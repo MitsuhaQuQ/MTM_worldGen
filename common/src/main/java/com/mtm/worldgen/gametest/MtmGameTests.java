@@ -1,5 +1,7 @@
 package com.mtm.worldgen.gametest;
 
+import com.google.gson.JsonElement;
+import com.mojang.serialization.JsonOps;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.Holder;
@@ -7,9 +9,10 @@ import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BiomeTags;
+import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
@@ -50,16 +53,31 @@ public final class MtmGameTests {
      * Hash of all sampled columns for {@link #SEED}. Changes whenever terrain generation changes on purpose:
      * update it then, together with LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0x7ffb213186bca57eL;
+    private static final long EXPECTED_COLUMN_HASH = 0xc95fcb0fea348ab2L;
 
     private static final int SEA_SURFACE_Y = 62;
     private static final double DEEP_OCEAN_COAST_DISTANCE = -1200.0;
     private static final double FAR_INLAND_COAST_DISTANCE = 1200.0;
+    /** One block apart, mountains up to 150% grade can differ by 2 blocks after rounding; more is a seam. */
+    private static final int MAX_BORDER_STEP = 2;
+
+    /** MTM build range. The game test level is a vanilla-height flat world, so columns are sampled with this. */
+    private static final LevelHeightAccessor MTM_HEIGHT = new LevelHeightAccessor() {
+        @Override
+        public int getHeight() {
+            return MtmGenerators.HEIGHT;
+        }
+
+        @Override
+        public int getMinBuildHeight() {
+            return MtmGenerators.MIN_Y;
+        }
+    };
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void columnsMatchExpectedHash(GameTestHelper helper) {
         TerrainLogic.forget(SEED);
-        long actual = hashColumns(generator(helper), helper.getLevel(), samplePoints());
+        long actual = hashColumns(generator(helper), samplePoints());
         if (actual != EXPECTED_COLUMN_HASH) {
             helper.fail("Column hash 0x" + Long.toHexString(actual) + " != expected 0x"
                     + Long.toHexString(EXPECTED_COLUMN_HASH) + " (terrain changed, or loaders disagree)");
@@ -69,16 +87,15 @@ public final class MtmGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void columnsDoNotDependOnSamplingOrder(GameTestHelper helper) {
-        ServerLevel level = helper.getLevel();
         List<int[]> points = samplePoints();
 
         TerrainLogic.forget(SEED);
-        List<Long> forward = columnHashes(generator(helper), level, points);
+        List<Long> forward = columnHashes(generator(helper), points);
 
         TerrainLogic.forget(SEED);
         List<int[]> reversed = new ArrayList<>(points);
         Collections.reverse(reversed);
-        List<Long> backward = columnHashes(generator(helper), level, reversed);
+        List<Long> backward = columnHashes(generator(helper), reversed);
         Collections.reverse(backward);
 
         if (!forward.equals(backward)) {
@@ -89,11 +106,10 @@ public final class MtmGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void columnsDoNotDependOnThreads(GameTestHelper helper) throws Exception {
-        ServerLevel level = helper.getLevel();
         List<int[]> points = samplePoints();
 
         TerrainLogic.forget(SEED);
-        List<Long> sequential = columnHashes(generator(helper), level, points);
+        List<Long> sequential = columnHashes(generator(helper), points);
 
         TerrainLogic.forget(SEED);
         ChunkGenerator shared = generator(helper);
@@ -101,7 +117,7 @@ public final class MtmGameTests {
         try {
             List<Future<Long>> futures = new ArrayList<>();
             for (int[] p : points) {
-                futures.add(pool.submit(() -> hashColumn(shared.getBaseColumn(p[0], p[1], level), level)));
+                futures.add(pool.submit(() -> hashColumn(shared.getBaseColumn(p[0], p[1], MTM_HEIGHT))));
             }
             for (int i = 0; i < points.size(); i++) {
                 if (!futures.get(i).get().equals(sequential.get(i))) {
@@ -116,13 +132,12 @@ public final class MtmGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void surfaceIsContinuousAcrossRegionBorders(GameTestHelper helper) {
-        ServerLevel level = helper.getLevel();
         ChunkGenerator generator = generator(helper);
         int border = TerrainLogic.forSeed(SEED).settings().regionSize();
         for (int z = -border; z <= border; z += 61) {
-            int west = generator.getBaseHeight(border - 1, z, Heightmap.Types.OCEAN_FLOOR_WG, level);
-            int east = generator.getBaseHeight(border, z, Heightmap.Types.OCEAN_FLOOR_WG, level);
-            if (Math.abs(east - west) > 1) {
+            int west = generator.getBaseHeight(border - 1, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
+            int east = generator.getBaseHeight(border, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
+            if (Math.abs(east - west) > MAX_BORDER_STEP) {
                 helper.fail("Surface jumps from " + west + " to " + east + " across the region border at z=" + z);
             }
         }
@@ -132,11 +147,10 @@ public final class MtmGameTests {
     /** Regression check for dry land below sea level next to walls of sea water. */
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void landBelowSeaLevelIsFlooded(GameTestHelper helper) {
-        ServerLevel level = helper.getLevel();
         ChunkGenerator generator = generator(helper);
         for (int[] p : samplePoints()) {
-            NoiseColumn column = generator.getBaseColumn(p[0], p[1], level);
-            for (int y = SEA_SURFACE_Y; y >= level.getMinBuildHeight(); y--) {
+            NoiseColumn column = generator.getBaseColumn(p[0], p[1], MTM_HEIGHT);
+            for (int y = SEA_SURFACE_Y; y >= MTM_HEIGHT.getMinBuildHeight(); y--) {
                 BlockState state = column.getBlock(y);
                 if (!state.isAir()) {
                     break;
@@ -176,6 +190,23 @@ public final class MtmGameTests {
         helper.succeed();
     }
 
+    /**
+     * Worlds are created and loaded through the generator codec, which wraps density functions in holders.
+     * Spawn placement and the locate command must still recognize the decoded generator as MTM.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void generatorIsRecognizedAfterSaveAndLoad(GameTestHelper helper) {
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, helper.getLevel().registryAccess());
+        JsonElement saved = ChunkGenerator.CODEC.encodeStart(ops, generator(helper))
+                .getOrThrow(false, message -> helper.fail("Encoding failed: " + message));
+        ChunkGenerator loaded = ChunkGenerator.CODEC.parse(ops, saved)
+                .getOrThrow(false, message -> helper.fail("Decoding failed: " + message));
+        if (MtmGenerators.terrainLogic(loaded) == null) {
+            helper.fail("Decoded generator is not recognized as an MTM generator");
+        }
+        helper.succeed();
+    }
+
     private static ChunkGenerator generator(GameTestHelper helper) {
         return MtmGenerators.create(helper.getLevel().registryAccess(), SEED);
     }
@@ -190,26 +221,26 @@ public final class MtmGameTests {
         return points;
     }
 
-    private static long hashColumns(ChunkGenerator generator, ServerLevel level, List<int[]> points) {
+    private static long hashColumns(ChunkGenerator generator, List<int[]> points) {
         long hash = 0x9E3779B97F4A7C15L;
-        for (long column : columnHashes(generator, level, points)) {
+        for (long column : columnHashes(generator, points)) {
             hash = hash * 31 + column;
         }
         return hash;
     }
 
-    private static List<Long> columnHashes(ChunkGenerator generator, ServerLevel level, List<int[]> points) {
+    private static List<Long> columnHashes(ChunkGenerator generator, List<int[]> points) {
         List<Long> hashes = new ArrayList<>(points.size());
         for (int[] p : points) {
-            hashes.add(hashColumn(generator.getBaseColumn(p[0], p[1], level), level));
+            hashes.add(hashColumn(generator.getBaseColumn(p[0], p[1], MTM_HEIGHT)));
         }
         return hashes;
     }
 
     /** Hashes block registry names, not numeric state ids, which may differ between loaders. */
-    private static long hashColumn(NoiseColumn column, ServerLevel level) {
+    private static long hashColumn(NoiseColumn column) {
         long hash = 17L;
-        for (int y = level.getMinBuildHeight(); y < level.getMaxBuildHeight(); y++) {
+        for (int y = MTM_HEIGHT.getMinBuildHeight(); y < MTM_HEIGHT.getMaxBuildHeight(); y++) {
             BlockState state = column.getBlock(y);
             String block = state.is(Blocks.AIR) ? "air" : Registry.BLOCK.getKey(state.getBlock()).toString();
             hash = hash * 1_000_003L + block.hashCode();

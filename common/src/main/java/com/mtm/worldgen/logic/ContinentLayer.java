@@ -3,8 +3,6 @@ package com.mtm.worldgen.logic;
 import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
 
-import java.util.Arrays;
-
 /**
  * Pipeline step 1: continent and ocean layout. A pure function of seed + block coordinates.
  *
@@ -58,7 +56,11 @@ final class ContinentLayer {
 
     /** Finite difference step in blocks for the continent value gradient. */
     private static final double GRADIENT_STEP = 16.0;
-    private static final double MIN_GRADIENT = 1.0e-6;
+    /**
+     * Floor for the gradient in the distance estimate, half the typical plate gradient. Inland the gradient can
+     * approach zero, and dividing by it made the estimate jump by tens of blocks per block.
+     */
+    private static final double MIN_GRADIENT = 0.5 / PLATE_SPACING;
     private static final double MAX_COAST_DISTANCE = 4096.0;
 
     /** Land rises this far above sea level in continent interiors (mountains come later). */
@@ -85,10 +87,10 @@ final class ContinentLayer {
         this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, STRAIT_WAVELENGTH);
         this.settings = settings;
 
-        double[] samples = sampleValues();
-        this.threshold = quantile(samples, settings.oceanRatio());
-        this.high = quantile(samples, HIGH_QUANTILE);
-        this.low = quantile(samples, LOW_QUANTILE);
+        NoiseStats stats = new NoiseStats(this::value, THRESHOLD_SAMPLES_PER_AXIS, THRESHOLD_SAMPLE_SPACING);
+        this.threshold = stats.quantile(settings.oceanRatio());
+        this.high = stats.quantile(HIGH_QUANTILE);
+        this.low = stats.quantile(LOW_QUANTILE);
     }
 
     double value(double x, double z) {
@@ -193,21 +195,4 @@ final class ContinentLayer {
         return group;
     }
 
-    /** Values over a large fixed sample grid; deterministic for a given seed. */
-    private double[] sampleValues() {
-        int n = THRESHOLD_SAMPLES_PER_AXIS;
-        double[] values = new double[n * n];
-        double origin = -n / 2.0 * THRESHOLD_SAMPLE_SPACING;
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                values[i * n + j] = value(origin + i * THRESHOLD_SAMPLE_SPACING, origin + j * THRESHOLD_SAMPLE_SPACING);
-            }
-        }
-        Arrays.sort(values);
-        return values;
-    }
-
-    private static double quantile(double[] sorted, double q) {
-        return sorted[(int) (q * (sorted.length - 1))];
-    }
 }

@@ -4,5 +4,8 @@
   "commands.mtm_worldgen.flyspeed.set": "Flying speed set to %s× the default",
   "commands.mtm_worldgen.debugmap.started": "Rendering terrain map (%s blocks across)...",
   "commands.mtm_worldgen.debugmap.done": "Terrain map saved to %s",
-  "commands.mtm_worldgen.debugmap.failed": "Failed to export terrain map: %s"
+  "commands.mtm_worldgen.debugmap.failed": "Failed to export terrain map: %s",
+  "commands.mtm_worldgen.not_mtm_world": "This world does not use MTM terrain",
+  "commands.mtm_worldgen.locate.mountain.found": "Nearest mountain is at %s (%s blocks away)",
+  "commands.mtm_worldgen.locate.mountain.none": "No mountain within %s blocks"
 }

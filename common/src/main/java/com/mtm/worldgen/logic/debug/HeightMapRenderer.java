@@ -5,10 +5,12 @@ import com.mtm.worldgen.logic.WorldgenSettings;
 
 import java.awt.image.BufferedImage;
 
-/** Renders the terrain logic's surface height as a hypsometric map, for tuning without flying around. */
+/** Renders the terrain logic's surface height as a hillshaded hypsometric map, for tuning without flying around. */
 public final class HeightMapRenderer {
     private static final int REGION_BORDER_RGB = 0xFF00FF;
     private static final int BEACH_RGB = 0xE8D8A0;
+    /** Light from the north-west; brightness change per unit of grade across one pixel. */
+    private static final double SHADE_STRENGTH = 1.2;
 
     private HeightMapRenderer() {
     }
@@ -24,13 +26,29 @@ public final class HeightMapRenderer {
         BufferedImage image = new BufferedImage(sizePx, sizePx, BufferedImage.TYPE_INT_RGB);
         int originX = centerX - sizePx / 2 * blocksPerPixel;
         int originZ = centerZ - sizePx / 2 * blocksPerPixel;
+
+        double[] heights = new double[(sizePx + 1) * (sizePx + 1)];
+        for (int py = 0; py <= sizePx; py++) {
+            for (int px = 0; px <= sizePx; px++) {
+                heights[py * (sizePx + 1) + px] =
+                        logic.sampleSurfaceHeight(originX + px * blocksPerPixel, originZ + py * blocksPerPixel);
+            }
+        }
+
+        double sea = settings.seaLevel() - 1;
         for (int py = 0; py < sizePx; py++) {
             for (int px = 0; px < sizePx; px++) {
                 int x = originX + px * blocksPerPixel;
                 int z = originZ + py * blocksPerPixel;
-                double height = logic.sampleSurfaceHeight(x, z);
-                boolean beach = height >= settings.seaLevel() - 1 && logic.sampleBeach(x, z);
+                double height = heights[py * (sizePx + 1) + px];
+                boolean beach = height >= sea && logic.sampleBeach(x, z);
                 int rgb = beach ? BEACH_RGB : color(height, settings);
+                if (height >= sea) {
+                    double gradeX = (heights[py * (sizePx + 1) + px + 1] - height) / blocksPerPixel;
+                    double gradeZ = (heights[(py + 1) * (sizePx + 1) + px] - height) / blocksPerPixel;
+                    double shade = Math.max(-0.6, Math.min(0.6, -(gradeX + gradeZ) * SHADE_STRENGTH));
+                    rgb = shade >= 0 ? blend(rgb, 0xFFFFFF, shade) : blend(rgb, 0x000000, -shade);
+                }
                 if (onRegionBorder(x, blocksPerPixel, settings) || onRegionBorder(z, blocksPerPixel, settings)) {
                     rgb = blend(rgb, REGION_BORDER_RGB, 0.35);
                 }

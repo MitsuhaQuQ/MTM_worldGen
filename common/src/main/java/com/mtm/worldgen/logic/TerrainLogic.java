@@ -33,6 +33,9 @@ public final class TerrainLogic {
     /** No beach on land rising more than this above sea level, such as coastal hills. */
     private static final double BEACH_MAX_HEIGHT = 6.0;
 
+    /** The top fraction of the height range is compressed so peaks approach but never exceed the maximum. */
+    private static final double SOFT_CAP_FRACTION = 0.13;
+
     private static final int FIELD_HEIGHT = 0;
     private static final int FIELD_COAST_DISTANCE = 1;
 
@@ -40,6 +43,7 @@ public final class TerrainLogic {
 
     private final WorldgenSettings settings;
     private final ContinentLayer continents;
+    private final SkeletonLayer skeleton;
     private final Fbm beachWidth;
     private final RegionCache regions;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
@@ -48,6 +52,7 @@ public final class TerrainLogic {
     public TerrainLogic(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
+        this.skeleton = new SkeletonLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, BEACH_WIDTH_WAVELENGTH);
         this.regions = new RegionCache(this::generateRegion, CACHE_CAPACITY);
     }
@@ -90,9 +95,24 @@ public final class TerrainLogic {
         return columns.get().column(this, x, z).beach();
     }
 
-    /** Surface height at any position, interpolated from the 4x4 surrounding cell centers. */
+    /**
+     * Surface height at any position: the continent base interpolated from the 4x4 surrounding cell centers,
+     * plus the terrain skeleton evaluated at the exact position, softly capped below the maximum height.
+     */
     public double sampleSurfaceHeight(double x, double z) {
-        return Math.min(interpolate(FIELD_HEIGHT, x, z), settings.maxSurfaceHeight());
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        double skeletonHeight = skeleton.height(x, z, base - (settings.seaLevel() - 1));
+        return softCap(base + skeletonHeight);
+    }
+
+    /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */
+    private double softCap(double height) {
+        double band = SOFT_CAP_FRACTION * settings.maxSurfaceHeight();
+        double start = settings.maxSurfaceHeight() - band;
+        if (height <= start) {
+            return height;
+        }
+        return start + band * (1.0 - Math.exp(-(height - start) / band));
     }
 
     /** Estimated distance to the coastline in blocks: positive inland, negative offshore. */
@@ -135,19 +155,56 @@ public final class TerrainLogic {
         return new BlockColumn(0, 0);
     }
 
+    /**
+     * Nearest surface at or above a height, searching square rings outward from an origin.
+     *
+     * @param step   ring spacing and sample spacing in blocks
+     * @param radius search radius in blocks
+     * @return the first matching column found, or null if none within the radius
+     */
+    public BlockColumn findNearestAbove(double minHeight, int originX, int originZ, int step, int radius) {
+        for (int ring = 0; ring * step <= radius; ring++) {
+            BlockColumn best = null;
+            double bestDistance = Double.MAX_VALUE;
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                        continue;
+                    }
+                    int x = originX + dx * step;
+                    int z = originZ + dz * step;
+                    double distance = Math.hypot(dx, dz);
+                    if (distance < bestDistance && sampleSurfaceHeight(x, z) >= minHeight) {
+                        best = new BlockColumn(x, z);
+                        bestDistance = distance;
+                    }
+                }
+            }
+            if (best != null) {
+                return best;
+            }
+        }
+        return null;
+    }
+
     private boolean isSpawnCell(int cellX, int cellZ, double sea) {
-        double height = cellHeight(cellX, cellZ);
+        double height = cellCenterSurface(cellX, cellZ);
         if (height < sea + SPAWN_MIN_ABOVE_SEA || height > sea + SPAWN_MAX_ABOVE_SEA) {
             return false;
         }
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                if (cellHeight(cellX + dx, cellZ + dz) < sea + 1.0) {
+                if (cellCenterSurface(cellX + dx, cellZ + dz) < sea + 1.0) {
                     return false;
                 }
             }
         }
         return true;
+    }
+
+    private double cellCenterSurface(int cellX, int cellZ) {
+        double size = settings.cellSize();
+        return sampleSurfaceHeight((cellX + 0.5) * size, (cellZ + 0.5) * size);
     }
 
     private double cellValue(int field, int cellX, int cellZ) {

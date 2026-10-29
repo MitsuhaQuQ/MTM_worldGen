@@ -35,8 +35,7 @@ public final class MtmWorldgenForge {
         DENSITY_FUNCTION_TYPES.register(MtmGenerators.TERRAIN_DENSITY_ID.getPath(), () -> TerrainDensity.CODEC);
         DENSITY_FUNCTION_TYPES.register(MtmGenerators.CLIMATE_DENSITY_ID.getPath(), () -> TerrainClimate.CODEC);
         SURFACE_CONDITIONS.register(MtmGenerators.BEACH_CONDITION_ID.getPath(), () -> BeachCondition.CODEC);
-        WORLD_TYPES.register(MtmGenerators.WORLD_TYPE_ID.getPath(),
-                () -> new ForgeWorldPreset((ForgeWorldPreset.IBasicChunkGeneratorFactory) MtmGenerators::create));
+        WORLD_TYPES.register(MtmGenerators.WORLD_TYPE_ID.getPath(), MtmForgeWorldPreset::new);
     }
 
     public MtmWorldgenForge() {

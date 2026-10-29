@@ -77,8 +77,51 @@ class TerrainLogicTest {
             double east = logic.sampleSurfaceHeight(border, z);
             maxStep = Math.max(maxStep, Math.abs(east - west));
         }
-        // One block apart: anything above a block or two would be a visible seam
-        assertTrue(maxStep < 1.0, "height jumps by " + maxStep + " across a region border");
+        // One block apart, so the step is the grade: anything beyond twice the steepest allowed slope is a seam
+        double limit = 2.0 * SETTINGS.mountainSlope() / 100.0;
+        assertTrue(maxStep < limit, "height jumps by " + maxStep + " across a region border");
+    }
+
+    @Test
+    void surfaceStaysBelowMaximumAndHasMountains() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double highest = 0.0;
+        for (int x = -20000; x < 20000; x += 64) {
+            for (int z = -20000; z < 20000; z += 64) {
+                highest = Math.max(highest, logic.sampleSurfaceHeight(x, z));
+            }
+        }
+        assertTrue(highest <= SETTINGS.maxSurfaceHeight(), "surface reaches " + highest);
+        assertTrue(highest > SETTINGS.maxSurfaceHeight() / 2.0, "no tall mountains, highest is " + highest);
+    }
+
+    /**
+     * Grades stay within the mountain limit for all but rare spots where several profiles stack, and nowhere
+     * reach twice the limit, which would mean a discontinuity rather than a steep slope.
+     */
+    @Test
+    void slopesStayWithinLimits() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double limit = SETTINGS.mountainSlope() / 100.0;
+        Random random = new Random(7);
+        List<Double> grades = new ArrayList<>();
+        double sea = SETTINGS.seaLevel() - 1;
+        for (int i = 0; i < 40000; i++) {
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
+            double h = logic.sampleSurfaceHeight(x, z);
+            if (h < sea) {
+                continue;
+            }
+            double gx = logic.sampleSurfaceHeight(x + 1, z) - h;
+            double gz = logic.sampleSurfaceHeight(x, z + 1) - h;
+            grades.add(Math.hypot(gx, gz));
+        }
+        Collections.sort(grades);
+        double p999 = grades.get((int) (0.999 * (grades.size() - 1)));
+        double max = grades.get(grades.size() - 1);
+        assertTrue(p999 <= limit, "99.9th percentile grade " + p999 + " exceeds " + limit);
+        assertTrue(max < 2.0 * limit, "max grade " + max + " suggests a discontinuity");
     }
 
     @Test

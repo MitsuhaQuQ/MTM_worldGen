@@ -7,9 +7,15 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.debug.HeightMapRenderer;
+import com.mtm.worldgen.world.MtmGenerators;
+import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentUtils;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -34,6 +40,8 @@ public final class MtmCommands {
     private static final int DEBUG_MAP_SIZE_PX = 1024;
     private static final int DEFAULT_BLOCKS_PER_PIXEL = 8;
     private static final int MAX_BLOCKS_PER_PIXEL = 64;
+    private static final int LOCATE_STEP = 64;
+    private static final int LOCATE_RADIUS = 16384;
 
     private MtmCommands() {
     }
@@ -52,7 +60,45 @@ public final class MtmCommands {
                         .executes(context -> exportDebugMap(context.getSource(), DEFAULT_BLOCKS_PER_PIXEL))
                         .then(Commands.argument("blocksPerPixel", IntegerArgumentType.integer(1, MAX_BLOCKS_PER_PIXEL))
                                 .executes(context -> exportDebugMap(context.getSource(),
-                                        IntegerArgumentType.getInteger(context, "blocksPerPixel"))))));
+                                        IntegerArgumentType.getInteger(context, "blocksPerPixel")))))
+                .then(Commands.literal("locate")
+                        .then(Commands.literal("mountain")
+                                .executes(context -> locateMountain(context.getSource())))));
+    }
+
+    /**
+     * Finds the nearest surface above half the maximum height (a real mountain) around the source, off the server
+     * thread, and reports it with clickable coordinates like vanilla /locate.
+     */
+    private static int locateMountain(CommandSourceStack source) {
+        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel().getChunkSource().getGenerator());
+        if (logic == null) {
+            source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.not_mtm_world"));
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        Vec3 position = source.getPosition();
+        double minHeight = logic.settings().maxSurfaceHeight() / 2.0;
+        CompletableFuture.supplyAsync(() -> logic.findNearestAbove(minHeight, (int) Math.floor(position.x),
+                        (int) Math.floor(position.z), LOCATE_STEP, LOCATE_RADIUS), Util.backgroundExecutor())
+                .whenComplete((found, error) -> server.execute(() -> {
+                    if (error != null || found == null) {
+                        source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.locate.mountain.none", LOCATE_RADIUS));
+                        return;
+                    }
+                    int y = (int) Math.ceil(logic.sampleSurfaceHeight(found.x(), found.z())) + 2;
+                    int distance = (int) Math.round(Math.hypot(found.x() - position.x, found.z() - position.z));
+                    Component coordinates = ComponentUtils.wrapInSquareBrackets(
+                                    new TranslatableComponent("chat.coordinates", found.x(), y, found.z()))
+                            .withStyle(style -> style.withColor(ChatFormatting.GREEN)
+                                    .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,
+                                            "/tp @s " + found.x() + " " + y + " " + found.z()))
+                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                            new TranslatableComponent("chat.coordinates.tooltip"))));
+                    source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.locate.mountain.found",
+                            coordinates, distance), false);
+                }));
+        return 1;
     }
 
     /** Renders the terrain logic around the source position to a PNG in the world folder, off the server thread. */
