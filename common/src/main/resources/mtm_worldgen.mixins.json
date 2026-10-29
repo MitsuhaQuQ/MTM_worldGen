@@ -4,6 +4,7 @@
   "package": "com.mtm.worldgen.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
+    "MinecraftServerMixin",
     "NoiseRouterDataMixin"
   ],
   "client": [],

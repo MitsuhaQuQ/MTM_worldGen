@@ -93,6 +93,17 @@ class TerrainLogicTest {
     }
 
     @Test
+    void spawnIsOnLandForManySeeds() {
+        double sea = SETTINGS.seaLevel() - 1;
+        for (long seed = 0; seed < 20; seed++) {
+            TerrainLogic logic = new TerrainLogic(seed * 0x9E3779B97F4A7C15L, SETTINGS);
+            BlockColumn spawn = logic.findSpawn();
+            assertTrue(logic.sampleSurfaceHeight(spawn.x(), spawn.z()) > sea + 1.0,
+                    "seed " + seed + " spawns at " + spawn + " below or at sea level");
+        }
+    }
+
+    @Test
     void oceanCoversRoughlyTheConfiguredRatio() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         int ocean = 0;

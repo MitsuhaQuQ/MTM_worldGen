@@ -10,6 +10,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class TerrainLogic {
     private static final int CACHE_CAPACITY = 64;
+    /** Spawn search radius in coarse cells (64 * 64 blocks = 4096 blocks by default). */
+    private static final int SPAWN_SEARCH_RINGS = 64;
+    private static final double SPAWN_MIN_ABOVE_SEA = 3.0;
+    private static final double SPAWN_MAX_ABOVE_SEA = 40.0;
     private static final Map<Long, TerrainLogic> BY_SEED = new ConcurrentHashMap<>();
 
     private final WorldgenSettings settings;
@@ -73,6 +77,42 @@ public final class TerrainLogic {
     private double row(int cellX, int cellZ, double t) {
         return catmullRom(cellHeight(cellX - 1, cellZ), cellHeight(cellX, cellZ),
                 cellHeight(cellX + 1, cellZ), cellHeight(cellX + 2, cellZ), t);
+    }
+
+    /**
+     * Initial world spawn: the coarse cell closest to the origin (searching outward ring by ring) that is
+     * comfortably on land, so players do not start in the middle of an ocean.
+     *
+     * @return block column at the center of the chosen cell, or the origin if no land is found in range
+     */
+    public BlockColumn findSpawn() {
+        double sea = settings.seaLevel() - 1;
+        for (int ring = 0; ring <= SPAWN_SEARCH_RINGS; ring++) {
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) == ring && isSpawnCell(dx, dz, sea)) {
+                        int half = settings.cellSize() / 2;
+                        return new BlockColumn(dx * settings.cellSize() + half, dz * settings.cellSize() + half);
+                    }
+                }
+            }
+        }
+        return new BlockColumn(0, 0);
+    }
+
+    private boolean isSpawnCell(int cellX, int cellZ, double sea) {
+        double height = cellHeight(cellX, cellZ);
+        if (height < sea + SPAWN_MIN_ABOVE_SEA || height > sea + SPAWN_MAX_ABOVE_SEA) {
+            return false;
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (cellHeight(cellX + dx, cellZ + dz) < sea + 1.0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private LogicRegion generateRegion(int regionX, int regionZ) {

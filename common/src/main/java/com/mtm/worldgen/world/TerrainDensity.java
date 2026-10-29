@@ -19,9 +19,16 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
     private static final double FALLOFF = 8.0;
     /**
      * NoiseRouterData#computePreliminarySurfaceLevelScanning treats a cell as solid when
-     * density - 0.703125 > 0.390625, so the initial density must cross 1.09375 at the surface.
+     * density - 0.703125 > 0.390625, so the initial density crosses 1.09375 at the preliminary surface.
      */
     private static final double PRELIMINARY_SURFACE_THRESHOLD = 1.09375;
+    /**
+     * How far below the real surface the preliminary surface sits, as in vanilla. The aquifer adds 8 blocks to
+     * the preliminary surface and floods with sea water only when that point is below sea level; with the
+     * preliminary surface at the real surface, land slightly below sea level counted as underground and stayed
+     * dry next to vertical walls of sea water.
+     */
+    private static final double PRELIMINARY_SURFACE_DEPTH = 8.0;
     private static final double INITIAL_LIMIT = 64.0;
 
     private final boolean initial;
@@ -42,12 +49,18 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
         return initial;
     }
 
+    /** The terrain logic this function samples, or null for the unbound placeholder. */
+    public TerrainLogic logic() {
+        return logic;
+    }
+
     @Override
     public double compute(FunctionContext context) {
         TerrainLogic terrain = logic != null ? logic : TerrainLogic.forSeed(0L);
         double depth = terrain.surfaceHeight(context.blockX(), context.blockZ()) - context.blockY();
         if (initial) {
-            return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + depth / FALLOFF, -INITIAL_LIMIT, INITIAL_LIMIT);
+            return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + (depth - PRELIMINARY_SURFACE_DEPTH) / FALLOFF,
+                    -INITIAL_LIMIT, INITIAL_LIMIT);
         }
         return Mth.clamp(depth / FALLOFF, -1.0, 1.0);
     }

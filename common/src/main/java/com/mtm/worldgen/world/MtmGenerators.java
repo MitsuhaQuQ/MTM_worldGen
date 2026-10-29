@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mtm.worldgen.MtmWorldgen;
+import com.mtm.worldgen.logic.TerrainLogic;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -22,6 +23,15 @@ public final class MtmGenerators {
     public static final ResourceLocation TERRAIN_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
 
     private MtmGenerators() {
+    }
+
+    /** The terrain logic driving a chunk generator, or null if it is not an MTM generator. */
+    public static TerrainLogic terrainLogic(ChunkGenerator generator) {
+        if (generator instanceof NoiseBasedChunkGenerator noise
+                && noise.router().finalDensity() instanceof TerrainDensity density) {
+            return density.logic();
+        }
+        return null;
     }
 
     public static ChunkGenerator create(RegistryAccess access, long seed) {
