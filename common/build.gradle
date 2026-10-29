@@ -1,0 +1,12 @@
+architectury {
+    common(rootProject.enabled_platforms.split(","))
+}
+
+loom {
+    accessWidenerPath = file("src/main/resources/mtm_worldgen.accesswidener")
+}
+
+dependencies {
+    // Only for the Mixin and access widener annotations; no Fabric API classes may be used in common
+    modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
+}
