@@ -15,13 +15,13 @@ import net.minecraft.world.level.levelgen.NoiseRouterWithOnlyNoises;
 /** Builds the MTM overworld generator: vanilla noise generator with MTM terrain density. */
 public final class MtmGenerators {
     public static final ResourceLocation WORLD_TYPE_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "realistic");
+    /**
+     * Density function type of {@link TerrainDensity}. Each loader registers {@link TerrainDensity#CODEC} under
+     * this id itself, because Forge freezes vanilla registries before mod construction.
+     */
+    public static final ResourceLocation TERRAIN_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
 
     private MtmGenerators() {
-    }
-
-    /** Registers MTM worldgen codecs into vanilla registries. Must run once during mod init. */
-    public static void register() {
-        Registry.register(Registry.DENSITY_FUNCTION_TYPES, new ResourceLocation(MtmWorldgen.MOD_ID, "terrain"), TerrainDensity.CODEC);
     }
 
     public static ChunkGenerator create(RegistryAccess access, long seed) {
