@@ -209,6 +209,9 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `gradlew :fabric:runServer` / `gradlew :forge:runServer`：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：
   - `/mtm flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mtm flyspeed reset` 恢复默认；`/mtm flyspeed` 查询当前倍数
+  - `/mtm debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
+- 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
+- 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比）
 - 平台服务：common 中的 `com.mtm.worldgen.platform.Platform` 接口，各加载器通过 `META-INF/services` 注册实现
 - 已知问题（Claude Code 沙箱环境）：Gradle 启动报 `Unable to establish loopback connection` 时，需在沙箱外运行，并设置环境变量 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=F:\MC\MTM_worldgen\.gradle\uds`（该目录需事先存在）
 

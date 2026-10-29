@@ -9,4 +9,11 @@ loom {
 dependencies {
     // Only for the Mixin and access widener annotations; no Fabric API classes may be used in common
     modImplementation "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter:${rootProject.junit_version}"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
 }

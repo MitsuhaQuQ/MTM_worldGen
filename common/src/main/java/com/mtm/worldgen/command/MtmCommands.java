@@ -2,13 +2,28 @@ package com.mtm.worldgen.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mtm.worldgen.MtmWorldgen;
+import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.debug.HeightMapRenderer;
+import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.TranslatableComponent;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.phys.Vec3;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 
 /** Debug commands for inspecting generated terrain. Requires permission level 2 (cheats). */
 public final class MtmCommands {
@@ -16,6 +31,9 @@ public final class MtmCommands {
     public static final float DEFAULT_FLYING_SPEED = 0.05F;
     private static final float MIN_MULTIPLIER = 0.1F;
     private static final float MAX_MULTIPLIER = 50.0F;
+    private static final int DEBUG_MAP_SIZE_PX = 1024;
+    private static final int DEFAULT_BLOCKS_PER_PIXEL = 8;
+    private static final int MAX_BLOCKS_PER_PIXEL = 64;
 
     private MtmCommands() {
     }
@@ -29,7 +47,45 @@ public final class MtmCommands {
                                 .executes(context -> setFlySpeed(context.getSource(), 1.0F)))
                         .then(Commands.argument("multiplier", FloatArgumentType.floatArg(MIN_MULTIPLIER, MAX_MULTIPLIER))
                                 .executes(context -> setFlySpeed(context.getSource(),
-                                        FloatArgumentType.getFloat(context, "multiplier"))))));
+                                        FloatArgumentType.getFloat(context, "multiplier")))))
+                .then(Commands.literal("debugmap")
+                        .executes(context -> exportDebugMap(context.getSource(), DEFAULT_BLOCKS_PER_PIXEL))
+                        .then(Commands.argument("blocksPerPixel", IntegerArgumentType.integer(1, MAX_BLOCKS_PER_PIXEL))
+                                .executes(context -> exportDebugMap(context.getSource(),
+                                        IntegerArgumentType.getInteger(context, "blocksPerPixel"))))));
+    }
+
+    /** Renders the terrain logic around the source position to a PNG in the world folder, off the server thread. */
+    private static int exportDebugMap(CommandSourceStack source, int blocksPerPixel) {
+        MinecraftServer server = source.getServer();
+        long seed = source.getLevel().getSeed();
+        Vec3 position = source.getPosition();
+        int centerX = (int) Math.floor(position.x);
+        int centerZ = (int) Math.floor(position.z);
+        Path file = server.getWorldPath(LevelResource.ROOT).resolve(MtmWorldgen.MOD_ID).resolve("debug")
+                .resolve(String.format(Locale.ROOT, "height_%d_%d_%dbpp.png", centerX, centerZ, blocksPerPixel));
+
+        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.debugmap.started",
+                DEBUG_MAP_SIZE_PX * blocksPerPixel), false);
+        CompletableFuture.runAsync(() -> {
+            BufferedImage image = HeightMapRenderer.render(TerrainLogic.forSeed(seed), centerX, centerZ,
+                    DEBUG_MAP_SIZE_PX, blocksPerPixel);
+            try {
+                Files.createDirectories(file.getParent());
+                ImageIO.write(image, "png", file.toFile());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }, Util.backgroundExecutor()).whenComplete((ignored, error) -> server.execute(() -> {
+            if (error != null) {
+                MtmWorldgen.LOGGER.error("Failed to export debug map", error);
+                source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.debugmap.failed", error.getMessage()));
+            } else {
+                source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.debugmap.done",
+                        file.toAbsolutePath().normalize().toString()), false);
+            }
+        }));
+        return 1;
     }
 
     private static int queryFlySpeed(CommandSourceStack source) throws CommandSyntaxException {
