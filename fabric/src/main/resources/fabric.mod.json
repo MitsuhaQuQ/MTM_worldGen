@@ -10,8 +10,14 @@
   "entrypoints": {
     "main": [
       "com.mtm.worldgen.fabric.MtmWorldgenFabric"
+    ],
+    "client": [
+      "com.mtm.worldgen.fabric.client.MtmWorldgenFabricClient"
     ]
   },
+  "mixins": [
+    "mtm_worldgen.mixins.json"
+  ],
   "accessWidener": "mtm_worldgen.accesswidener",
   "depends": {
     "fabricloader": ">=0.14.0",

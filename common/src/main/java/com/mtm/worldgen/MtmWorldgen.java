@@ -1,6 +1,7 @@
 package com.mtm.worldgen;
 
 import com.mtm.worldgen.platform.Platform;
+import com.mtm.worldgen.world.MtmGenerators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,5 +19,6 @@ public final class MtmWorldgen {
     /** Called once by each loader's entry point during mod construction. */
     public static void init() {
         LOGGER.info("MTM Worldgen initializing on {}", Platform.get().loaderName());
+        MtmGenerators.register();
     }
 }

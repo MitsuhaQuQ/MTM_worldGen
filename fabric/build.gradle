@@ -42,8 +42,8 @@ processResources {
         expand "version": project.version
     }
 
-    // Fabric Loader only looks for the access widener in this mod's own resources in dev
-    from(project(":common").loom.accessWidenerPath)
+    // In dev, Fabric Loader only reads resources (access widener, mixin config, assets) from this mod's own output
+    from(project(":common").sourceSets.main.resources)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
