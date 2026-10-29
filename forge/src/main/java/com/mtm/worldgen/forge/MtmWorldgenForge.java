@@ -1,8 +1,11 @@
 package com.mtm.worldgen.forge;
 
 import com.mtm.worldgen.MtmWorldgen;
+import com.mtm.worldgen.command.MtmCommands;
 import com.mtm.worldgen.world.MtmGenerators;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.world.ForgeWorldPreset;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.DeferredRegister;
@@ -21,5 +24,6 @@ public final class MtmWorldgenForge {
     public MtmWorldgenForge() {
         MtmWorldgen.init();
         WORLD_TYPES.register(FMLJavaModLoadingContext.get().getModEventBus());
+        MinecraftForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> MtmCommands.register(event.getDispatcher()));
     }
 }

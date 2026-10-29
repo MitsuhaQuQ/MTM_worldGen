@@ -1,3 +1,5 @@
 {
-  "generator.mtm_worldgen.realistic": "MTM Realistic"
+  "generator.mtm_worldgen.realistic": "MTM Realistic",
+  "commands.mtm_worldgen.flyspeed.query": "Flying speed is %s× the default",
+  "commands.mtm_worldgen.flyspeed.set": "Flying speed set to %s× the default"
 }
