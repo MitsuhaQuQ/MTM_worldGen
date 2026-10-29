@@ -41,11 +41,16 @@ processResources {
     filesMatching("fabric.mod.json") {
         expand "version": project.version
     }
+
+    // Fabric Loader only looks for the access widener in this mod's own resources in dev
+    from(project(":common").loom.accessWidenerPath)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 shadowJar {
     configurations = [project.configurations.shadowBundle]
     archiveClassifier = "dev-shadow"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 remapJar {
