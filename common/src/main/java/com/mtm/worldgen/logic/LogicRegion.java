@@ -14,15 +14,17 @@ public final class LogicRegion {
     private final int regionZ;
     private final int cells;
     private final float[] heights;
+    private final float[] coastDistances;
 
-    LogicRegion(int regionX, int regionZ, int cells, float[] heights) {
-        if (heights.length != cells * cells) {
-            throw new IllegalArgumentException("heights must hold cells * cells values");
+    LogicRegion(int regionX, int regionZ, int cells, float[] heights, float[] coastDistances) {
+        if (heights.length != cells * cells || coastDistances.length != cells * cells) {
+            throw new IllegalArgumentException("cell arrays must hold cells * cells values");
         }
         this.regionX = regionX;
         this.regionZ = regionZ;
         this.cells = cells;
         this.heights = heights;
+        this.coastDistances = coastDistances;
     }
 
     public int regionX() {
@@ -42,8 +44,13 @@ public final class LogicRegion {
         return heights[localZ * cells + localX];
     }
 
+    /** Estimated distance to the coastline at a cell center in blocks: positive inland, negative offshore. */
+    public float cellCoastDistance(int localX, int localZ) {
+        return coastDistances[localZ * cells + localX];
+    }
+
     boolean contentEquals(LogicRegion other) {
         return regionX == other.regionX && regionZ == other.regionZ && cells == other.cells
-                && Arrays.equals(heights, other.heights);
+                && Arrays.equals(heights, other.heights) && Arrays.equals(coastDistances, other.coastDistances);
     }
 }

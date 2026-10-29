@@ -56,6 +56,11 @@ final class ContinentLayer {
     private static final double HIGH_QUANTILE = 0.995;
     private static final double LOW_QUANTILE = 0.005;
 
+    /** Finite difference step in blocks for the continent value gradient. */
+    private static final double GRADIENT_STEP = 16.0;
+    private static final double MIN_GRADIENT = 1.0e-6;
+    private static final double MAX_COAST_DISTANCE = 4096.0;
+
     /** Land rises this far above sea level in continent interiors (mountains come later). */
     private static final double LAND_RANGE = 72.0;
     private static final double OCEAN_DEPTH = 36.0;
@@ -94,12 +99,24 @@ final class ContinentLayer {
     }
 
     /**
-     * Surface height of the continent layer at a block position. Continuous and with finite slope at the
+     * Horizontal distance to the coastline in blocks at a position with the given continent value: positive
+     * inland, negative offshore. Uses a first-order estimate (value - threshold) / |gradient|, which is accurate
+     * near the coast where beaches need it, and is clamped further away where the gradient can vanish.
+     */
+    double coastDistance(double x, double z, double value) {
+        double gx = (value(x + GRADIENT_STEP, z) - value(x - GRADIENT_STEP, z)) / (2.0 * GRADIENT_STEP);
+        double gz = (value(x, z + GRADIENT_STEP) - value(x, z - GRADIENT_STEP)) / (2.0 * GRADIENT_STEP);
+        double gradient = Math.max(Math.hypot(gx, gz), MIN_GRADIENT);
+        double distance = (value - threshold) / gradient;
+        return Math.max(-MAX_COAST_DISTANCE, Math.min(MAX_COAST_DISTANCE, distance));
+    }
+
+    /**
+     * Surface height of the continent layer for a continent value. Continuous and with finite slope at the
      * coastline: the coarse grid samples this function, so any jump or steep kink there shows up as
      * grid-aligned stair steps along the coast.
      */
-    double height(double x, double z) {
-        double c = value(x, z);
+    double height(double c) {
         double sea = settings.seaLevel() - 1;
         if (c >= threshold) {
             return sea + LAND_RANGE * Math.min(1.0, (c - threshold) / (high - threshold));

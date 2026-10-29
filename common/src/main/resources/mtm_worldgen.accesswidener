@@ -2,3 +2,8 @@ accessWidener v2 named
 
 # Fabric registers the world type by subclassing the client-side preset list entry
 accessible method net/minecraft/client/gui/screens/worldselection/WorldPreset <init> (Ljava/lang/String;)V
+
+# Custom surface rule conditions implement the package-private Condition and read the current column
+accessible class net/minecraft/world/level/levelgen/SurfaceRules$Condition
+accessible field net/minecraft/world/level/levelgen/SurfaceRules$Context blockX I
+accessible field net/minecraft/world/level/levelgen/SurfaceRules$Context blockZ I

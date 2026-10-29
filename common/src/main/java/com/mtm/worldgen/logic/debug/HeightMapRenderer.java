@@ -8,8 +8,7 @@ import java.awt.image.BufferedImage;
 /** Renders the terrain logic's surface height as a hypsometric map, for tuning without flying around. */
 public final class HeightMapRenderer {
     private static final int REGION_BORDER_RGB = 0xFF00FF;
-    /** Land within this many blocks above sea level is drawn as shore. */
-    private static final double BEACH_BAND = 1.5;
+    private static final int BEACH_RGB = 0xE8D8A0;
 
     private HeightMapRenderer() {
     }
@@ -29,7 +28,9 @@ public final class HeightMapRenderer {
             for (int px = 0; px < sizePx; px++) {
                 int x = originX + px * blocksPerPixel;
                 int z = originZ + py * blocksPerPixel;
-                int rgb = color(logic.sampleSurfaceHeight(x, z), settings);
+                double height = logic.sampleSurfaceHeight(x, z);
+                boolean beach = height >= settings.seaLevel() - 1 && logic.sampleBeach(x, z);
+                int rgb = beach ? BEACH_RGB : color(height, settings);
                 if (onRegionBorder(x, blocksPerPixel, settings) || onRegionBorder(z, blocksPerPixel, settings)) {
                     rgb = blend(rgb, REGION_BORDER_RGB, 0.35);
                 }
@@ -48,9 +49,6 @@ public final class HeightMapRenderer {
         if (height < sea) {
             double depth = Math.min(1.0, (sea - height) / 40.0);
             return blend(0x5AA0E0, 0x0B2E6B, depth);
-        }
-        if (height - sea < BEACH_BAND) {
-            return 0xE8D8A0;
         }
         double t = Math.min(1.0, (height - sea) / (settings.maxSurfaceHeight() - sea));
         if (t < 0.3) {
