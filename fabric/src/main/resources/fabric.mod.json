@@ -13,6 +13,9 @@
     ],
     "client": [
       "com.mtm.worldgen.fabric.client.MtmWorldgenFabricClient"
+    ],
+    "fabric-gametest": [
+      "com.mtm.worldgen.gametest.MtmGameTests"
     ]
   },
   "mixins": [

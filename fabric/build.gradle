@@ -9,6 +9,17 @@ architectury {
 
 loom {
     accessWidenerPath = project(":common").loom.accessWidenerPath
+
+    runs {
+        // Headless game test server: runs all game tests, then exits non-zero on failure
+        gametest {
+            server()
+            name "Fabric Game Test"
+            property "fabric-api.gametest"
+            property "fabric-api.gametest.report-file", "${project.buildDir}/gametest/junit.xml"
+            runDir "build/gametest"
+        }
+    }
 }
 
 configurations {

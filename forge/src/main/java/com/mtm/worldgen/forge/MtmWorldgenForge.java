@@ -3,6 +3,7 @@ package com.mtm.worldgen.forge;
 import com.mojang.serialization.Codec;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.command.MtmCommands;
+import com.mtm.worldgen.gametest.MtmGameTests;
 import com.mtm.worldgen.world.BeachCondition;
 import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.TerrainClimate;
@@ -13,6 +14,7 @@ import net.minecraft.world.level.levelgen.SurfaceRules;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.world.ForgeWorldPreset;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.RegisterGameTestsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -43,6 +45,7 @@ public final class MtmWorldgenForge {
         DENSITY_FUNCTION_TYPES.register(modBus);
         SURFACE_CONDITIONS.register(modBus);
         WORLD_TYPES.register(modBus);
+        modBus.addListener((RegisterGameTestsEvent event) -> event.register(MtmGameTests.class));
         MinecraftForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> MtmCommands.register(event.getDispatcher()));
     }
 }

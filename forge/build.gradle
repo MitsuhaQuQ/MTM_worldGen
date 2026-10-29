@@ -16,6 +16,19 @@ loom {
 
         mixinConfig "mtm_worldgen.mixins.json"
     }
+
+    runs {
+        // Headless game test server: runs all game tests, then exits non-zero on failure
+        gameTestServer {
+            // Plain server launch target plus the properties Forge's GameTestMain would set: the dedicated
+            // gametest launch target fails to build its module layer in this dev environment
+            server()
+            name "Forge Game Test"
+            property "forge.enableGameTest", "true"
+            property "forge.gameTestServer", "true"
+            runDir "build/gametest"
+        }
+    }
 }
 
 configurations {

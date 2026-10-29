@@ -220,8 +220,12 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 以游戏内测试为主，能自动化的尽量自动化。
 
 - **框架**：原版 GameTest（Forge 自带；Fabric 使用 Fabric API 的 GameTest 模块），在无头服务器上运行
-  - 自动运行：`gradlew :forge:runGameTestServer` 及 Fabric 对应任务；任一测试失败即构建失败
-  - 同一套测试用例写在 common 中，Forge 与 Fabric 各跑一遍
+  - 自动运行：`gradlew :fabric:runGametest`、`gradlew :forge:runGameTestServer`；任一测试失败即构建失败（已验证）
+  - 同一套测试用例写在 common 的 `com.mtm.worldgen.gametest.MtmGameTests`，Forge 与 Fabric 各跑一遍
+  - GameTest 服务端固定为超平坦世界，测试自建 MTM 生成器，用 `getBaseColumn` / `getBaseHeight` 直接计算方块列（覆盖种子 Mixin、密度函数、含水层、群系源），不生成区块
+  - Forge 与 Fabric 一致：两端都与同一常量 `EXPECTED_COLUMN_HASH` 比对；有意修改地形后需更新该值（失败信息会打印新哈希，须确认两端相同）
+  - 空结构模板两端解析不同，两份都需保留：Fabric 读 `data/minecraft/gametest/structures/mtm_worldgen_empty.snbt`，Forge 读 `data/minecraft/structures/mtmgametests.mtm_worldgen_empty.nbt`
+  - Forge 的 GameTest 用普通服务端启动目标加 `forge.gameTestServer=true`；专用的 `gameTestServer` 启动目标在此开发环境下会因模块名为空而崩溃
 - **确定性测试**（同 seed、同配置，在全新世界生成同一片区域，比对逐区块方块哈希）：
   - 不同探索顺序（如由内向外螺旋 vs 反向，或从相反方向接近）
   - 不同 worldgen 线程数

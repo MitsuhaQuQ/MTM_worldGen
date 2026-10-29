@@ -57,6 +57,11 @@ public final class TerrainLogic {
         return BY_SEED.computeIfAbsent(seed, s -> new TerrainLogic(s, WorldgenSettings.DEFAULT));
     }
 
+    /** Drops the shared instance for a seed so the next {@link #forSeed} starts with cold caches. For tests. */
+    public static void forget(long seed) {
+        BY_SEED.remove(seed);
+    }
+
     public WorldgenSettings settings() {
         return settings;
     }
