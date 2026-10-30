@@ -2,8 +2,12 @@ package com.mtm.worldgen.gametest;
 
 import com.google.gson.JsonElement;
 import com.mojang.serialization.JsonOps;
+import com.mtm.worldgen.MtmWorldgen;
+import com.mtm.worldgen.benchmark.GenerationBenchmark;
+import com.mtm.worldgen.logic.BlockColumn;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.MtmGenerators;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
@@ -12,14 +16,20 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.tags.BiomeTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
+import net.minecraft.world.level.StructureFeatureManager;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.blending.Blender;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -204,6 +214,47 @@ public final class MtmGameTests {
         if (MtmGenerators.terrainLogic(loaded) == null) {
             helper.fail("Decoded generator is not recognized as an MTM generator");
         }
+        helper.succeed();
+    }
+
+    /**
+     * Chunk filling stops above the surface as an optimization, a path the column based tests do not cover. Fills
+     * real chunks on flat land and on a mountain and compares them with full height columns, block by block.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void filledChunksMatchColumns(GameTestHelper helper) {
+        ChunkGenerator generator = generator(helper);
+        TerrainLogic logic = TerrainLogic.forSeed(SEED);
+        Registry<Biome> biomes = helper.getLevel().registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
+        StructureFeatureManager structures = GenerationBenchmark.noStructures(helper.getLevel());
+
+        BlockColumn mountain = logic.findNearestAbove(logic.settings().maxSurfaceHeight() / 2.0, 0, 0, 64, 16384);
+        if (mountain == null) {
+            helper.fail("No mountain found near the origin to test against");
+        }
+        for (ChunkPos pos : List.of(new ChunkPos(0, 0), new ChunkPos(new BlockPos(mountain.x(), 0, mountain.z())))) {
+            ChunkAccess chunk = new ProtoChunk(pos, UpgradeData.EMPTY, MTM_HEIGHT, biomes, null);
+            generator.fillFromNoise(Runnable::run, Blender.empty(), structures, chunk).join();
+            for (int[] offset : new int[][]{{0, 0}, {7, 7}, {15, 15}, {3, 12}}) {
+                int x = pos.getMinBlockX() + offset[0];
+                int z = pos.getMinBlockZ() + offset[1];
+                NoiseColumn column = generator.getBaseColumn(x, z, MTM_HEIGHT);
+                for (int y = MTM_HEIGHT.getMinBuildHeight(); y < MTM_HEIGHT.getMaxBuildHeight(); y++) {
+                    BlockState filled = chunk.getBlockState(new BlockPos(x, y, z));
+                    if (filled.getBlock() != column.getBlock(y).getBlock()) {
+                        helper.fail("Chunk has " + filled + " but the column has " + column.getBlock(y)
+                                + " at " + x + "," + y + "," + z);
+                    }
+                }
+            }
+        }
+        helper.succeed();
+    }
+
+    /** Logs generation speed compared with vanilla. Timing varies by machine, so it reports and never fails. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS, required = false)
+    public void reportGenerationBenchmark(GameTestHelper helper) {
+        MtmWorldgen.LOGGER.info("Benchmark: {}", GenerationBenchmark.run(helper.getLevel()).summary());
         helper.succeed();
     }
 

@@ -33,6 +33,12 @@ public final class TerrainLogic {
     /** No beach on land rising more than this above sea level, such as coastal hills. */
     private static final double BEACH_MAX_HEIGHT = 6.0;
 
+    private static final int CHUNK_SIZE = 16;
+    /** Horizontal spacing of the corners the terrain density is evaluated at. */
+    private static final int NOISE_CELL_WIDTH = 4;
+    /** Vanilla adds density around structure pieces, which can lift terrain above the plain surface. */
+    private static final int STRUCTURE_TERRAIN_MARGIN = 32;
+
     /** The top fraction of the height range is compressed so peaks approach but never exceed the maximum. */
     private static final double SOFT_CAP_FRACTION = 0.13;
 
@@ -78,6 +84,21 @@ public final class TerrainLogic {
     /** Coarse surface height at a cell center, by global cell index. */
     public double cellHeight(int cellX, int cellZ) {
         return cellValue(FIELD_HEIGHT, cellX, cellZ);
+    }
+
+    /**
+     * Upper bound for solid blocks and sea water in a chunk. Terrain density is interpolated between noise cell
+     * corners, so the highest corner bounds the surface; the margin covers terrain that vanilla raises under
+     * structures. Everything above is known to be air, which lets chunk filling stop early.
+     */
+    public int highestBlockInChunk(int chunkX, int chunkZ) {
+        double highest = settings.seaLevel();
+        for (int dx = 0; dx <= CHUNK_SIZE; dx += NOISE_CELL_WIDTH) {
+            for (int dz = 0; dz <= CHUNK_SIZE; dz += NOISE_CELL_WIDTH) {
+                highest = Math.max(highest, sampleSurfaceHeight(chunkX * CHUNK_SIZE + dx, chunkZ * CHUNK_SIZE + dz));
+            }
+        }
+        return (int) Math.ceil(highest) + STRUCTURE_TERRAIN_MARGIN;
     }
 
     /** Surface height at a block column, memoized per thread for repeated queries of the same column. */

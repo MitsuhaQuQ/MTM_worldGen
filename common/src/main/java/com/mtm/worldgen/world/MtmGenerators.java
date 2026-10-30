@@ -48,8 +48,8 @@ public final class MtmGenerators {
     /** The terrain logic driving a chunk generator, or null if it is not an MTM generator. */
     public static TerrainLogic terrainLogic(ChunkGenerator generator) {
         if (generator instanceof NoiseBasedChunkGenerator noise
-                && unwrap(noise.router().finalDensity()) instanceof TerrainDensity density) {
-            return density.logic();
+                && unwrap(noise.router().continents()) instanceof TerrainClimate climate) {
+            return climate.logic();
         }
         return null;
     }
@@ -97,7 +97,9 @@ public final class MtmGenerators {
         NoiseRouterWithOnlyNoises router = new NoiseRouterWithOnlyNoises(
                 r.barrierNoise(), r.fluidLevelFloodednessNoise(), r.fluidLevelSpreadNoise(), r.lavaNoise(),
                 r.temperature(), r.vegetation(), TerrainClimate.CONTINENTS, r.erosion(), TerrainClimate.DEPTH, r.ridges(),
-                TerrainDensity.INITIAL, TerrainDensity.FINAL,
+                // Interpolated like vanilla's final density: evaluated on the sparse noise cell grid instead of for
+                // every block. The density is linear around the surface, so interpolation keeps the surface in place
+                TerrainDensity.INITIAL, DensityFunctions.interpolated(TerrainDensity.FINAL),
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,

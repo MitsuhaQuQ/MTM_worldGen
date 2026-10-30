@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mtm.worldgen.MtmWorldgen;
+import com.mtm.worldgen.benchmark.GenerationBenchmark;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.debug.HeightMapRenderer;
 import com.mtm.worldgen.world.MtmGenerators;
@@ -16,6 +17,7 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.TextComponent;
 import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -61,9 +63,28 @@ public final class MtmCommands {
                         .then(Commands.argument("blocksPerPixel", IntegerArgumentType.integer(1, MAX_BLOCKS_PER_PIXEL))
                                 .executes(context -> exportDebugMap(context.getSource(),
                                         IntegerArgumentType.getInteger(context, "blocksPerPixel")))))
+                .then(Commands.literal("benchmark")
+                        .executes(context -> runBenchmark(context.getSource())))
                 .then(Commands.literal("locate")
                         .then(Commands.literal("mountain")
                                 .executes(context -> locateMountain(context.getSource())))));
+    }
+
+    /** Runs the generation benchmark off the server thread and reports the result in chat and the log. */
+    private static int runBenchmark(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.benchmark.started"), false);
+        CompletableFuture.supplyAsync(() -> GenerationBenchmark.run(source.getLevel()), Util.backgroundExecutor())
+                .whenComplete((result, error) -> server.execute(() -> {
+                    if (error != null) {
+                        MtmWorldgen.LOGGER.error("Benchmark failed", error);
+                        source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.benchmark.failed", error.getMessage()));
+                        return;
+                    }
+                    MtmWorldgen.LOGGER.info("Benchmark: {}", result.summary());
+                    source.sendSuccess(new TextComponent(result.summary()), false);
+                }));
+        return 1;
     }
 
     /**

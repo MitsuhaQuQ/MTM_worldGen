@@ -49,11 +49,6 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
         return initial;
     }
 
-    /** The terrain logic this function samples, or null for the unbound placeholder. */
-    public TerrainLogic logic() {
-        return logic;
-    }
-
     @Override
     public double compute(FunctionContext context) {
         TerrainLogic terrain = logic != null ? logic : TerrainLogic.forSeed(0L);
