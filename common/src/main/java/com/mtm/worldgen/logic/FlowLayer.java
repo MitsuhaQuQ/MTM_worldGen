@@ -81,9 +81,11 @@ final class FlowLayer {
         int reach = ceilDiv(config.flowLookAhead, config.flowCellSize);
         int radius = reach + 1;
         Grid grid = new Grid(originX - radius, originZ - radius, cells + 2 * radius);
-        int[] catchment = accumulate(grid, reach, false);
-        int[] uplandCatchment = accumulate(grid, reach, true);
-        int[] nearby = accumulate(grid, reach / 2, false);
+        // Only water that ends up in this region matters, usually a small part of the window
+        boolean[] feeders = grid.feeders(originX, originZ, cells);
+        int[] catchment = accumulate(grid, feeders, reach, false);
+        int[] uplandCatchment = accumulate(grid, feeders, reach, true);
+        int[] nearby = accumulate(grid, feeders, reach / 2, false);
         int[] mainInflow = mainInflows(grid, nearby);
         int[] tributaries = countTributaries(grid, nearby, mainInflow, reach / 2,
                 ceilDiv(config.tributaryCells, cellArea), ceilDiv(config.trunkCells, cellArea));
@@ -127,12 +129,13 @@ final class FlowLayer {
     /**
      * Land cells of the grid drain into every cell downstream of them, as far as reach cells from where they start.
      *
+     * @param feeders    the cells to count, which must include all that drain into the cells of interest
      * @param uplandOnly count only the water that fell on hills and mountains
      */
-    private int[] accumulate(Grid grid, int reach, boolean uplandOnly) {
+    private int[] accumulate(Grid grid, boolean[] feeders, int reach, boolean uplandOnly) {
         int[] catchment = new int[grid.height.length];
         for (int cell = 0; cell < catchment.length; cell++) {
-            if (grid.height[cell] >= sea && (!uplandOnly || grid.upland[cell])) {
+            if (feeders[cell] && grid.height[cell] >= sea && (!uplandOnly || grid.upland[cell])) {
                 walk(grid, cell, cell, reach, catchment, 1);
             }
         }
@@ -216,11 +219,20 @@ final class FlowLayer {
             int firstZ = Math.floorDiv(originZ, tileSize);
             int tilesAcross = Math.floorDiv(originX + size - 1, tileSize) - firstX + 1;
             LogicThreads.forEach(tilesAcross * tilesAcross, i -> tiles.get(firstX + i % tilesAcross, firstZ + i / tilesAcross));
+            float[] tile = null;
+            int loadedX = Integer.MIN_VALUE;
+            int loadedZ = Integer.MIN_VALUE;
             for (int z = 0; z < size; z++) {
                 for (int x = 0; x < size; x++) {
                     int cellX = originX + x;
                     int cellZ = originZ + z;
-                    float[] tile = tiles.get(Math.floorDiv(cellX, tileSize), Math.floorDiv(cellZ, tileSize));
+                    int tileX = Math.floorDiv(cellX, tileSize);
+                    int tileZ = Math.floorDiv(cellZ, tileSize);
+                    if (tileX != loadedX || tileZ != loadedZ) {
+                        tile = tiles.get(tileX, tileZ);
+                        loadedX = tileX;
+                        loadedZ = tileZ;
+                    }
                     height[z * size + x] = tile[Math.floorMod(cellZ, tileSize) * tileSize + Math.floorMod(cellX, tileSize)];
                     noisy[z * size + x] = tile[(tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)];
                     upland[z * size + x] = tile[(2 * tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)] > 0.5F;
@@ -272,6 +284,35 @@ final class FlowLayer {
                     }
                 }
             }
+        }
+
+        /** Marks the cells that drain into a square of cells, following each route only once. */
+        boolean[] feeders(int squareX, int squareZ, int squareSize) {
+            byte[] state = new byte[height.length];
+            int[] path = new int[height.length];
+            for (int cell = 0; cell < height.length; cell++) {
+                int length = 0;
+                int current = cell;
+                while (current >= 0 && state[current] == 0) {
+                    int x = cellX(current) - squareX;
+                    int z = cellZ(current) - squareZ;
+                    if (x >= 0 && z >= 0 && x < squareSize && z < squareSize) {
+                        state[current] = 1;
+                        break;
+                    }
+                    path[length++] = current;
+                    current = down[current];
+                }
+                byte result = current >= 0 && state[current] == 1 ? (byte) 1 : (byte) 2;
+                for (int i = 0; i < length; i++) {
+                    state[path[i]] = result;
+                }
+            }
+            boolean[] feeders = new boolean[height.length];
+            for (int cell = 0; cell < height.length; cell++) {
+                feeders[cell] = state[cell] == 1;
+            }
+            return feeders;
         }
 
         /** Sort key of a water level. */

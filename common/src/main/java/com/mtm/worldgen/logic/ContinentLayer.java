@@ -25,6 +25,8 @@ final class ContinentLayer {
     /** Plates searched in each direction around the containing plate cell. */
     private static final int PLATE_SEARCH = 2;
     private static final int PLATE_WINDOW = PLATE_SEARCH * 2 + 1;
+    /** Slots of the per-thread plate cache, a power of two. */
+    private static final int PLATE_CACHE_SIZE = 256;
     /**
      * Largest |plate value|. Plates outside the search window are at least about this far away, so capping
      * here hides the window edge and keeps the value continuous.
@@ -56,6 +58,7 @@ final class ContinentLayer {
     private final double threshold;
     private final double high;
     private final double low;
+    private final ThreadLocal<Plate[]> plates = ThreadLocal.withInitial(() -> new Plate[PLATE_CACHE_SIZE]);
 
     ContinentLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
@@ -138,12 +141,9 @@ final class ContinentLayer {
         int owner = 0;
         for (int du = -PLATE_SEARCH; du <= PLATE_SEARCH; du++) {
             for (int dv = -PLATE_SEARCH; dv <= PLATE_SEARCH; dv++) {
-                long hash = Hashing.hash(plateSeed, cellU + du, cellV + dv);
-                double pu = cellU + du + 0.5 + config.plateJitter * (Hashing.unit(hash) - 0.5);
-                double pv = cellV + dv + 0.5 + config.plateJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5);
-                distances[count] = Math.hypot(u - pu, v - pv);
-                boolean ocean = Hashing.unit(Hashing.derive(hash, OCEAN_PLATE_SALT)) < config.oceanPlateFraction;
-                groups[count] = ocean ? OCEAN_GROUP : continentGroup(pu, pv);
+                Plate plate = plate(cellU + du, cellV + dv);
+                distances[count] = Math.hypot(u - plate.u, v - plate.v);
+                groups[count] = plate.group;
                 if (distances[count] < distances[owner]) {
                     owner = count;
                 }
@@ -161,6 +161,22 @@ final class ContinentLayer {
             nearestCoast = Math.min(nearestCoast, betweenGroups ? distance - strait : distance);
         }
         return ownerOcean ? -nearestCoast : nearestCoast;
+    }
+
+    /** Center and group of a plate. Plates are far larger than any sampling step, so nearly every lookup is a repeat. */
+    private Plate plate(int cellU, int cellV) {
+        Plate[] cache = plates.get();
+        int slot = (cellU * 31 + cellV) & (PLATE_CACHE_SIZE - 1);
+        Plate plate = cache[slot];
+        if (plate == null || plate.cellU != cellU || plate.cellV != cellV) {
+            long hash = Hashing.hash(plateSeed, cellU, cellV);
+            double pu = cellU + 0.5 + config.plateJitter * (Hashing.unit(hash) - 0.5);
+            double pv = cellV + 0.5 + config.plateJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5);
+            boolean ocean = Hashing.unit(Hashing.derive(hash, OCEAN_PLATE_SALT)) < config.oceanPlateFraction;
+            plate = new Plate(cellU, cellV, pu, pv, ocean ? OCEAN_GROUP : continentGroup(pu, pv));
+            cache[slot] = plate;
+        }
+        return plate;
     }
 
     /** Id of the continent group a plate center belongs to: the nearest site of the group grid. */
@@ -186,4 +202,6 @@ final class ContinentLayer {
         return group;
     }
 
+    private record Plate(int cellU, int cellV, double u, double v, long group) {
+    }
 }

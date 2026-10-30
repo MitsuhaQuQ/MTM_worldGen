@@ -58,6 +58,8 @@ final class SkeletonLayer {
 
     private static final int STATS_SAMPLES_PER_AXIS = 96;
     private static final double STATS_SPACING = 1536.0;
+    /** Slots of the per-thread site cache, a power of two. */
+    private static final int SITE_CACHE_SIZE = 4096;
     private static final int SITE_CACHE_LIMIT = 4096;
 
     /** Position in the cross section where the summit weight reaches zero. */
@@ -100,7 +102,7 @@ final class SkeletonLayer {
     private final double plainsLow;
     private final double plainsHigh;
     private final double hillsMiddle;
-    private final ThreadLocal<Map<Long, Site>> sites = ThreadLocal.withInitial(HashMap::new);
+    private final ThreadLocal<SiteCache> sites = ThreadLocal.withInitial(SiteCache::new);
     private final ThreadLocal<Map<Long, Isolated>> isolated = ThreadLocal.withInitial(HashMap::new);
 
     SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents) {
@@ -395,18 +397,17 @@ final class SkeletonLayer {
 
     /** Mountain site of a grid cell, with its links resolved; cached per thread. */
     private Site site(int cellX, int cellZ) {
-        Map<Long, Site> cache = sites.get();
+        SiteCache cache = sites.get();
         long key = ((long) cellX << 32) | (cellZ & 0xFFFFFFFFL);
-        Site site = cache.get(key);
-        if (site == null) {
-            if (cache.size() >= SITE_CACHE_LIMIT) {
-                cache.clear();
-            }
+        int slot = (cellX * 31 + cellZ) & (SITE_CACHE_SIZE - 1);
+        Site site = cache.sites[slot];
+        if (site == null || cache.keys[slot] != key) {
             site = basicSite(cellX, cellZ);
             if (site.type == RANGE) {
                 site = withLinks(site, cellX, cellZ);
             }
-            cache.put(key, site);
+            cache.sites[slot] = site;
+            cache.keys[slot] = key;
         }
         return site;
     }
@@ -474,6 +475,12 @@ final class SkeletonLayer {
     private static double smoothstep(double edge0, double edge1, double value) {
         double t = Math.max(0.0, Math.min(1.0, (value - edge0) / (edge1 - edge0)));
         return t * t * (3.0 - 2.0 * t);
+    }
+
+    /** Direct-mapped cache: a lookup costs one array read, and a miss only replaces the site in its slot. */
+    private static final class SiteCache {
+        final Site[] sites = new Site[SITE_CACHE_SIZE];
+        final long[] keys = new long[SITE_CACHE_SIZE];
     }
 
     private record Isolated(double x, double z, double height, double radius, boolean peak) {
