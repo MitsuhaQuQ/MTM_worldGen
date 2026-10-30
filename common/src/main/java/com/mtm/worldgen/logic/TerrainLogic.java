@@ -28,6 +28,9 @@ public final class TerrainLogic {
     private static final int FIELD_HEIGHT = 0;
     private static final int FIELD_COAST_DISTANCE = 1;
 
+    /** Share of lake cells around a position where a lake's water ends and its rim stands. */
+    private static final double LAKE_EDGE = 0.25;
+
     private static final Map<WorldKey, TerrainLogic> WORLDS = new ConcurrentHashMap<>();
 
     private final WorldgenSettings settings;
@@ -43,12 +46,14 @@ public final class TerrainLogic {
     private final RegionCache<FlowRegion> flowRegions;
     private final RegionCache<RiverRegion> riverRegions;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
+    private final ThreadLocal<FlowRegion> lastFlow = new ThreadLocal<>();
+    private final ThreadLocal<RiverRegion> lastRivers = new ThreadLocal<>();
     private final ThreadLocal<ColumnCache> columns = ThreadLocal.withInitial(ColumnCache::new);
 
     public TerrainLogic(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
-        this.skeleton = new SkeletonLayer(seed, settings);
+        this.skeleton = new SkeletonLayer(seed, settings, continents);
         this.climate = new ClimateLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
@@ -58,7 +63,7 @@ public final class TerrainLogic {
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
-        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion);
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand);
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
     }
 
@@ -93,8 +98,14 @@ public final class TerrainLogic {
     /** Nearest river within rivers.queryReach of a position, or null. */
     public RiverRegion.Hit sampleRiver(double x, double z) {
         int size = settings.general.regionSize;
-        return riverRegion((int) Math.floorDiv((long) Math.floor(x), size),
-                (int) Math.floorDiv((long) Math.floor(z), size)).nearest(x, z);
+        int regionX = (int) Math.floorDiv((long) Math.floor(x), size);
+        int regionZ = (int) Math.floorDiv((long) Math.floor(z), size);
+        RiverRegion rivers = lastRivers.get();
+        if (rivers == null || rivers.regionX() != regionX || rivers.regionZ() != regionZ) {
+            rivers = riverRegion(regionX, regionZ);
+            lastRivers.set(rivers);
+        }
+        return rivers.nearest(x, z);
     }
 
     /** Coarse surface height at a cell center, by global cell index. */
@@ -138,17 +149,133 @@ public final class TerrainLogic {
      */
     public double sampleSurfaceHeight(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        double skeletonHeight = skeleton.height(x, z, base - (settings.general.seaLevel - 1));
-        return softCap(base + skeletonHeight);
+        double[] texture = new double[1];
+        double smooth = base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture);
+        return carve(x, z, softCap(smooth), softCap(smooth + texture[0]));
+    }
+
+    /** Surface height before water has shaped it. */
+    public double sampleLandform(double x, double z) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        double[] texture = new double[1];
+        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture) + texture[0]);
+    }
+
+    /** Surface height without ridge texture, which is the ground rivers run on. */
+    public double sampleSmoothLand(double x, double z) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), null));
     }
 
     /**
-     * Surface height without ridge texture, for drainage. Drainage windows span more regions than the region cache
-     * holds, so the base comes straight from the continents instead of through the cache.
+     * Shapes land around water. Ridge texture fades out toward rivers, which leaves them the smooth ground they
+     * were routed on, with no spurs to cut through and no gullies to bridge. Valley walls then bound the land from above and below, flat on the valley floor and
+     * spreading with distance, so land only changes where it would not leave a valley. Mountains that already fall
+     * away toward a river stay as they are, and a river always runs in a channel.
+     */
+    private double carve(double x, double z, double smooth, double textured) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        double ground = river == null ? textured : smooth + (textured - smooth) * river.texture();
+        double land = river == null ? textured : carveValley(river, ground);
+        double[] lake = sampleLake(x, z);
+        if (lake == null) {
+            return land;
+        }
+        // Lakes fill the land as it is, so shores follow the terrain. Inside one, valley banks give way to the basin,
+        // and along its edge a rim closes any gap below the water. Land is never pulled down to a lake: rivers nearby
+        // can run higher, and the ground beside them would drop away.
+        double inside = smooth((lake[0] - LAKE_EDGE) / LAKE_EDGE);
+        double shaped = land + (ground - land) * inside;
+        double rim = smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
+        double bank = lake[1] + settings.rivers.bankHeight;
+        return shaped < bank ? shaped + (bank - shaped) * rim : shaped;
+    }
+
+    private double carveValley(RiverRegion.Hit river, double ground) {
+        double half = river.halfWidth(settings.rivers.minChannelWidth);
+        if (river.distance() < half) {
+            double offset = river.distance() / half;
+            return river.level() - river.depth() * (1.0 - offset * offset);
+        }
+        // The sea floor stays where it is, or banks would wall off the mouth
+        double sea = settings.general.seaLevel - 1;
+        double seaFloor = Math.min(ground, river.high());
+        if (ground < sea) {
+            return seaFloor;
+        }
+        double walled;
+        if (river.low() > river.high()) {
+            walled = 0.5 * (river.low() + river.high());
+        } else {
+            walled = Math.min(Math.max(ground, river.low()), river.high());
+        }
+        // Walls of a much higher or lower river nearby may disagree, but a river's banks always meet its own water
+        double bank = river.level() + settings.rivers.bankHeight;
+        double land = bank + (walled - bank) * smooth(river.run() / settings.rivers.valleyBankBlend);
+        return seaFloor + (land - seaFloor) * smooth((ground - sea) / settings.rivers.coastBlend);
+    }
+
+    private static double smooth(double t) {
+        double clamped = Math.max(0.0, Math.min(1.0, t));
+        return clamped * clamped * (3.0 - 2.0 * clamped);
+    }
+
+    /** Water surface of a column, or NaN where it holds no river or lake. */
+    public double sampleWaterLevel(double x, double z) {
+        double[] lake = sampleLake(x, z);
+        if (lake != null && lake[0] > LAKE_EDGE && sampleSurfaceHeight(x, z) < lake[1]) {
+            return lake[1];
+        }
+        RiverRegion.Hit river = sampleRiver(x, z);
+        return river != null && river.distance() < river.halfWidth(settings.rivers.minChannelWidth) ? river.level() : Double.NaN;
+    }
+
+    /**
+     * Lake influence at a position, as {share of lake among the four nearest routing cells, blended smoothly, and
+     * the lake's water level}, or null away from lakes.
+     */
+    private double[] sampleLake(double x, double z) {
+        int size = settings.rivers.flowCellSize;
+        double u = x / size - 0.5;
+        double v = z / size - 0.5;
+        int cellX = (int) Math.floor(u);
+        int cellZ = (int) Math.floor(v);
+        double tx = smooth(u - cellX);
+        double tz = smooth(v - cellZ);
+        double share = 0.0;
+        double levelSum = 0.0;
+        for (int dz = 0; dz <= 1; dz++) {
+            for (int dx = 0; dx <= 1; dx++) {
+                int cells = settings.general.regionSize / size;
+                FlowRegion flow = flowRegionAt(Math.floorDiv(cellX + dx, cells), Math.floorDiv(cellZ + dz, cells));
+                int lx = Math.floorMod(cellX + dx, cells);
+                int lz = Math.floorMod(cellZ + dz, cells);
+                if (flow.isLake(lx, lz)) {
+                    double weight = (dx == 0 ? 1.0 - tx : tx) * (dz == 0 ? 1.0 - tz : tz);
+                    share += weight;
+                    levelSum += weight * flow.lakeLevel(lx, lz);
+                }
+            }
+        }
+        return share > 0.0 ? new double[]{share, levelSum / share} : null;
+    }
+
+    private FlowRegion flowRegionAt(int regionX, int regionZ) {
+        FlowRegion flow = lastFlow.get();
+        if (flow == null || flow.regionX() != regionX || flow.regionZ() != regionZ) {
+            flow = flowRegions.get(regionX, regionZ);
+            lastFlow.set(flow);
+        }
+        return flow;
+    }
+
+    /**
+     * Smooth land for drainage. Drainage windows span more regions than the region cache holds, so the base comes
+     * straight from the continents instead of through the cache.
      */
     private double sampleDrainageHeight(double x, double z) {
         double base = continents.height(continents.value(x, z));
-        return softCap(base + skeleton.coarseHeight(x, z, base - (settings.general.seaLevel - 1)));
+        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), null));
     }
 
     /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */

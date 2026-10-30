@@ -114,6 +114,11 @@ class TerrainLogicTest {
             if (h < sea) {
                 continue;
             }
+            // River banks are channel structure, steeper than any slope limit by design
+            RiverRegion.Hit river = logic.sampleRiver(x, z);
+            if (river != null && river.distance() < 1.5 * river.halfWidth(SETTINGS.rivers.minChannelWidth)) {
+                continue;
+            }
             double gx = logic.sampleSurfaceHeight(x + 1, z) - h;
             double gz = logic.sampleSurfaceHeight(x, z + 1) - h;
             grades.add(Math.hypot(gx, gz));
@@ -248,20 +253,19 @@ class TerrainLogicTest {
         assertTrue(downstream >= 0.8 * upstream, "river shrinks from " + upstream + " to " + downstream);
     }
 
-    /** Distance to the nearest river changes by at most one block per block, or a curve goes missing somewhere. */
+    /** Both regions at a border must see exactly the same rivers, or a curve went missing on one side. */
     @Test
     void riverCoursesAreContinuousAcrossRegionBorders() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         int border = SETTINGS.general.regionSize;
+        RiverRegion west = logic.riverRegion(0, 0);
+        RiverRegion east = logic.riverRegion(1, 0);
         int hits = 0;
-        for (int z = -border; z < 2 * border; z += 11) {
-            RiverRegion.Hit west = logic.sampleRiver(border - 0.5, z);
-            RiverRegion.Hit east = logic.sampleRiver(border + 0.5, z);
-            assertEquals(west == null, east == null, "river seen on one side of the border only at z " + z);
-            if (west != null) {
-                assertTrue(Math.abs(west.distance() - east.distance()) <= 1.01, "river jumps at z " + z);
-                hits++;
-            }
+        for (int z = 1; z < border; z += 11) {
+            RiverRegion.Hit a = west.nearest(border, z);
+            RiverRegion.Hit b = east.nearest(border, z);
+            assertEquals(a, b, "regions disagree at z " + z);
+            hits += a != null ? 1 : 0;
         }
         assertTrue(hits > 0, "no rivers near the border");
     }
@@ -285,6 +289,116 @@ class TerrainLogicTest {
         }
     }
 
+    /** Beside a channel the ground must reach the water surface, or the water would stand as a wall. */
+    @Test
+    void riversStayBetweenTheirBanks() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        Random random = new Random(11);
+        double sea = SETTINGS.general.seaLevel - 1;
+        List<Double> excess = new ArrayList<>();
+        for (int i = 0; i < 200000 && excess.size() < 2000; i++) {
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
+            RiverRegion.Hit river = logic.sampleRiver(x, z);
+            if (river == null || river.level() <= sea + 2) {
+                continue;
+            }
+            double half = river.halfWidth(SETTINGS.rivers.minChannelWidth);
+            // Lake beds lie below the water by design, so only dry columns count as banks
+            if (river.distance() >= half && river.distance() < 2.0 * half && Double.isNaN(logic.sampleWaterLevel(x, z))) {
+                excess.add(river.level() - logic.sampleSurfaceHeight(x, z));
+            }
+        }
+        Collections.sort(excess);
+        double p99 = excess.get((int) (0.99 * (excess.size() - 1)));
+        System.out.println("water over the bank p99 " + p99 + " max " + excess.get(excess.size() - 1) + " of " + excess.size());
+        assertTrue(excess.size() > 50, "too few river samples: " + excess.size());
+        assertTrue(p99 <= 2.0, "99th percentile of water over the bank is " + p99);
+    }
+
+    /** A lake must keep its basin wherever rivers run in: this is what used to cut rivers off at the shore. */
+    @Test
+    void lakesKeepTheirBasinsNextToRivers() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        int size = SETTINGS.rivers.flowCellSize;
+        int lakes = 0;
+        for (int rx = -2; rx <= 2; rx++) {
+            for (int rz = -2; rz <= 2; rz++) {
+                FlowRegion flow = logic.flowRegion(rx, rz);
+                int cells = flow.cells();
+                for (int lz = 1; lz < cells - 1; lz++) {
+                    for (int lx = 1; lx < cells - 1; lx++) {
+                        if (flow.isLake(lx, lz) && flow.isLake(lx - 1, lz) && flow.isLake(lx + 1, lz) && flow.isLake(lx, lz - 1) && flow.isLake(lx, lz + 1)
+                                && flow.isLake(lx - 1, lz - 1) && flow.isLake(lx + 1, lz - 1) && flow.isLake(lx - 1, lz + 1) && flow.isLake(lx + 1, lz + 1)) {
+                            double x = (rx * cells + lx + 0.5) * size;
+                            double z = (rz * cells + lz + 0.5) * size;
+                            double water = logic.sampleWaterLevel(x, z);
+                            assertTrue(!Double.isNaN(water) && logic.sampleSurfaceHeight(x, z) < water, "dry lake center at " + x + "," + z);
+                            lakes++;
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(lakes > 0, "no lake centers found");
+    }
+
+    /** Where a river's route ends in the sea, the real surface there must be sea, with nothing closing off the mouth. */
+    @Test
+    void riversEndInOpenSea() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double sea = SETTINGS.general.seaLevel - 1;
+        long nodeSeed = RiverLayer.nodeSeed(SEED);
+        int mouths = 0;
+        int blocked = 0;
+        for (int rx = -3; rx < 3; rx++) {
+            for (int rz = -3; rz < 3; rz++) {
+                FlowRegion flow = logic.flowRegion(rx, rz);
+                int cells = flow.cells();
+                for (int lz = 1; lz < cells - 1; lz++) {
+                    for (int lx = 1; lx < cells - 1; lx++) {
+                        if (!flow.flows(lx, lz) || flow.riverClass(lx, lz) == FlowRegion.RiverClass.NONE) {
+                            continue;
+                        }
+                        int nx = lx + flow.downstreamX(lx, lz);
+                        int nz = lz + flow.downstreamZ(lx, lz);
+                        if (flow.flows(nx, nz) || flow.isLake(nx, nz)) {
+                            continue;
+                        }
+                        double[] node = RiverLayer.node(nodeSeed, SETTINGS.rivers, rx * cells + nx, rz * cells + nz);
+                        mouths++;
+                        blocked += logic.sampleSurfaceHeight(node[0], node[1]) > sea ? 1 : 0;
+                    }
+                }
+            }
+        }
+        System.out.println("river mouths " + mouths + " blocked " + blocked);
+        assertTrue(mouths > 10, "too few mouths: " + mouths);
+        assertTrue(blocked <= mouths / 20, blocked + " of " + mouths + " river mouths end on land");
+    }
+
+    @Test
+    void waterNeverRunsUphill() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        for (int rx = -1; rx <= 1; rx++) {
+            for (int rz = -1; rz <= 1; rz++) {
+                FlowRegion flow = logic.flowRegion(rx, rz);
+                int cells = flow.cells();
+                for (int lz = 0; lz < cells; lz++) {
+                    for (int lx = 0; lx < cells; lx++) {
+                        if (flow.flows(lx, lz)) {
+                            int nx = lx + flow.downstreamX(lx, lz);
+                            int nz = lz + flow.downstreamZ(lx, lz);
+                            if (nx >= 0 && nz >= 0 && nx < cells && nz < cells) {
+                                assertTrue(flow.waterLevel(nx, nz) <= flow.waterLevel(lx, lz), "water rises at " + lx + "," + lz);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     void landDrainsWithoutSinks() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
@@ -295,7 +409,8 @@ class TerrainLogicTest {
         for (int lz = 0; lz < cells; lz++) {
             for (int lx = 0; lx < cells; lx++) {
                 double height = logic.sampleSurfaceHeight((lx + 0.5) * size, (lz + 0.5) * size);
-                assertTrue(flow.flows(lx, lz) || height < sea + 2 * SETTINGS.rivers.routeNoise, "land sink at height " + height);
+                // Routing samples coarsely, so cells right at the coast can count as sea
+                assertTrue(flow.flows(lx, lz) || height < sea + 16.0, "land sink at height " + height);
             }
         }
     }

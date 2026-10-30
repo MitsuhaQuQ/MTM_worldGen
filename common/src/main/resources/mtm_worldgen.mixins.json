@@ -9,7 +9,8 @@
     "NoiseBasedChunkGeneratorMixin",
     "NoiseRouterDataMixin",
     "ServerLevelMixin",
-    "SnowAndFreezeFeatureMixin"
+    "SnowAndFreezeFeatureMixin",
+    "WorldCarverMixin"
   ],
   "client": [],
   "injectors": {

@@ -96,6 +96,14 @@ final class ContinentLayer {
     }
 
     /**
+     * Rough distance inland in blocks from a continent height. The value rises steadily away from coasts and the
+     * height follows it, which makes this cheap enough for every column, unlike {@link #coastDistance}.
+     */
+    double inlandDistance(double baseAboveSea) {
+        return baseAboveSea / config.landRange * (high - threshold) * config.plateSpacing;
+    }
+
+    /**
      * Surface height of the continent layer for a continent value. Continuous and with finite slope at the
      * coastline: the coarse grid samples this function, so any jump or steep kink there shows up as
      * grid-aligned stair steps along the coast.

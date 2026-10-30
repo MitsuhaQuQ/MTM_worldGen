@@ -33,6 +33,7 @@ final class FlowLayer {
     /** Area of a routing cell in coarse cells, the unit of catchments. */
     private final int cellArea;
     private final Fbm routeNoise;
+    private final long nodeSeed;
     private final RegionCache<float[]> tiles;
 
     FlowLayer(long seed, WorldgenSettings settings, HeightSampler heights) {
@@ -43,20 +44,23 @@ final class FlowLayer {
         int ratio = config.flowCellSize / settings.general.cellSize;
         this.cellArea = ratio * ratio;
         this.routeNoise = new Fbm(Hashing.derive(seed, ROUTE_SALT), 2, config.routeWavelength);
+        this.nodeSeed = RiverLayer.nodeSeed(seed);
         this.tiles = new RegionCache<>(this::tile, TILES);
     }
 
-    /** Heights of one region's worth of routing cells. Shared by all windows that overlap it. */
+    /**
+     * Heights of one region's worth of routing cells, sampled at their river nodes so rivers meet the real ground
+     * there. The second half holds the same heights with route noise, which steers water but never sets its level.
+     */
     private float[] tile(int tileX, int tileZ) {
-        int cellSize = config.flowCellSize;
-        int size = settings.general.regionSize / cellSize;
-        float[] tile = new float[size * size];
+        int size = settings.general.regionSize / config.flowCellSize;
+        float[] tile = new float[2 * size * size];
         for (int z = 0; z < size; z++) {
             for (int x = 0; x < size; x++) {
-                double blockX = ((long) tileX * size + x + 0.5) * cellSize;
-                double blockZ = ((long) tileZ * size + z + 0.5) * cellSize;
-                double height = heights.height(blockX, blockZ);
-                tile[z * size + x] = (float) (height < sea ? height : Math.max(sea, height + config.routeNoise * routeNoise.sample(blockX, blockZ)));
+                double[] node = RiverLayer.node(nodeSeed, config, tileX * size + x, tileZ * size + z);
+                double height = heights.height(node[0], node[1]);
+                tile[z * size + x] = (float) height;
+                tile[(size + z) * size + x] = (float) (height < sea ? height : Math.max(sea, height + config.routeNoise * routeNoise.sample(node[0], node[1])));
             }
         }
         return tile;
@@ -82,6 +86,7 @@ final class FlowLayer {
         int[] regionTributaries = new int[size];
         byte[] classes = new byte[size];
         float[] lakeLevels = new float[size];
+        float[] waterLevels = new float[size];
         for (int lz = 0; lz < cells; lz++) {
             for (int lx = 0; lx < cells; lx++) {
                 int source = grid.index(originX + lx, originZ + lz);
@@ -92,9 +97,10 @@ final class FlowLayer {
                 regionTributaries[target] = tributaries[source];
                 classes[target] = (byte) classify(regionCatchment[target], tributaries[source]).ordinal();
                 lakeLevels[target] = grid.filled[source] - grid.height[source] >= config.lakeMinDepth ? grid.filled[source] : Float.NaN;
+                waterLevels[target] = (float) Math.max(sea, grid.filled[source]);
             }
         }
-        return new FlowRegion(regionX, regionZ, cells, directions, inflows, regionCatchment, regionTributaries, classes, lakeLevels);
+        return new FlowRegion(regionX, regionZ, cells, directions, inflows, regionCatchment, regionTributaries, classes, lakeLevels, waterLevels);
     }
 
     private FlowRegion.RiverClass classify(int catchment, int tributaries) {
@@ -171,6 +177,8 @@ final class FlowLayer {
         final int originZ;
         final int size;
         final float[] height;
+        /** Height with route noise, which decides the order of the flood. */
+        final float[] noisy;
         /** Water surface once depressions have filled up to their spill point. */
         final float[] filled;
         final byte[] direction;
@@ -181,6 +189,7 @@ final class FlowLayer {
             this.originZ = originZ;
             this.size = size;
             this.height = new float[size * size];
+            this.noisy = new float[size * size];
             this.filled = new float[size * size];
             this.direction = new byte[size * size];
             this.down = new int[size * size];
@@ -195,6 +204,7 @@ final class FlowLayer {
                     int cellZ = originZ + z;
                     float[] tile = tiles.get(Math.floorDiv(cellX, tileSize), Math.floorDiv(cellZ, tileSize));
                     height[z * size + x] = tile[Math.floorMod(cellZ, tileSize) * tileSize + Math.floorMod(cellX, tileSize)];
+                    noisy[z * size + x] = tile[(tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)];
                 }
             }
             route();
@@ -208,6 +218,7 @@ final class FlowLayer {
         private void route() {
             PriorityQueue<long[]> queue = new PriorityQueue<>(Comparator.<long[]>comparingLong(e -> e[0]).thenComparingLong(e -> e[1]));
             boolean[] reached = new boolean[height.length];
+            float[] order = new float[height.length];
             long arrival = 0;
             for (int cell = 0; cell < height.length; cell++) {
                 direction[cell] = -1;
@@ -217,7 +228,8 @@ final class FlowLayer {
                 if (height[cell] < sea || x == 0 || z == 0 || x == size - 1 || z == size - 1) {
                     reached[cell] = true;
                     filled[cell] = height[cell];
-                    queue.add(new long[]{encode(height[cell]), arrival++, cell});
+                    order[cell] = noisy[cell];
+                    queue.add(new long[]{encode(order[cell]), arrival++, cell});
                 }
             }
             while (!queue.isEmpty()) {
@@ -234,9 +246,10 @@ final class FlowLayer {
                     if (!reached[neighbor]) {
                         reached[neighbor] = true;
                         filled[neighbor] = Math.max(height[neighbor], filled[cell]);
+                        order[neighbor] = Math.max(noisy[neighbor], order[cell]);
                         direction[neighbor] = (byte) (7 - d);
                         down[neighbor] = cell;
-                        queue.add(new long[]{encode(filled[neighbor]), arrival++, neighbor});
+                        queue.add(new long[]{encode(order[neighbor]), arrival++, neighbor});
                     }
                 }
             }

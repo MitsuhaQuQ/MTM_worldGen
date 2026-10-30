@@ -10,6 +10,7 @@ import java.util.List;
  * Refines the routing grid into river courses. Each routing cell gets a jittered node, and each flow edge a smooth
  * curve between its two nodes with meanders on top. Nodes depend on their cell and meanders on their edge only, so
  * whichever region builds an edge gets the same curve, and rivers join up across region borders without any matching.
+ * Water levels come from the routing grid at the nodes and follow the real ground along the curve between them.
  */
 final class RiverLayer {
     private static final long NODE_SALT = 0x4E4F4445L;
@@ -23,17 +24,19 @@ final class RiverLayer {
     private final WorldgenSettings settings;
     private final WorldgenSettings.Rivers config;
     private final FlowSource flows;
+    private final FlowLayer.HeightSampler landform;
     private final long nodeSeed;
     private final long meanderSeed;
     private final long sizeSeed;
     private final int cellSize;
     private final int cells;
 
-    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows) {
+    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform) {
         this.settings = settings;
         this.config = settings.rivers;
         this.flows = flows;
-        this.nodeSeed = Hashing.derive(seed, NODE_SALT);
+        this.landform = landform;
+        this.nodeSeed = nodeSeed(seed);
         this.meanderSeed = Hashing.derive(seed, MEANDER_SALT);
         this.sizeSeed = Hashing.derive(seed, SIZE_SALT);
         this.cellSize = config.flowCellSize;
@@ -47,12 +50,20 @@ final class RiverLayer {
 
         int originX = regionX * cells;
         int originZ = regionZ * cells;
-        int margin = Math.max(1, ceilDiv(config.queryReach, cellSize) + 1);
-        Curves curves = new Curves();
-        for (int cellZ = originZ - margin; cellZ < originZ + cells + margin; cellZ++) {
+        int margin = Math.max(1, ceilDiv(config.queryReach, cellSize) + 2);
+        // Rows run in parallel into their own lists and join in row order, so the result does not depend on timing
+        int rows = cells + 2 * margin;
+        Curves[] parts = new Curves[rows];
+        LogicThreads.forEach(rows, row -> {
+            Curves part = new Curves();
             for (int cellX = originX - margin; cellX < originX + cells + margin; cellX++) {
-                addEdge(around, regionX, regionZ, cellX, cellZ, curves);
+                addEdge(around, regionX, regionZ, cellX, originZ - margin + row, part);
             }
+            parts[row] = part;
+        });
+        Curves curves = new Curves();
+        for (Curves part : parts) {
+            curves.addAll(part);
         }
         return curves.index(regionX * settings.general.regionSize, regionZ * settings.general.regionSize);
     }
@@ -75,17 +86,21 @@ final class RiverLayer {
         if (flow.isLake(lx, lz) && nextFlow.isLake(nextLx, nextLz)) {
             return;
         }
-        double[] a = node(cellX, cellZ);
-        double[] b = node(nextX, nextZ);
+        double[] a = smoothNode(around, regionX, regionZ, cellX, cellZ);
+        double[] b = smoothNode(around, regionX, regionZ, nextX, nextZ);
         // Tangents run from the neighbor behind to the neighbor ahead, so the curves of consecutive edges join smoothly
-        double[] before = flow.hasInflow(lx, lz) ? node(cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz)) : a;
+        double[] before = flow.hasInflow(lx, lz)
+                ? smoothNode(around, regionX, regionZ, cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz)) : a;
         double[] after = nextFlow.flows(nextLx, nextLz)
-                ? node(nextX + nextFlow.downstreamX(nextLx, nextLz), nextZ + nextFlow.downstreamZ(nextLx, nextLz)) : b;
+                ? smoothNode(around, regionX, regionZ, nextX + nextFlow.downstreamX(nextLx, nextLz), nextZ + nextFlow.downstreamZ(nextLx, nextLz)) : b;
 
         double[] startSize = size(flow.riverClass(lx, lz), flow.catchment(lx, lz), cellX, cellZ);
         FlowRegion.RiverClass nextClass = nextFlow.riverClass(nextLx, nextLz);
         double[] endSize = nextClass == FlowRegion.RiverClass.NONE ? startSize
                 : size(nextClass, nextFlow.catchment(nextLx, nextLz), nextX, nextZ);
+
+        double startLevel = flow.waterLevel(lx, lz);
+        double endLevel = nextFlow.waterLevel(nextLx, nextLz);
 
         long hash = Hashing.derive(Hashing.hash(meanderSeed, cellX, cellZ), Hashing.hash(meanderSeed, nextX, nextZ));
         double phase1 = 2.0 * Math.PI * Hashing.unit(hash);
@@ -104,6 +119,7 @@ final class RiverLayer {
 
         double previousX = a[0];
         double previousZ = a[1];
+        double previousLevel = startLevel;
         byte riverClass = (byte) flow.riverClass(lx, lz).ordinal();
         for (int i = 1; i <= config.curveSegments; i++) {
             double t = (double) i / config.curveSegments;
@@ -115,13 +131,19 @@ final class RiverLayer {
                     * (swing + Math.sin(2.0 * Math.PI * t + phase1) + 0.5 * Math.sin(4.0 * Math.PI * t + phase2));
             x += normalX * meander;
             z += normalZ * meander;
+            // Water follows the ground down between the nodes, but never below where this edge has to end up
+            double chord = startLevel + t * (endLevel - startLevel);
+            double level = i == config.curveSegments ? endLevel
+                    : Math.max(endLevel, Math.min(previousLevel, Math.min(chord, landform.height(x, z))));
             double from = (double) (i - 1) / config.curveSegments;
             curves.add(previousX, previousZ, x, z,
                     startSize[0] + from * (endSize[0] - startSize[0]), startSize[0] + t * (endSize[0] - startSize[0]),
                     startSize[1] + from * (endSize[1] - startSize[1]), startSize[1] + t * (endSize[1] - startSize[1]),
+                    previousLevel, level,
                     riverClass);
             previousX = x;
             previousZ = z;
+            previousLevel = level;
         }
     }
 
@@ -131,10 +153,40 @@ final class RiverLayer {
         return Math.abs(dx) <= 1 && Math.abs(dz) <= 1 ? around[(dz + 1) * 3 + dx + 1] : null;
     }
 
+    /**
+     * Node moved toward the middle of the river's neighbors before and after it. Routes only have eight directions
+     * and can double back, which even a smooth curve cannot round when it has to pass through the raw node.
+     */
+    private double[] smoothNode(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        double[] node = node(cellX, cellZ);
+        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
+        if (flow == null) {
+            return node;
+        }
+        int lx = Math.floorMod(cellX, cells);
+        int lz = Math.floorMod(cellZ, cells);
+        if (!flow.flows(lx, lz) || !flow.hasInflow(lx, lz)) {
+            return node;
+        }
+        double[] before = node(cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz));
+        double[] after = node(cellX + flow.downstreamX(lx, lz), cellZ + flow.downstreamZ(lx, lz));
+        double s = config.nodeSmoothing;
+        return new double[]{node[0] + s * (0.5 * (before[0] + after[0]) - node[0]), node[1] + s * (0.5 * (before[1] + after[1]) - node[1])};
+    }
+
     private double[] node(int cellX, int cellZ) {
+        return node(nodeSeed, config, cellX, cellZ);
+    }
+
+    static long nodeSeed(long seed) {
+        return Hashing.derive(seed, NODE_SALT);
+    }
+
+    /** River node of a routing cell, the same for routing and for the curves. */
+    static double[] node(long nodeSeed, WorldgenSettings.Rivers config, int cellX, int cellZ) {
         long hash = Hashing.hash(nodeSeed, cellX, cellZ);
-        return new double[]{(cellX + 0.5 + config.nodeJitter * (Hashing.unit(hash) - 0.5)) * cellSize,
-                (cellZ + 0.5 + config.nodeJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * cellSize};
+        return new double[]{(cellX + 0.5 + config.nodeJitter * (Hashing.unit(hash) - 0.5)) * config.flowCellSize,
+                (cellZ + 0.5 + config.nodeJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * config.flowCellSize};
     }
 
     /** Width and depth of a river at a node, varying per node so that both edges meeting there agree. */
@@ -176,12 +228,12 @@ final class RiverLayer {
 
     /** Collects segments and sorts them into the buckets within reach of them. */
     private final class Curves {
-        private static final int STRIDE = 8;
+        private static final int STRIDE = 10;
         private double[] values = new double[STRIDE * 1024];
         private byte[] classes = new byte[1024];
         private int count;
 
-        void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, byte riverClass) {
+        void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1, byte riverClass) {
             if (count == classes.length) {
                 values = Arrays.copyOf(values, values.length * 2);
                 classes = Arrays.copyOf(classes, classes.length * 2);
@@ -195,7 +247,17 @@ final class RiverLayer {
             values[s + 5] = w1;
             values[s + 6] = d0;
             values[s + 7] = d1;
+            values[s + 8] = l0;
+            values[s + 9] = l1;
             classes[count++] = riverClass;
+        }
+
+        void addAll(Curves other) {
+            for (int i = 0; i < other.count; i++) {
+                int s = i * STRIDE;
+                add(other.values[s], other.values[s + 1], other.values[s + 2], other.values[s + 3], other.values[s + 4], other.values[s + 5],
+                        other.values[s + 6], other.values[s + 7], other.values[s + 8], other.values[s + 9], other.classes[i]);
+            }
         }
 
         RiverRegion index(int originX, int originZ) {
@@ -222,7 +284,7 @@ final class RiverLayer {
             for (int i = 0; i < index.length; i++) {
                 index[i] = lists.get(i).stream().mapToInt(Integer::intValue).toArray();
             }
-            return new RiverRegion(originX, originZ, bucketSize, buckets, reach, Arrays.copyOf(values, count * STRIDE),
+            return new RiverRegion(originX, originZ, bucketSize, buckets, config, Arrays.copyOf(values, count * STRIDE),
                     Arrays.copyOf(classes, count), index);
         }
 

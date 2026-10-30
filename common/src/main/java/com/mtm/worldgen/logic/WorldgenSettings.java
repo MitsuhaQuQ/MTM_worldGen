@@ -63,6 +63,8 @@ public final class WorldgenSettings {
         public double coastFadeHeight = 8.0;
         /** Blocks kept above the surface when filling chunks, for terrain raised under structures. */
         public int structureTerrainMargin = 32;
+        /** Caves and ravines stay at least this many blocks below the surface. */
+        public int caveSurfaceMargin = 12;
     }
 
     /** Maximum grades in percent (height difference / horizontal distance * 100). */
@@ -77,7 +79,7 @@ public final class WorldgenSettings {
         /** Target fraction of the surface covered by ocean. */
         public double oceanRatio = 0.30;
         /** Average distance between plate centers in blocks. */
-        public double plateSpacing = 8192.0;
+        public double plateSpacing = 11000.0;
         /** How far plate centers move from their grid cell center, as a fraction of the spacing. */
         public double plateJitter = 0.85;
         /** Fraction of plates that are open ocean instead of continent. */
@@ -101,6 +103,9 @@ public final class WorldgenSettings {
         public double zoneWavelength = 7168.0;
         /** Fraction of the world inside orogeny zones. */
         public double zoneCoverage = 0.32;
+        /** Mountains keep this many blocks from the coast, varying along it down to nothing, so some still meet the sea. */
+        public double coastMargin = 2400.0;
+        public double coastMarginWavelength = 6144.0;
         public double zoneFade = 0.05;
         public double siteSpacing = 1536.0;
         public double siteJitter = 0.8;
@@ -342,7 +347,7 @@ public final class WorldgenSettings {
         public double meander = 0.14;
         public int curveSegments = 12;
         /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
-        public int queryReach = 384;
+        public int queryReach = 512;
         /** Rivers vary by this fraction of their width. */
         public double widthVariation = 0.1;
         public double streamWidthMin = 4.0;
@@ -357,6 +362,25 @@ public final class WorldgenSettings {
         public double majorTrunkWidth = 200.0;
         public double majorTrunkDepthMin = 15.0;
         public double majorTrunkDepthMax = 20.0;
+        /** Narrower rivers still cut a channel this wide, or noise cells would lose them. */
+        public double minChannelWidth = 6.0;
+        /** Valley floor width as a multiple of the river width. */
+        public double valleyFloorFactor = 3.0;
+        /** Valley walls: land may rise this grade above the floor at first, then steeper by the curve per block. */
+        public double valleyWallGrade = 0.15;
+        public double valleyWallCurve = 0.003;
+        public double valleyWallMaxGrade = 0.9;
+        /** Beyond the valley floor, land leaves the river's own bank height over this many blocks. */
+        public double valleyBankBlend = 96.0;
+        /** River banks fade out over this many blocks of land height above the sea. */
+        public double coastBlend = 6.0;
+        /** Ridge texture fades in over this many blocks from a valley floor, plus this many per block of river width. */
+        public double textureFadeBase = 160.0;
+        public double textureFadePerWidth = 2.0;
+        /** How far a river node moves toward the middle of its neighbors, rounding sharp bends. */
+        public double nodeSmoothing = 0.6;
+        /** Height of the valley floor above the water. */
+        public double bankHeight = 1.0;
     }
 
     public static final class Climate {

@@ -33,6 +33,7 @@ final class SkeletonLayer {
     private static final long PLATEAU_HEIGHT_SALT = 0x504C4854L;
     private static final long HILLS_ZONE_SALT = 0x48494C4C5AL;
     private static final long HILLS_SALT = 0x48494C4CL;
+    private static final long COAST_SALT = 0x434F415354L;
 
     /**
      * Sites searched in each direction. A link spans up to about 2.8 cells (diagonal neighbor plus jitter), so
@@ -70,6 +71,8 @@ final class SkeletonLayer {
     private final Fbm plateauHeight;
     private final Fbm hillsZone;
     private final Fbm hills;
+    private final Fbm coastMargin;
+    private final ContinentLayer continents;
     private final WorldgenSettings settings;
     private final WorldgenSettings.Mountains m;
     private final WorldgenSettings.Plateaus plateaus;
@@ -89,8 +92,9 @@ final class SkeletonLayer {
     private final double hillsHigh;
     private final ThreadLocal<Map<Long, Site>> sites = ThreadLocal.withInitial(HashMap::new);
 
-    SkeletonLayer(long seed, WorldgenSettings settings) {
+    SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents) {
         this.settings = settings;
+        this.continents = continents;
         this.m = settings.mountains;
         this.plateaus = settings.plateaus;
         this.hillSettings = settings.hills;
@@ -109,6 +113,7 @@ final class SkeletonLayer {
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
         this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, hillSettings.zoneWavelength);
         this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
+        this.coastMargin = new Fbm(Hashing.derive(seed, COAST_SALT), 2, m.coastMarginWavelength);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
@@ -124,35 +129,30 @@ final class SkeletonLayer {
     }
 
     /**
-     * Elevation added on top of the continent base.
+     * Elevation added on top of the continent base, without the ridge texture.
      *
      * @param baseAboveSea continent base height above the sea surface in blocks
+     * @param texture      receives the ridge texture in its first element, or null if it is not needed
      */
-    double height(double x, double z, double baseAboveSea) {
-        return height(x, z, baseAboveSea, true);
-    }
-
-    /** Elevation without ridge texture: much cheaper, and all that drainage needs at its scale. */
-    double coarseHeight(double x, double z, double baseAboveSea) {
-        return height(x, z, baseAboveSea, false);
-    }
-
-    private double height(double x, double z, double baseAboveSea, boolean detailed) {
+    double height(double x, double z, double baseAboveSea, double[] texture) {
         double land = smoothstep(0.0, settings.general.coastFadeHeight, baseAboveSea);
         if (land <= 0.0) {
+            if (texture != null) {
+                texture[0] = 0.0;
+            }
             return 0.0;
         }
-        double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z));
+        double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * inlandWeight(x, z, baseAboveSea);
         double massif = scale * m.massifHeight * mountainZone;
         // Warp the lookup so ridges between sites curve instead of running dead straight
         double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
         double wz = z + m.ridgeWarp * ridgeWarpZ.sample(x, z);
-        double[] mountain = mountains(wx, wz, detailed);
+        double[] mountain = mountains(wx, wz, texture != null);
         double peaks = mountain[0];
         double textured = peaks + m.massifTextureShare * massif;
         double summitCalm = 1.0 - m.summitTextureReduction * mountain[2];
         double rugged = 0.0;
-        if (detailed && textured > 0.0) {
+        if (texture != null && textured > 0.0) {
             // Spurs near ridges fade into crease-free noise on the open massif, where they have no direction to follow
             double openWeight = scale * m.massifHeight;
             openWeight *= openWeight;
@@ -168,14 +168,23 @@ final class SkeletonLayer {
         double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
         double rolling = scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
 
-        return land * (massif + peaks + rugged + foothill + plateau + rolling);
+        if (texture != null) {
+            texture[0] = land * rugged;
+        }
+        return land * (massif + peaks + foothill + plateau + rolling);
+    }
+
+    /** Share of mountain building allowed at a position: none at the coast, unless the margin there runs out. */
+    private double inlandWeight(double x, double z, double baseAboveSea) {
+        double margin = m.coastMargin * Math.max(0.0, Math.min(1.0, 0.5 + 2.5 * coastMargin.sample(x, z)));
+        return margin <= 0.0 ? 1.0 : smoothstep(0.0, margin, continents.inlandDistance(baseAboveSea));
     }
 
     /**
      * Tallest mountain profile at a position with the strongest foothill and summit weights, plus the spur texture
      * summed over nearby ridges weighted by squared height and distance, as {height, belt, summit, spurSum, spurWeight}.
      */
-    private double[] mountains(double x, double z, boolean detailed) {
+    private double[] mountains(double x, double z, boolean textured) {
         int cellX = (int) Math.floor(x / m.siteSpacing);
         int cellZ = (int) Math.floor(z / m.siteSpacing);
         double peak = 0.0;
@@ -194,7 +203,7 @@ final class SkeletonLayer {
                     peak = smoothMax(peak, profile[0]);
                     belt = Math.max(belt, profile[1]);
                     summit = Math.max(summit, profile[2]);
-                    if (detailed && profile[3] < m.textureReach) {
+                    if (textured && profile[3] < m.textureReach) {
                         double weight = profile[4] * (1.0 - smoothstep(0.0, m.textureReach, profile[3]));
                         weight *= weight;
                         spurSum += weight * spurTexture(x, z, site, other);
@@ -321,7 +330,8 @@ final class SkeletonLayer {
         long hash = Hashing.hash(siteSeed, cellX, cellZ);
         double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * m.siteSpacing;
         double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
-        double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z));
+        double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
+        double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * inlandWeight(x, z, base);
         if (zoneWeight < m.siteMinZone) {
             return new Site(x, z, NONE, 0.0, 0.0, new Site[0]);
         }

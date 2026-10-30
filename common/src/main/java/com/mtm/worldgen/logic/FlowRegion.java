@@ -22,8 +22,9 @@ public final class FlowRegion {
     private final int[] tributaries;
     private final byte[] classes;
     private final float[] lakeLevels;
+    private final float[] waterLevels;
 
-    FlowRegion(int regionX, int regionZ, int cells, byte[] directions, byte[] inflows, int[] catchments, int[] tributaries, byte[] classes, float[] lakeLevels) {
+    FlowRegion(int regionX, int regionZ, int cells, byte[] directions, byte[] inflows, int[] catchments, int[] tributaries, byte[] classes, float[] lakeLevels, float[] waterLevels) {
         this.regionX = regionX;
         this.regionZ = regionZ;
         this.cells = cells;
@@ -33,6 +34,7 @@ public final class FlowRegion {
         this.tributaries = tributaries;
         this.classes = classes;
         this.lakeLevels = lakeLevels;
+        this.waterLevels = waterLevels;
     }
 
     public int regionX() {
@@ -100,12 +102,17 @@ public final class FlowRegion {
         return lakeLevels[localZ * cells + localX];
     }
 
+    /** Water surface where water runs through a cell. Never rises downstream. */
+    public float waterLevel(int localX, int localZ) {
+        return waterLevels[localZ * cells + localX];
+    }
+
     /** Whether this region holds exactly the same values as another. */
     public boolean contentEquals(FlowRegion other) {
         return regionX == other.regionX && regionZ == other.regionZ && cells == other.cells
                 && Arrays.equals(directions, other.directions) && Arrays.equals(inflows, other.inflows)
                 && Arrays.equals(catchments, other.catchments)
                 && Arrays.equals(tributaries, other.tributaries) && Arrays.equals(classes, other.classes)
-                && Arrays.equals(lakeLevels, other.lakeLevels);
+                && Arrays.equals(lakeLevels, other.lakeLevels) && Arrays.equals(waterLevels, other.waterLevels);
     }
 }

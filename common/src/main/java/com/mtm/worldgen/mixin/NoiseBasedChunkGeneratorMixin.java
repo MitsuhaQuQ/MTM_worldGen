@@ -2,12 +2,16 @@ package com.mtm.worldgen.mixin;
 
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.TerrainCondition;
+import com.mtm.worldgen.world.MtmCarving;
 import com.mtm.worldgen.world.MtmGenerators;
+import com.mtm.worldgen.world.MtmWater;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.StructureFeatureManager;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseSettings;
@@ -37,6 +41,7 @@ public abstract class NoiseBasedChunkGeneratorMixin {
                                            CallbackInfo ci) {
         TerrainLogic logic = MtmGenerators.terrainLogic((ChunkGenerator) (Object) this);
         if (logic != null) {
+            MtmWater.fill(logic, chunk);
             TerrainCondition.begin(logic);
         }
     }
@@ -45,6 +50,21 @@ public abstract class NoiseBasedChunkGeneratorMixin {
     private void mtm_worldgen$endSurface(WorldGenRegion region, StructureFeatureManager structures, ChunkAccess chunk,
                                          CallbackInfo ci) {
         TerrainCondition.end();
+    }
+
+    @Inject(method = "applyCarvers", at = @At("HEAD"))
+    private void mtm_worldgen$beginCarving(WorldGenRegion region, long seed, BiomeManager biomes, StructureFeatureManager structures,
+                                           ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
+        TerrainLogic logic = MtmGenerators.terrainLogic((ChunkGenerator) (Object) this);
+        if (logic != null) {
+            MtmCarving.begin(logic);
+        }
+    }
+
+    @Inject(method = "applyCarvers", at = @At("RETURN"))
+    private void mtm_worldgen$endCarving(WorldGenRegion region, long seed, BiomeManager biomes, StructureFeatureManager structures,
+                                         ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
+        MtmCarving.end();
     }
 
     /**
