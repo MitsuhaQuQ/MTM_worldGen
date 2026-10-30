@@ -64,7 +64,7 @@ final class SkeletonLayer {
     private final Fbm ridgeWarpZ;
     private final RidgedNoise texture;
     private final Fbm massifTexture;
-    private final Fbm surfaceDetail;
+    private final RidgedNoise gullies;
     private final Fbm foothills;
     private final Fbm plateauZone;
     private final Fbm plateauHeight;
@@ -103,7 +103,7 @@ final class SkeletonLayer {
         this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength);
         this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 4);
         this.massifTexture = new Fbm(Hashing.derive(seed, DETAIL_SALT + 1), 3, m.massifTextureWavelength);
-        this.surfaceDetail = new Fbm(Hashing.derive(seed, DETAIL_SALT + 2), 2, m.detailWavelength);
+        this.gullies = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT + 2), 3);
         this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
         this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
@@ -151,7 +151,6 @@ final class SkeletonLayer {
             double relief = (mountain[3] + openWeight * open) / (mountain[4] + openWeight);
             rugged = summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
         }
-        double detail = scale * m.detailHeight * mountainZone * surfaceDetail.sample(x, z);
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
@@ -160,7 +159,7 @@ final class SkeletonLayer {
         double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
         double rolling = scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
 
-        return land * (massif + peaks + rugged + detail + foothill + plateau + rolling);
+        return land * (massif + peaks + rugged + foothill + plateau + rolling);
     }
 
     /**
@@ -208,7 +207,8 @@ final class SkeletonLayer {
         // The bend keeps spurs from running ruler straight; it adds no rotation, so it cannot wind them into spirals
         double along = ((x - a.x) * sx + (z - a.z) * sz) / length + m.textureBend * massifTexture.sample(x, z);
         double across = ((x - a.x) * sz - (z - a.z) * sx) / length;
-        return texture.sample(along / m.textureWavelength, across / (m.textureWavelength * m.textureStretch));
+        return texture.sample(along / m.textureWavelength, across / (m.textureWavelength * m.textureStretch))
+                + m.gullyShare * (gullies.sample(along / m.gullyWavelength, across / (m.gullyWavelength * m.textureStretch)) - 0.5);
     }
 
     /** Height, foothill weight and summit weight of the ridge between two linked sites at a position. */

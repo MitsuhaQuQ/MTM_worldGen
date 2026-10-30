@@ -124,9 +124,9 @@ public final class WorldgenSettings {
         public double textureBend = 700.0;
         /** Wavelength of the texture on open massif land away from ridges. */
         public double massifTextureWavelength = 1400.0;
-        /** Height of the fine relief in mountain zones that keeps smooth slopes from showing contour-like block steps. */
-        public double detailHeight = 2.0;
-        public double detailWavelength = 64.0;
+        /** Strength of the fine gullies relative to the texture; they break smooth slopes into uneven block steps. */
+        public double gullyShare = 0.5;
+        public double gullyWavelength = 240.0;
         /** Share of the massif uplift the texture also applies to, so land between ridges is not a flat table. */
         public double massifTextureShare = 0.5;
         /** Mix between a rounded (0) and a sharp, concave (1) mountain cross section. */
@@ -214,6 +214,8 @@ public final class WorldgenSettings {
         /** Optional: wet lowland just above the sea. */
         public String[] swamp = {};
         public String[] highland = {"minecraft:forest"};
+        /** Optional: dry highland away from zone borders. */
+        public String[] dryHighland = {};
         public String[] alpine = {"minecraft:meadow"};
         public String[] snowPeak = {"minecraft:frozen_peaks"};
 
@@ -232,8 +234,13 @@ public final class WorldgenSettings {
             return this;
         }
 
+        BiomeZone withDryHighland(String[] dryHighland) {
+            this.dryHighland = dryHighland;
+            return this;
+        }
+
         String[][] lists() {
-            return new String[][]{ocean, deepOcean, beach, dry, medium, wet, swamp, highland, alpine, snowPeak};
+            return new String[][]{ocean, deepOcean, beach, dry, medium, wet, swamp, highland, dryHighland, alpine, snowPeak};
         }
     }
 
@@ -262,8 +269,8 @@ public final class WorldgenSettings {
         public BiomeZone tropical = new BiomeZone().with(
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
                 ids("desert", "badlands", "savanna"), ids("savanna", "sparse_jungle"), ids("jungle", "bamboo_jungle"),
-                ids("swamp"), ids("savanna_plateau", "wooded_badlands", "eroded_badlands", "windswept_savanna"),
-                ids("meadow"), ids("jagged_peaks"));
+                ids("swamp"), ids("savanna_plateau", "windswept_savanna"),
+                ids("meadow"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
         public BiomeZone temperate = new BiomeZone().with(
                 ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach", "stony_shore"),
                 ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
@@ -316,6 +323,8 @@ public final class WorldgenSettings {
         /** Fine temperature noise that dithers zone borders. */
         public double zoneJitterWavelength = 128.0;
         public double zoneJitterAmplitude = 0.03;
+        /** Temperature margin on each side of a zone border where dry biomes give way, about 300 blocks wide. */
+        public double zoneTransition = 0.05;
         public double humidityWavelength = 6144.0;
         /**
          * Coast distances in blocks mapped to {@link #continentalness}, piecewise linear. The default values pass
@@ -372,7 +381,8 @@ public final class WorldgenSettings {
         for (BiomeZone zone : List.of(biomes.tropical, biomes.temperate, biomes.cold, biomes.polar)) {
             String[][] lists = zone.lists();
             for (int i = 0; i < lists.length; i++) {
-                require(lists[i].length > 0 || lists[i] == zone.swamp, "biome lists must not be empty, except swamp");
+                require(lists[i].length > 0 || lists[i] == zone.swamp || lists[i] == zone.dryHighland,
+                        "biome lists must not be empty, except swamp and dryHighland");
             }
         }
         require(beaches.maxWidth > beaches.minWidth, "beaches.maxWidth must be above beaches.minWidth");

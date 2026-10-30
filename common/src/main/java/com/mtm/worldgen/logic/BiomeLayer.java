@@ -29,10 +29,13 @@ final class BiomeLayer {
      * @param coastDistance distance to the coast in blocks, positive inland
      * @param snowLine      local snow line height; zero or less means snow reaches the sea
      * @param humidity      humidity in [0, 1]
+     * @param zoneBorder    whether the position is close to a neighboring climate zone, where dry biomes such as
+     *                      desert and badlands give way so their strong colors do not meet the next zone head on
      */
     String surfaceBiome(double x, double z, ClimateLayer.Zone zone, double height, double coastDistance,
-                        double snowLine, double humidity) {
+                        double snowLine, double humidity, boolean zoneBorder) {
         double sea = settings.general.seaLevel - 1;
+        boolean dry = humidity < config.dryHumidity && !zoneBorder;
         WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
         if (height < sea) {
             return pick(sea - height > config.deepOceanDepth ? biomes.deepOcean : biomes.ocean, x, z);
@@ -48,13 +51,13 @@ final class BiomeLayer {
                 return pick(biomes.alpine, x, z);
             }
             if (height >= sea + config.highlandLine * (snowLine - sea)) {
-                return pick(biomes.highland, x, z);
+                return pick(dry && biomes.dryHighland.length > 0 ? biomes.dryHighland : biomes.highland, x, z);
             }
         }
         if (humidity >= config.wetHumidity && height < sea + config.swampMaxAboveSea && biomes.swamp.length > 0) {
             return pick(biomes.swamp, x, z);
         }
-        if (humidity < config.dryHumidity) {
+        if (dry) {
             return pick(biomes.dry, x, z);
         }
         return pick(humidity >= config.wetHumidity ? biomes.wet : biomes.medium, x, z);

@@ -6,7 +6,9 @@
   "mixins": [
     "MinecraftServerMixin",
     "NoiseBasedChunkGeneratorMixin",
-    "NoiseRouterDataMixin"
+    "NoiseRouterDataMixin",
+    "ServerLevelMixin",
+    "SnowAndFreezeFeatureMixin"
   ],
   "client": [],
   "injectors": {

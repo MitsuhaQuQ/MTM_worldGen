@@ -150,7 +150,7 @@ public final class TerrainLogic {
     public String sampleBiome(double x, double z) {
         double temperature = climate.temperature(x, z);
         return biomes.surfaceBiome(x, z, climate.zone(temperature), sampleSurfaceHeight(x, z), sampleCoastDistance(x, z),
-                sampleSnowLine(x, z), climate.humidity(x, z));
+                sampleSnowLine(x, z), climate.humidity(x, z), climate.nearZoneBorder(temperature));
     }
 
     /** Climate zone name of a position. */

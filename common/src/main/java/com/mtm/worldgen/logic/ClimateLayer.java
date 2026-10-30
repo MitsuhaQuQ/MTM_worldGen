@@ -74,6 +74,13 @@ final class ClimateLayer {
         return temperature < temperateEnd ? Zone.TEMPERATE : Zone.TROPICAL;
     }
 
+    /** Whether a temperature lies within the transition of a border between two zones. */
+    boolean nearZoneBorder(double temperature) {
+        double margin = config.zoneTransition;
+        return Math.abs(temperature - polarEnd) < margin || Math.abs(temperature - coldEnd) < margin
+                || Math.abs(temperature - temperateEnd) < margin;
+    }
+
     /** Humidity in [0, 1]. */
     double humidity(double x, double z) {
         double value = (humidity.sample(x, z) - humidityLow) / (humidityHigh - humidityLow);
