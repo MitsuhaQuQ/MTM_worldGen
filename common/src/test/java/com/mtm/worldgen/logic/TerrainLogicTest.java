@@ -377,6 +377,33 @@ class TerrainLogicTest {
         assertTrue(blocked <= mouths / 20, blocked + " of " + mouths + " river mouths end on land");
     }
 
+    /** Low land beside a big river is a plain within a few blocks of it, and never below it. */
+    @Test
+    void lowlandsBesideBigRiversArePlains() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        Random random = new Random(13);
+        List<Double> rises = new ArrayList<>();
+        for (int i = 0; i < 400000 && rises.size() < 1000; i++) {
+            int x = random.nextInt(32000) - 16000;
+            int z = random.nextInt(32000) - 16000;
+            RiverRegion.Hit river = logic.sampleRiver(x, z);
+            // Ground near the coast stays low by design, so that nothing closes off river mouths
+            if (river == null || river.level() < SETTINGS.general.seaLevel + SETTINGS.rivers.coastBlend + 4.0
+                    || river.width() < 100.0 || river.run() > 150.0 || river.run() <= 0.0
+                    || logic.sampleLandform(x, z) > river.level() + 15.0 || !Double.isNaN(logic.sampleWaterLevel(x, z))) {
+                continue;
+            }
+            rises.add(logic.sampleSurfaceHeight(x, z) - river.level());
+        }
+        Collections.sort(rises);
+        assertTrue(rises.size() > 100, "too few samples: " + rises.size());
+        double p95 = rises.get((int) (0.95 * (rises.size() - 1)));
+        double p05 = rises.get((int) (0.05 * (rises.size() - 1)));
+        System.out.println("plain rise above rivers p05 " + p05 + " p95 " + p95 + " of " + rises.size());
+        assertTrue(p95 <= SETTINGS.rivers.floodplainRise + SETTINGS.rivers.bankHeight + 1.0, "plains stand " + p95 + " above rivers");
+        assertTrue(p05 >= 0.0, "plains lie " + p05 + " below rivers");
+    }
+
     @Test
     void waterNeverRunsUphill() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);

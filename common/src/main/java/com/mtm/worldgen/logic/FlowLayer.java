@@ -26,9 +26,14 @@ final class FlowLayer {
         double height(double x, double z);
     }
 
+    interface UplandTest {
+        boolean isUpland(double x, double z);
+    }
+
     private final WorldgenSettings settings;
     private final WorldgenSettings.Rivers config;
     private final HeightSampler heights;
+    private final UplandTest uplands;
     private final double sea;
     /** Area of a routing cell in coarse cells, the unit of catchments. */
     private final int cellArea;
@@ -36,10 +41,11 @@ final class FlowLayer {
     private final long nodeSeed;
     private final RegionCache<float[]> tiles;
 
-    FlowLayer(long seed, WorldgenSettings settings, HeightSampler heights) {
+    FlowLayer(long seed, WorldgenSettings settings, HeightSampler heights, UplandTest uplands) {
         this.settings = settings;
         this.config = settings.rivers;
         this.heights = heights;
+        this.uplands = uplands;
         this.sea = settings.general.seaLevel - 1;
         int ratio = config.flowCellSize / settings.general.cellSize;
         this.cellArea = ratio * ratio;
@@ -50,17 +56,19 @@ final class FlowLayer {
 
     /**
      * Heights of one region's worth of routing cells, sampled at their river nodes so rivers meet the real ground
-     * there. The second half holds the same heights with route noise, which steers water but never sets its level.
+     * there. The second layer holds the same heights with route noise, which steers water but never sets its level,
+     * and the third marks uplands, where rivers can start.
      */
     private float[] tile(int tileX, int tileZ) {
         int size = settings.general.regionSize / config.flowCellSize;
-        float[] tile = new float[2 * size * size];
+        float[] tile = new float[3 * size * size];
         for (int z = 0; z < size; z++) {
             for (int x = 0; x < size; x++) {
                 double[] node = RiverLayer.node(nodeSeed, config, tileX * size + x, tileZ * size + z);
                 double height = heights.height(node[0], node[1]);
                 tile[z * size + x] = (float) height;
                 tile[(size + z) * size + x] = (float) (height < sea ? height : Math.max(sea, height + config.routeNoise * routeNoise.sample(node[0], node[1])));
+                tile[(2 * size + z) * size + x] = uplands.isUpland(node[0], node[1]) ? 1.0F : 0.0F;
             }
         }
         return tile;
@@ -73,8 +81,9 @@ final class FlowLayer {
         int reach = ceilDiv(config.flowLookAhead, config.flowCellSize);
         int radius = reach + 1;
         Grid grid = new Grid(originX - radius, originZ - radius, cells + 2 * radius);
-        int[] catchment = accumulate(grid, reach);
-        int[] nearby = accumulate(grid, reach / 2);
+        int[] catchment = accumulate(grid, reach, false);
+        int[] uplandCatchment = accumulate(grid, reach, true);
+        int[] nearby = accumulate(grid, reach / 2, false);
         int[] mainInflow = mainInflows(grid, nearby);
         int[] tributaries = countTributaries(grid, nearby, mainInflow, reach / 2,
                 ceilDiv(config.tributaryCells, cellArea), ceilDiv(config.trunkCells, cellArea));
@@ -95,7 +104,9 @@ final class FlowLayer {
                 inflows[target] = mainInflow[source] < 0 ? -1 : (byte) (7 - grid.direction[mainInflow[source]]);
                 regionCatchment[target] = catchment[source] * cellArea;
                 regionTributaries[target] = tributaries[source];
-                classes[target] = (byte) classify(regionCatchment[target], tributaries[source]).ordinal();
+                // Rivers start in hills and mountains: water that only ever fell on the plains forms none of its own
+                classes[target] = (byte) (uplandCatchment[source] * cellArea < config.streamCells ? FlowRegion.RiverClass.NONE
+                        : classify(regionCatchment[target], tributaries[source])).ordinal();
                 lakeLevels[target] = grid.filled[source] - grid.height[source] >= config.lakeMinDepth ? grid.filled[source] : Float.NaN;
                 waterLevels[target] = (float) Math.max(sea, grid.filled[source]);
             }
@@ -113,11 +124,15 @@ final class FlowLayer {
         return catchment >= config.streamCells ? FlowRegion.RiverClass.STREAM : FlowRegion.RiverClass.NONE;
     }
 
-    /** Land cells of the grid drain into every cell downstream of them, as far as reach cells from where they start. */
-    private int[] accumulate(Grid grid, int reach) {
+    /**
+     * Land cells of the grid drain into every cell downstream of them, as far as reach cells from where they start.
+     *
+     * @param uplandOnly count only the water that fell on hills and mountains
+     */
+    private int[] accumulate(Grid grid, int reach, boolean uplandOnly) {
         int[] catchment = new int[grid.height.length];
         for (int cell = 0; cell < catchment.length; cell++) {
-            if (grid.height[cell] >= sea) {
+            if (grid.height[cell] >= sea && (!uplandOnly || grid.upland[cell])) {
                 walk(grid, cell, cell, reach, catchment, 1);
             }
         }
@@ -179,6 +194,8 @@ final class FlowLayer {
         final float[] height;
         /** Height with route noise, which decides the order of the flood. */
         final float[] noisy;
+        /** Whether a river can start at a cell. */
+        final boolean[] upland;
         /** Water surface once depressions have filled up to their spill point. */
         final float[] filled;
         final byte[] direction;
@@ -190,6 +207,7 @@ final class FlowLayer {
             this.size = size;
             this.height = new float[size * size];
             this.noisy = new float[size * size];
+            this.upland = new boolean[size * size];
             this.filled = new float[size * size];
             this.direction = new byte[size * size];
             this.down = new int[size * size];
@@ -205,6 +223,7 @@ final class FlowLayer {
                     float[] tile = tiles.get(Math.floorDiv(cellX, tileSize), Math.floorDiv(cellZ, tileSize));
                     height[z * size + x] = tile[Math.floorMod(cellZ, tileSize) * tileSize + Math.floorMod(cellX, tileSize)];
                     noisy[z * size + x] = tile[(tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)];
+                    upland[z * size + x] = tile[(2 * tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)] > 0.5F;
                 }
             }
             route();

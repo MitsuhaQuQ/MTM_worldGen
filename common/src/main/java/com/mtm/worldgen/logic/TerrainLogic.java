@@ -53,7 +53,7 @@ public final class TerrainLogic {
     public TerrainLogic(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
-        this.skeleton = new SkeletonLayer(seed, settings);
+        this.skeleton = new SkeletonLayer(seed, settings, continents);
         this.climate = new ClimateLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
@@ -61,7 +61,7 @@ public final class TerrainLogic {
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
-        FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight);
+        FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand);
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
@@ -216,8 +216,23 @@ public final class TerrainLogic {
         }
         // Walls of a much higher or lower river nearby may disagree, but a river's banks always meet its own water
         double bank = river.level() + settings.rivers.bankHeight;
+        walled = flatten(river, walled, bank);
         double land = bank + (walled - bank) * smooth(river.run() / settings.rivers.valleyBankBlend);
         return seaFloor + (land - seaFloor) * smooth((ground - sea) / settings.rivers.coastBlend);
+    }
+
+    /**
+     * Lays low land near a river out as a plain just above it, raising what lies below the river and leaving hills and
+     * mountains beside it alone.
+     */
+    private double flatten(RiverRegion.Hit river, double land, double bank) {
+        double rise = land - bank;
+        if (rise <= 0.0) {
+            return land + (bank - land) * smooth(2.0 * river.floodplain());
+        }
+        double low = 1.0 - smooth(rise / settings.rivers.floodplainRelief);
+        double plain = bank + Math.min(rise, settings.rivers.floodplainRise);
+        return land + (plain - land) * smooth(2.0 * river.floodplain()) * low;
     }
 
     private static double smooth(double t) {
@@ -272,6 +287,11 @@ public final class TerrainLogic {
             lastFlow.set(flow);
         }
         return flow;
+    }
+
+    private boolean isUpland(double x, double z) {
+        double base = continents.height(continents.value(x, z));
+        return skeleton.isUpland(x, z, base - (settings.general.seaLevel - 1));
     }
 
     /**
@@ -433,7 +453,8 @@ public final class TerrainLogic {
                     int x = cellX * settings.general.cellSize + half;
                     int z = cellZ * settings.general.cellSize + half;
                     // Most far samples are open sea, and this rules them out without touching the region cache
-                    if (sampleContinentHeight(x, z) >= sea && isSpawnCell(cellX, cellZ, sea)) {
+                    if (sampleContinentHeight(x, z) >= sea && isSpawnCell(cellX, cellZ, sea)
+                            && sampleSurfaceHeight(x, z) >= sea + settings.spawn.minAboveSea && Double.isNaN(sampleWaterLevel(x, z))) {
                         return new BlockColumn(x, z);
                     }
                 }

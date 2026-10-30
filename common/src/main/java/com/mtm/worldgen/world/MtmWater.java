@@ -46,6 +46,7 @@ public final class MtmWater {
         if (!any) {
             return;
         }
+        clean(tops);
         smooth(tops);
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int bottom = chunk.getMinBuildHeight();
@@ -74,6 +75,33 @@ public final class MtmWater {
                         break;
                     }
                     chunk.setBlockState(pos, WATER, false);
+                }
+            }
+        }
+    }
+
+    /**
+     * Rounds the outline of the water: spikes one column wide go dry and notches one column wide fill up, because
+     * banks follow the outline block by block and would turn every such column into a sharp corner.
+     */
+    private static void clean(int[] tops) {
+        int[] source = Arrays.copyOf(tops, tops.length);
+        for (int z = 1; z < SPAN - 1; z++) {
+            for (int x = 1; x < SPAN - 1; x++) {
+                int wet = 0;
+                int highest = DRY;
+                for (int d = 0; d < 4; d++) {
+                    int value = neighbor(source, x, z, d);
+                    if (value != DRY) {
+                        wet++;
+                        highest = Math.max(highest, value);
+                    }
+                }
+                int index = z * SPAN + x;
+                if (source[index] != DRY && wet <= 1) {
+                    tops[index] = DRY;
+                } else if (source[index] == DRY && wet >= 3) {
+                    tops[index] = highest;
                 }
             }
         }

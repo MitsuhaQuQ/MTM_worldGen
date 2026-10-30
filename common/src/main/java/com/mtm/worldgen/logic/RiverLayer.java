@@ -99,14 +99,15 @@ final class RiverLayer {
 
         double[] startSize = size(around, regionX, regionZ, flow.riverClass(lx, lz), flow.catchment(lx, lz), cellX, cellZ);
         FlowRegion.RiverClass nextClass = nextFlow.riverClass(nextLx, nextLz);
-        // A side branch keeps its own size into the confluence, or it would flare out to the width of the main river
+        // A side branch opens only a little into the confluence: enough for a rounded mouth, not the width of the main river
         boolean mainStem = nextFlow.hasInflow(nextLx, nextLz) && nextX + nextFlow.inflowX(nextLx, nextLz) == cellX
                 && nextZ + nextFlow.inflowZ(nextLx, nextLz) == cellZ;
-        double[] endSize = nextClass == FlowRegion.RiverClass.NONE || !mainStem ? startSize
+        double[] endSize = nextClass == FlowRegion.RiverClass.NONE ? startSize
+                : !mainStem ? new double[]{config.mouthFlare * startSize[0], startSize[1]}
                 : size(around, regionX, regionZ, nextClass, nextFlow.catchment(nextLx, nextLz), nextX, nextZ);
 
-        double startLevel = flow.waterLevel(lx, lz);
-        double endLevel = nextFlow.waterLevel(nextLx, nextLz);
+        double startLevel = riverLevel(around, regionX, regionZ, cellX, cellZ);
+        double endLevel = riverLevel(around, regionX, regionZ, nextX, nextZ);
 
         long hash = Hashing.derive(Hashing.hash(meanderSeed, cellX, cellZ), Hashing.hash(meanderSeed, nextX, nextZ));
         double phase1 = 2.0 * Math.PI * Hashing.unit(hash);
@@ -270,6 +271,33 @@ final class RiverLayer {
         double[] position = node(cellX, cellZ);
         double variation = Math.max(-1.0, Math.min(1.0, 2.0 * widthNoise.sample(position[0], position[1])));
         return new double[]{spread * width * (1.0 + config.widthVariation * variation), depth};
+    }
+
+    /**
+     * Water level at a node. Rivers settle towards the sea over their last nodes: the routing grid alone would keep
+     * them up on the coastal land and drop them to the sea in a single edge, as a tilted sheet of water.
+     */
+    private double riverLevel(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
+        double level = flow.waterLevel(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells));
+        double sea = settings.general.seaLevel - 1;
+        int x = cellX;
+        int z = cellZ;
+        for (int step = 0; step < config.estuaryLength; step++) {
+            FlowRegion here = flowAt(around, regionX, regionZ, x, z);
+            if (here == null) {
+                return level;
+            }
+            int lx = Math.floorMod(x, cells);
+            int lz = Math.floorMod(z, cells);
+            if (!here.flows(lx, lz)) {
+                double share = (double) step / config.estuaryLength;
+                return here.waterLevel(lx, lz) > sea + 1.0 ? level : sea + (level - sea) * share * share;
+            }
+            x += here.downstreamX(lx, lz);
+            z += here.downstreamZ(lx, lz);
+        }
+        return level;
     }
 
     private double widthFactor(double slope) {

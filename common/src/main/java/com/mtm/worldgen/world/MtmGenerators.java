@@ -133,8 +133,8 @@ public final class MtmGenerators {
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
                         SurfaceRules.sequence(
                                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
-                // Their vanilla surfaces scatter stone patches regardless of slope, which reads as rock pasted on hills
-                SurfaceRules.ifTrue(SurfaceRules.isBiome(Biomes.WINDSWEPT_HILLS, Biomes.WINDSWEPT_SAVANNA), SurfaceRules.sequence(
+                // Their vanilla surfaces scatter stone and gravel patches regardless of slope, which reads as rock pasted on hills
+                SurfaceRules.ifTrue(SurfaceRules.isBiome(Biomes.WINDSWEPT_HILLS, Biomes.WINDSWEPT_SAVANNA, Biomes.WINDSWEPT_GRAVELLY_HILLS), SurfaceRules.sequence(
                         SurfaceRules.ifTrue(SurfaceRules.ON_FLOOR, SurfaceRules.ifTrue(SurfaceRules.waterBlockCheck(-1, 0),
                                 SurfaceRules.state(Blocks.GRASS_BLOCK.defaultBlockState()))),
                         SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.DIRT.defaultBlockState())))),

@@ -12,13 +12,18 @@ import java.util.Map;
  * seed + block coordinates, evaluated per block column so ridges and peaks stay sharp.
  *
  * <ul>
- *   <li>Mountain sites sit on a jittered grid inside low-frequency orogeny zones. Sites link to the neighbor best aligned with a low-frequency
+ *   <li>One low-frequency field divides land into three tiers, low to high: plains, hills and mountains. Being
+ *       continuous, it puts hills between plains and mountains by itself, and it also rises into hills alone.
+ *       It is held down along coasts, so hills stand in for mountains there.</li>
+ *   <li>Mountain sites sit on a jittered grid inside the mountain tier. Sites link to the neighbor best aligned with a low-frequency
  *       orientation field, so neighboring ranges run roughly parallel and chain into long ridges.</li>
  *   <li>Mountains stand on a broad massif uplift of their zone. Cross sections are S-shaped, with the half-width
  *       derived from the slope limit; overlapping ridges merge through a smooth maximum, and a ridged texture
  *       sampled through the same warp as the ridges adds spurs and gullies.</li>
+ *   <li>Ranges blend between two styles along their length: steep igneous and gentle wind-worn.</li>
  *   <li>Foothills form a belt around every range and peak.</li>
- *   <li>Plateaus are raised table lands in their own zones; hills cover a further zone with rolling terrain.</li>
+ *   <li>Plateaus are raised table lands in their own zones. Isolated peaks stand where hills meet mountains, and
+ *       rounded dome hills inside the hill tier.</li>
  * </ul>
  * Every profile's worst-case grade is derived from the configured slope limits.
  */
@@ -31,9 +36,13 @@ final class SkeletonLayer {
     private static final long FOOTHILL_SALT = 0x464F4F54L;
     private static final long PLATEAU_ZONE_SALT = 0x504C4154L;
     private static final long PLATEAU_HEIGHT_SALT = 0x504C4854L;
-    private static final long HILLS_ZONE_SALT = 0x48494C4C5AL;
     private static final long HILLS_SALT = 0x48494C4CL;
-    private static final long PLAINS_SALT = 0x504C41494EL;
+    private static final long ISOLATED_SALT = 0x49534F4CL;
+    private static final long STYLE_SALT = 0x5354594C45L;
+    /** Style field values at which a range is fully eroded and fully igneous. */
+    private static final double STYLE_RANGE = 0.3;
+    /** Cross section used to relate a range's width at half height to its full width. */
+    private static final double TYPICAL_SHARPNESS = 0.15;
 
     /**
      * Sites searched in each direction. A link spans up to about 2.8 cells (diagonal neighbor plus jitter), so
@@ -69,9 +78,10 @@ final class SkeletonLayer {
     private final Fbm foothills;
     private final Fbm plateauZone;
     private final Fbm plateauHeight;
-    private final Fbm hillsZone;
     private final Fbm hills;
-    private final Fbm plainsZone;
+    private final Fbm style;
+    private final ContinentLayer continents;
+    private final long isolatedSeed;
     private final WorldgenSettings settings;
     private final WorldgenSettings.Mountains m;
     private final WorldgenSettings.Plateaus plateaus;
@@ -87,14 +97,16 @@ final class SkeletonLayer {
     private final double zoneHigh;
     private final double plateauLow;
     private final double plateauHigh;
-    private final double hillsLow;
-    private final double hillsHigh;
     private final double plainsLow;
     private final double plainsHigh;
+    private final double hillsMiddle;
     private final ThreadLocal<Map<Long, Site>> sites = ThreadLocal.withInitial(HashMap::new);
+    private final ThreadLocal<Map<Long, Isolated>> isolated = ThreadLocal.withInitial(HashMap::new);
 
-    SkeletonLayer(long seed, WorldgenSettings settings) {
+    SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents) {
         this.settings = settings;
+        this.continents = continents;
+        this.isolatedSeed = Hashing.derive(seed, ISOLATED_SALT);
         this.m = settings.mountains;
         this.plateaus = settings.plateaus;
         this.hillSettings = settings.hills;
@@ -111,24 +123,20 @@ final class SkeletonLayer {
         this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
         this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
-        this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, hillSettings.zoneWavelength);
         this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
-        this.plainsZone = new Fbm(Hashing.derive(seed, PLAINS_SALT), 3, settings.plains.zoneWavelength);
+        this.style = new Fbm(Hashing.derive(seed, STYLE_SALT), 2, m.styleWavelength);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
         NoiseStats zoneStats = new NoiseStats(zone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.zoneLow = zoneStats.quantile(1.0 - m.zoneCoverage - m.zoneFade);
         this.zoneHigh = zoneStats.quantile(1.0 - m.zoneCoverage + m.zoneFade);
+        this.plainsLow = zoneStats.quantile(settings.plains.coverage - settings.plains.fade / 2.0);
+        this.plainsHigh = zoneStats.quantile(settings.plains.coverage + settings.plains.fade / 2.0);
+        this.hillsMiddle = zoneStats.quantile(settings.plains.coverage + 0.5 * (1.0 - settings.plains.coverage - m.zoneCoverage));
         NoiseStats plateauStats = new NoiseStats(plateauZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
         this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
-        NoiseStats plainsStats = new NoiseStats(plainsZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
-        this.plainsLow = plainsStats.quantile(1.0 - settings.plains.coverage - settings.plains.fade / 2.0);
-        this.plainsHigh = plainsStats.quantile(1.0 - settings.plains.coverage + settings.plains.fade / 2.0);
-        NoiseStats hillsStats = new NoiseStats(hillsZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
-        this.hillsLow = hillsStats.quantile(1.0 - hillSettings.coverage - hillSettings.fade / 2.0);
-        this.hillsHigh = hillsStats.quantile(1.0 - hillSettings.coverage + hillSettings.fade / 2.0);
     }
 
     /**
@@ -145,8 +153,10 @@ final class SkeletonLayer {
             }
             return 0.0;
         }
-        double plain = plainWeight(x, z);
-        double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * (1.0 - plain);
+        double tier = tier(x, z, baseAboveSea);
+        double mountainZone = smoothstep(zoneLow, zoneHigh, tier);
+        double plain = 1.0 - smoothstep(plainsLow, plainsHigh, tier);
+        double hilly = (1.0 - plain) * (1.0 - mountainZone);
         double openLand = 1.0 - plain * (1.0 - settings.plains.reliefShare);
         double massif = scale * m.massifHeight * mountainZone;
         // Warp the lookup so ridges between sites curve instead of running dead straight
@@ -163,25 +173,95 @@ final class SkeletonLayer {
             openWeight *= openWeight;
             double open = 0.5 + 0.5 * massifTexture.sample(wx, wz);
             double relief = (mountain[3] + openWeight * open) / (mountain[4] + openWeight);
-            rugged = summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
+            rugged = mix(m.erodedTexture, m.igneousTexture, style(wx, wz)) * summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
         }
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
         double plateau = openLand * scale * plateauWeight * (plateaus.minHeight + (plateaus.maxHeight - plateaus.minHeight) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
 
-        double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
-        double rolling = openLand * scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
+        double rolling = scale * hillSettings.height * (hilly + settings.plains.reliefShare * plain) * (0.5 + 0.5 * hills.sample(x, z));
 
         if (texture != null) {
             texture[0] = land * rugged;
         }
-        return land * (massif + peaks + foothill + plateau + rolling);
+        return land * (massif + peaks + foothill + plateau + rolling + isolatedHeight(x, z));
     }
 
-    /** How far a position lies inside a great plain, from 0 to 1. */
-    private double plainWeight(double x, double z) {
-        return smoothstep(plainsLow, plainsHigh, plainsZone.sample(x, z));
+    /** Whether a position lies in the hill or mountain tier, where rivers can start. */
+    boolean isUpland(double x, double z, double baseAboveSea) {
+        return tier(x, z, baseAboveSea) >= plainsHigh;
+    }
+
+    /**
+     * The tier field at a position: low values are plains, middle ones hills, high ones mountains. Near the coast it
+     * is held down to the middle of the hills, which turns mountains into hills and leaves plains as they are.
+     */
+    private double tier(double x, double z, double baseAboveSea) {
+        double value = zone.sample(x, z);
+        if (value <= hillsMiddle) {
+            return value;
+        }
+        double inland = smoothstep(0.0, m.coastBand, continents.inlandDistance(baseAboveSea));
+        return hillsMiddle + inland * (value - hillsMiddle);
+    }
+
+    /** Height of the isolated peaks and dome hills around a position. */
+    private double isolatedHeight(double x, double z) {
+        WorldgenSettings.Isolated config = settings.isolated;
+        int cellX = (int) Math.floor(x / config.spacing);
+        int cellZ = (int) Math.floor(z / config.spacing);
+        double total = 0.0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Isolated hill = isolated(cellX + dx, cellZ + dz);
+                if (hill.height > 0.0) {
+                    double u = Math.hypot(x - hill.x, z - hill.z) / hill.radius;
+                    if (u < 1.0) {
+                        total += hill.height * (hill.peak ? (1.0 - u) * (1.0 - u) : 0.5 + 0.5 * Math.cos(Math.PI * u));
+                    }
+                }
+            }
+        }
+        return total;
+    }
+
+    private Isolated isolated(int cellX, int cellZ) {
+        Map<Long, Isolated> cache = isolated.get();
+        long key = ((long) cellX << 32) | (cellZ & 0xFFFFFFFFL);
+        Isolated hill = cache.get(key);
+        if (hill == null) {
+            if (cache.size() >= SITE_CACHE_LIMIT) {
+                cache.clear();
+            }
+            hill = createIsolated(cellX, cellZ);
+            cache.put(key, hill);
+        }
+        return hill;
+    }
+
+    private Isolated createIsolated(int cellX, int cellZ) {
+        WorldgenSettings.Isolated config = settings.isolated;
+        long hash = Hashing.hash(isolatedSeed, cellX, cellZ);
+        double x = (cellX + 0.5 + 0.7 * (Hashing.unit(hash) - 0.5)) * config.spacing;
+        double z = (cellZ + 0.5 + 0.7 * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * config.spacing;
+        double roll = Hashing.unit(Hashing.derive(hash, 2));
+        double size = Hashing.unit(Hashing.derive(hash, 3));
+        double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
+        if (base <= settings.general.coastFadeHeight) {
+            return new Isolated(x, z, 0.0, 1.0, false);
+        }
+        double tier = tier(x, z, base);
+        if (tier >= hillsMiddle && tier < zoneHigh) {
+            if (roll < config.peakChance) {
+                double height = scale * (config.peakMin + size * (config.peakMax - config.peakMin));
+                return new Isolated(x, z, height, config.peakSpread * height, true);
+            }
+        } else if (tier >= plainsHigh && tier < hillsMiddle && roll < config.domeChance) {
+            double height = scale * (config.domeMin + size * (config.domeMax - config.domeMin));
+            return new Isolated(x, z, height, config.domeSpread * height, false);
+        }
+        return new Isolated(x, z, 0.0, 1.0, false);
     }
 
     /**
@@ -245,9 +325,11 @@ final class SkeletonLayer {
         double height = crest * ridgeFactor(x, z);
         // The profile starts at the edge of the summit band, leaving the band itself at crest height
         double slopeDistance = Math.max(0.0, distance - 0.5 * m.summitWidth);
-        double u = slopeDistance / halfWidth(height, a.width + t * (b.width - a.width));
+        double style = a.style + t * (b.style - a.style);
+        double sharpness = mix(m.erodedSharpness, m.igneousSharpness, style);
+        double u = slopeDistance / halfWidth(height, a.width + t * (b.width - a.width), sharpness, style);
         double summit = 1.0 - smoothstep(0.0, SUMMIT_FADE, u);
-        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax), summit, distance, height};
+        return new double[]{profile(u, sharpness) * height, foothillBelt(u) * crest / (scale * m.peakMax), summit, distance, height};
     }
 
     private double ridgeFactor(double x, double z) {
@@ -258,9 +340,9 @@ final class SkeletonLayer {
      * Base half-width of a mountain whose width at half height is the given value, widened if needed so that
      * {@link #profile}'s steepest grade, at most (1.5 + 0.5 sharpness) H / W, stays at the mountain grade.
      */
-    private double halfWidth(double height, double width) {
+    private double halfWidth(double height, double width, double sharpness, double style) {
         double fromWidth = 0.5 * (width - m.summitWidth) / halfHeightU;
-        double fromSlope = (1.5 + 0.5 * m.crestSharpness) * height / mountainGrade;
+        double fromSlope = (1.5 + 0.5 * sharpness) * height / (mountainGrade * mix(m.erodedGrade, 1.0, style));
         return Math.max(fromWidth, fromSlope);
     }
 
@@ -270,7 +352,7 @@ final class SkeletonLayer {
         double high = 1.0;
         for (int i = 0; i < 32; i++) {
             double mid = 0.5 * (low + high);
-            if (profile(mid) > 0.5) {
+            if (profile(mid, TYPICAL_SHARPNESS) > 0.5) {
                 low = mid;
             } else {
                 high = mid;
@@ -283,13 +365,13 @@ final class SkeletonLayer {
      * Cross section mixing an S curve (rounded crest, steepest at mid slope, grade 1.5 H / W) with a concave curve
      * (sharp crest, steepest at the top, grade 2 H / W). Both flatten toward the foot.
      */
-    private double profile(double u) {
+    private double profile(double u, double sharpness) {
         if (u >= 1.0) {
             return 0.0;
         }
         double rounded = 1.0 - u * u * (3.0 - 2.0 * u);
         double sharp = (1.0 - u) * (1.0 - u);
-        return rounded + m.crestSharpness * (sharp - rounded);
+        return rounded + sharpness * (sharp - rounded);
     }
 
     /**
@@ -334,14 +416,18 @@ final class SkeletonLayer {
         long hash = Hashing.hash(siteSeed, cellX, cellZ);
         double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * m.siteSpacing;
         double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
-        double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * (1.0 - plainWeight(x, z));
+        double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
+        double zoneWeight = smoothstep(zoneLow, zoneHigh, tier(x, z, base));
         if (zoneWeight < m.siteMinZone) {
-            return new Site(x, z, NONE, 0.0, 0.0, new Site[0]);
+            return new Site(x, z, NONE, 0.0, 0.0, 0.0, new Site[0]);
         }
         double strength = 0.4 + 0.6 * zoneWeight;
         double height = scale * strength * (m.peakMin + (m.peakMax - m.peakMin) * Hashing.unit(Hashing.derive(hash, 2)));
         double width = m.widthMin + (m.widthMax - m.widthMin) * Hashing.unit(Hashing.derive(hash, 3));
-        return new Site(x, z, RANGE, height, width, new Site[0]);
+        double style = style(x, z);
+        height *= mix(m.erodedHeight, m.igneousHeight, style);
+        width *= mix(m.erodedWidth, m.igneousWidth, style);
+        return new Site(x, z, RANGE, height, width, style, new Site[0]);
     }
 
     /**
@@ -373,7 +459,16 @@ final class SkeletonLayer {
             }
         }
         Site[] links = ahead != null ? new Site[]{ahead} : new Site[0];
-        return new Site(site.x, site.z, site.type, site.height, site.width, links);
+        return new Site(site.x, site.z, site.type, site.height, site.width, site.style, links);
+    }
+
+    /** How igneous a position is: 0 for smooth wind-worn ranges, 1 for steep igneous ones, blending between them. */
+    private double style(double x, double z) {
+        return smoothstep(-STYLE_RANGE, STYLE_RANGE, style.sample(x, z));
+    }
+
+    private static double mix(double from, double to, double t) {
+        return from + t * (to - from);
     }
 
     private static double smoothstep(double edge0, double edge1, double value) {
@@ -381,6 +476,9 @@ final class SkeletonLayer {
         return t * t * (3.0 - 2.0 * t);
     }
 
-    private record Site(double x, double z, int type, double height, double width, Site[] links) {
+    private record Isolated(double x, double z, double height, double radius, boolean peak) {
+    }
+
+    private record Site(double x, double z, int type, double height, double width, double style, Site[] links) {
     }
 }

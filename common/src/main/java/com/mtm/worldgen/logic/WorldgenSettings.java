@@ -38,6 +38,7 @@ public final class WorldgenSettings {
     public final Surface surface = new Surface();
     public final Spawn spawn = new Spawn();
     public final Plains plains = new Plains();
+    public final Isolated isolated = new Isolated();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -101,9 +102,12 @@ public final class WorldgenSettings {
     }
 
     public static final class Mountains {
-        public double zoneWavelength = 7168.0;
-        /** Fraction of the world inside orogeny zones, before great plains clear part of them. */
-        public double zoneCoverage = 0.60;
+        /** Wavelength of the tier field that divides land into plains, hills and mountains. */
+        public double zoneWavelength = 11264.0;
+        /** Share of the world in the mountain tier. */
+        public double zoneCoverage = 0.30;
+        /** Within this many blocks of the coast, mountains give way to hills. */
+        public double coastBand = 2400.0;
         public double zoneFade = 0.05;
         public double siteSpacing = 1536.0;
         public double siteJitter = 0.8;
@@ -138,8 +142,21 @@ public final class WorldgenSettings {
         public double gullyWavelength = 240.0;
         /** Share of the massif uplift the texture also applies to, so land between ridges is not a flat table. */
         public double massifTextureShare = 0.5;
-        /** Mix between a rounded (0) and a sharp, concave (1) mountain cross section. */
-        public double crestSharpness = 0.15;
+        /** Ranges blend between a steep igneous and a gentle wind-worn style, patch by patch at this wavelength. */
+        public double styleWavelength = 6144.0;
+        /** Height and width of a range relative to its nominal size, by style. */
+        public double igneousHeight = 1.1;
+        public double erodedHeight = 0.75;
+        public double igneousWidth = 0.8;
+        public double erodedWidth = 1.6;
+        /** Mix between a rounded (0) and a sharp, concave (1) cross section, by style. */
+        public double igneousSharpness = 0.6;
+        public double erodedSharpness = 0.0;
+        /** Strength of the ridge texture, by style. */
+        public double igneousTexture = 1.3;
+        public double erodedTexture = 0.5;
+        /** Steepest slope of wind-worn ranges, as a share of the mountain slope limit. */
+        public double erodedGrade = 0.6;
         /** Width in blocks of the gentle band along the crest, centered on the ridge line. */
         public double summitWidth = 120.0;
         /** How much the texture is reduced on the summit band, from 0 (not at all) to 1 (fully). */
@@ -155,13 +172,12 @@ public final class WorldgenSettings {
         public double foothillWavelength = 512.0;
     }
 
-    /** Great plains: wide lowlands for big cities, where mountains and most relief give way. */
+    /** The plains tier: wide lowlands for big cities. */
     public static final class Plains {
-        public double zoneWavelength = 14336.0;
-        /** Fraction of the world in great plains. */
+        /** Share of the world in the plains tier. */
         public double coverage = 0.33;
         public double fade = 0.06;
-        /** Share of hills and plateaus that remains in great plains. */
+        /** Share of hills and plateaus that remains on plains. */
         public double reliefShare = 0.2;
     }
 
@@ -173,11 +189,24 @@ public final class WorldgenSettings {
         public double maxHeight = 80.0;
     }
 
+    /** Isolated peaks where hills meet mountains, and dome hills inside the hill tier. */
+    public static final class Isolated {
+        /** One candidate per square of this size, in blocks. */
+        public double spacing = 2048.0;
+        public double peakChance = 0.35;
+        public double peakMin = 50.0;
+        public double peakMax = 90.0;
+        /** Base radius as a multiple of the height. */
+        public double peakSpread = 2.2;
+        public double domeChance = 0.3;
+        public double domeMin = 14.0;
+        public double domeMax = 34.0;
+        public double domeSpread = 6.0;
+    }
+
+    /** The hill tier, between plains and mountains. */
     public static final class Hills {
-        public double zoneWavelength = 5120.0;
-        public double coverage = 0.35;
-        public double fade = 0.15;
-        public double height = 26.0;
+        public double height = 44.0;
         public double wavelength = 640.0;
     }
 
@@ -291,16 +320,16 @@ public final class WorldgenSettings {
                 ids("swamp"), ids("savanna_plateau", "windswept_savanna"),
                 ids("meadow"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
         public BiomeZone temperate = new BiomeZone().with(
-                ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach", "stony_shore"),
+                ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach"),
                 ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
                 ids("dark_forest", "old_growth_birch_forest"), ids("swamp"),
                 ids("windswept_forest", "windswept_hills", "forest"),
                 ids("meadow"), ids("frozen_peaks", "jagged_peaks"));
         public BiomeZone cold = new BiomeZone().with(
-                ids("cold_ocean"), ids("deep_cold_ocean"), ids("stony_shore", "beach"),
-                ids("taiga", "windswept_gravelly_hills"), ids("taiga", "old_growth_spruce_taiga"),
+                ids("cold_ocean"), ids("deep_cold_ocean"), ids("beach"),
+                ids("taiga", "snowy_taiga"), ids("taiga", "old_growth_spruce_taiga"),
                 ids("old_growth_pine_taiga", "old_growth_spruce_taiga"), new String[0],
-                ids("grove", "windswept_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes"));
+                ids("grove", "windswept_hills", "windswept_gravelly_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes"));
         public BiomeZone polar = new BiomeZone().with(
                 ids("frozen_ocean"), ids("deep_frozen_ocean"), ids("snowy_beach"),
                 ids("snowy_plains", "ice_spikes"), ids("snowy_plains", "snowy_taiga"), ids("snowy_taiga", "grove"),
@@ -340,7 +369,7 @@ public final class WorldgenSettings {
         public int flowCellSize = 256;
         /** How far upstream of a cell catchments reach, in blocks. */
         public int flowLookAhead = 32768;
-        public int streamCells = 20;
+        public int streamCells = 64;
         public int tributaryCells = 150;
         public int trunkCells = 1000;
         /** A trunk with more tributaries than this is a major trunk. */
@@ -360,7 +389,11 @@ public final class WorldgenSettings {
         /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
         public int queryReach = 768;
         /** Rivers vary by this fraction of their width. */
+        /** Nodes before the sea over which rivers settle down to sea level, so that they do not fall into it. */
+        public int estuaryLength = 5;
         public double widthVariation = 0.1;
+        /** A side branch widens by this factor over its last edge, rounding the corners where it meets the main river. */
+        public double mouthFlare = 1.6;
         /** Distance over which a river's width wanders along its length. */
         public double widthWavelength = 2048.0;
         /** Rivers on a slope of at most gentleRiverSlope are plainWidthFactor times their base width, those at
@@ -391,6 +424,13 @@ public final class WorldgenSettings {
         public double valleyWallMaxGrade = 0.9;
         /** Beyond the valley floor, land leaves the river's own bank height over this many blocks. */
         public double valleyBankBlend = 96.0;
+        /** Floodplains flatten low land beside rivers: this many blocks wide, plus this many per block of river width. */
+        public double floodplainBase = 64.0;
+        public double floodplainPerWidth = 5.0;
+        /** Plains stay within this many blocks above the river. */
+        public double floodplainRise = 5.0;
+        /** Land this far above the river is no plain and stays as it is, however close. */
+        public double floodplainRelief = 40.0;
         /** River banks fade out over this many blocks of land height above the sea. */
         public double coastBlend = 6.0;
         /** Ridge texture fades in over this many blocks from a valley floor, plus this many per block of river width. */
@@ -472,7 +512,7 @@ public final class WorldgenSettings {
         require(mountains.summitWidth >= 0.0 && mountains.summitWidth < mountains.widthMin,
                 "mountains.summitWidth must be below mountains.widthMin");
         require(mountains.zoneCoverage > 0.0 && mountains.zoneCoverage < 1.0, "mountains.zoneCoverage must be in (0, 1)");
-        require(plains.coverage >= 0.0 && plains.coverage < 1.0, "plains.coverage must be in [0, 1)");
+        require(plains.coverage >= 0.0 && plains.coverage + mountains.zoneCoverage < 1.0, "plains.coverage plus mountains.zoneCoverage must leave room for hills");
         require(slopes.plains > 0.0 && slopes.hills > 0.0 && slopes.plateau > 0.0 && slopes.mountain > 0.0,
                 "slopes must be positive");
         require(climate.tropicalShare + climate.temperateShare + climate.coldShare < 1.0,

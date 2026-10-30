@@ -11,9 +11,10 @@ public final class RiverRegion {
      * Rivers around a position. Distance, width and depth are those of the river whose channel the position is
      * deepest in. The water level is a blend of all rivers in reach, weighted by closeness, so it does not jump
      * between two rivers. Land must stay between low and high, the valley walls of all rivers in reach, and keeps
-     * this share of its ridge texture. Run is the distance from the nearest valley floor.
+     * this share of its ridge texture. Run is the distance from the nearest valley floor,
+     * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1.
      */
-    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run) {
+    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain) {
         public double halfWidth(double minimumWidth) {
             return 0.5 * Math.max(width, minimumWidth);
         }
@@ -71,20 +72,26 @@ public final class RiverRegion {
         double low = -Double.MAX_VALUE;
         double high = Double.MAX_VALUE;
         double texture = 1.0;
+        double floodplain = 0.0;
         for (int segment : index[bucketZ * buckets + bucketX]) {
             int s = segment * STRIDE;
             double dx = segments[s + 2] - segments[s];
             double dz = segments[s + 3] - segments[s + 1];
             double t = Math.max(0.0, Math.min(1.0, ((x - segments[s]) * dx + (z - segments[s + 1]) * dz) / (dx * dx + dz * dz)));
-            double distance = Math.hypot(x - segments[s] - t * dx, z - segments[s + 1] - t * dz);
-            if (distance > reach) {
+            double offsetX = x - segments[s] - t * dx;
+            double offsetZ = z - segments[s + 1] - t * dz;
+            double squared = offsetX * offsetX + offsetZ * offsetZ;
+            if (squared > reach * reach) {
                 continue;
             }
+            double distance = Math.sqrt(squared);
             double width = segments[s + 4] + t * (segments[s + 5] - segments[s + 4]);
             double level = segments[s + 8] + t * (segments[s + 9] - segments[s + 8]);
             double half = 0.5 * Math.max(width, config.minChannelWidth);
             double run = Math.max(0.0, distance - config.valleyFloorFactor * half);
             double wall = wall(run);
+            double plainWidth = Math.min(config.floodplainBase + config.floodplainPerWidth * width, reach - config.valleyFloorFactor * half);
+            floodplain = Math.max(floodplain, 1.0 - smooth(run / plainWidth));
             nearestRun = Math.min(nearestRun, run);
             // The fade has to end inside the reach, or the texture would jump where a river drops out of the query
             double fade = Math.min(config.textureFadeBase + config.textureFadePerWidth * width, reach - config.valleyFloorFactor * half);
@@ -104,7 +111,7 @@ public final class RiverRegion {
                 bestDepth = segments[s + 6] + t * (segments[s + 7] - segments[s + 6]);
             }
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, levelSum / weightSum, low, high, texture, nearestRun);
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, levelSum / weightSum, low, high, texture, nearestRun, floodplain);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */
