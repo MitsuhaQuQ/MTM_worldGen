@@ -37,6 +37,37 @@ Generation only depends on the seed, the coordinates and the settings of the wor
 
 Not done yet: delta and coast types, islands, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds. Rivers do not freeze yet.
 
+## How it works
+
+The mod keeps vanilla's chunk generator and replaces what it reads. Custom density functions tell it where the ground is, a custom biome source assigns biomes, and a few mixins add what density cannot express, such as water above sea level. Vanilla's surface rules, carvers, features and structures then run as usual.
+
+### Terrain as a function of position
+
+Everything is computed from the seed and block coordinates, without depending on what was generated before. That is what makes terrain independent of exploration order and thread timing, and identical across loaders. It also means neighboring areas always agree, so large-scale features need no stitching at borders. Logic regions of 4096 by 4096 blocks are only a cache of these results, not boundaries.
+
+Height is built up in layers, each only depending on the ones before it:
+
+1. **Continents.** Jittered Voronoi plates are grouped into landmasses, and a value that rises away from plate borders gives the coastlines, warped by noise. The land threshold is a per-seed quantile, so the ocean share holds for every seed.
+2. **Climate.** A continuous temperature field is cut into zones in order, so tropical and cold zones can never touch. A separate field gives humidity.
+3. **Tiers.** One low-frequency field divides land into plains, hills and mountains by quantile. It is capped near coasts, which turns mountains into hills there.
+4. **Mountains.** Sites on a jittered grid link along a low-frequency direction field into winding ridge chains. A cross-section profile around each ridge gives the mountain body, with its shape and width derived from the slope limit, and a smooth maximum merges overlapping ridges. A ridged texture sampled in the frame of the ridge adds spurs and gullies that run down the flanks.
+5. **Drainage.** See below.
+6. **Surface and biomes.** Snow lines, bare rock, beaches and biomes follow from height, slope, climate and humidity.
+
+### Rivers and lakes
+
+Rivers are routed on a sparse grid with 256 block cells, in a window reaching 32768 blocks around each region:
+
+- **Routing.** A priority flood runs inland from the sea, always continuing from the lowest water level reached so far. Each cell drains to the cell that reached it, so depressions fill up to their spill point and every cell finds a way out. Filled cells become lakes.
+- **Size.** Catchment is counted along the routes, and tributaries are counted along each trunk to find major trunks. Water that never touched hills or mountains forms no river.
+- **Courses.** Each cell gets a jittered node, and each flow edge a smooth curve with meanders seeded by that edge alone, so any region that builds an edge gets the same curve. Big rivers average their nodes over a longer stretch, because they are wider than the node spacing.
+- **Shaping the land.** Ridge texture fades out near rivers, leaving them the same smooth ground they were routed on. Valley walls then bound the land from above and below, and low land nearby is flattened into a floodplain just above the water.
+- **Water.** Water surfaces come from the routing grid and are written into chunks before surface rules run. Banks are built up or dug out around them where interpolated blocks land off the computed height. Lakes fill the real terrain, so their shores follow it.
+
+### Performance
+
+Terrain is a height map rather than vanilla's 3D noise, so density is simple to compute. Chunks are only filled up to their highest surface, which skips interpolation, aquifers and ore veins for the air above it, and this is where most of the time is saved. Logic that many columns share is cached by region. Expensive steps run on a small fork-join pool, which is safe because they are pure functions of the seed and coordinates, so the number of threads cannot change the result.
+
 ## Configuration
 
 Settings live in `config/mtm_worldgen.json`, created with default values on first use. Missing fields use their defaults, and invalid values are reported when a world is created.
