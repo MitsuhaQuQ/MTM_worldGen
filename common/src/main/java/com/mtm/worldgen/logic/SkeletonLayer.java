@@ -16,7 +16,7 @@ import java.util.Map;
  *       orientation field, so neighboring ranges run roughly parallel and chain into long ridges.</li>
  *   <li>Mountains stand on a broad massif uplift of their zone. Cross sections are S-shaped, with the half-width
  *       derived from the slope limit; overlapping ridges merge through a smooth maximum, and a ridged texture
- *       stretched along the range adds spurs and gullies.</li>
+ *       sampled through the same warp as the ridges adds spurs and gullies.</li>
  *   <li>Foothills form a belt around every range and peak.</li>
  *   <li>Plateaus are raised table lands in their own zones; hills cover a further zone with rolling terrain.</li>
  * </ul>
@@ -95,7 +95,7 @@ final class SkeletonLayer {
         this.ridge = new Fbm(Hashing.derive(seed, RIDGE_SALT), 2, m.ridgeWavelength);
         this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, m.ridgeWarpWavelength);
         this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength);
-        this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 3);
+        this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 4);
         this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
         this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
@@ -131,7 +131,8 @@ final class SkeletonLayer {
         double wz = z + m.ridgeWarp * ridgeWarpZ.sample(x, z);
         double[] mountain = mountains(wx, wz);
         double peaks = mountain[0];
-        double rugged = peaks > 0.0 ? m.textureShare * peaks * (2.0 * orientedTexture(x, z) - 1.0) : 0.0;
+        double textured = peaks + m.massifTextureShare * massif;
+        double rugged = textured > 0.0 ? m.textureShare * textured * (2.0 * texture.sample(wx / m.textureWavelength, wz / m.textureWavelength) - 1.0) : 0.0;
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
@@ -182,27 +183,22 @@ final class SkeletonLayer {
         return 1.0 - m.ridgeVariation + m.ridgeVariation * ridge.sample(x, z);
     }
 
-    /** Half-width that keeps {@link #profile}'s steepest grade (1.5 H / W) at the mountain grade. */
+    /** Half-width that keeps {@link #profile}'s steepest grade, at most (1.5 + 0.5 sharpness) H / W, at the mountain grade. */
     private double halfWidth(double height) {
-        return Math.max(1.0, 1.5 * height / mountainGrade);
-    }
-
-    /** Ridged texture in [0, 1], stretched along the local range orientation. */
-    private double orientedTexture(double x, double z) {
-        double angle = Math.PI * 1.5 * orientation.sample(x, z);
-        double cos = Math.cos(angle);
-        double sin = Math.sin(angle);
-        double along = x * cos + z * sin;
-        double across = -x * sin + z * cos;
-        return texture.sample(along / m.textureAlong, across / m.textureAcross);
+        return Math.max(1.0, (1.5 + 0.5 * m.crestSharpness) * height / mountainGrade);
     }
 
     /**
-     * S-shaped cross section: rounded crest, steepest at mid slope, flattening toward the foot.
-     * Steepest grade is 1.5 H / W at u = 0.5.
+     * Cross section mixing an S curve (rounded crest, steepest at mid slope, grade 1.5 H / W) with a concave curve
+     * (sharp crest, steepest at the top, grade 2 H / W). Both flatten toward the foot.
      */
-    private static double profile(double u) {
-        return u >= 1.0 ? 0.0 : 1.0 - u * u * (3.0 - 2.0 * u);
+    private double profile(double u) {
+        if (u >= 1.0) {
+            return 0.0;
+        }
+        double rounded = 1.0 - u * u * (3.0 - 2.0 * u);
+        double sharp = (1.0 - u) * (1.0 - u);
+        return rounded + m.crestSharpness * (sharp - rounded);
     }
 
     /**

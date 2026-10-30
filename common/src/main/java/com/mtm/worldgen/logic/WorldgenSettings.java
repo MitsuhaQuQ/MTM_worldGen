@@ -109,11 +109,14 @@ public final class WorldgenSettings {
         /** Ridge height varies along the range by this fraction. */
         public double ridgeVariation = 0.2;
         /** Spur and gully texture amplitude, as a fraction of the local mountain height. */
-        public double textureShare = 0.15;
-        public double textureAcross = 640.0;
-        public double textureAlong = 1920.0;
+        public double textureShare = 0.25;
+        public double textureWavelength = 1400.0;
+        /** Share of the massif uplift the texture also applies to, so land between ridges is not a flat table. */
+        public double massifTextureShare = 0.5;
+        /** Mix between a rounded (0) and a sharp, concave (1) mountain cross section. */
+        public double crestSharpness = 0.35;
         /** Share of the slope limit used by the main profile; the rest is headroom for texture and foothills. */
-        public double profileSlopeShare = 0.45;
+        public double profileSlopeShare = 0.38;
         /** Blend width in blocks where two mountain profiles meet. */
         public double mergeWidth = 24.0;
         public double foothillHeight = 32.0;
