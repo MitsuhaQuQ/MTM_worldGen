@@ -38,6 +38,7 @@ public final class WorldgenSettings {
     public final Surface surface = new Surface();
     public final Spawn spawn = new Spawn();
     public final Climate climate = new Climate();
+    public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
 
     public static final class General {
@@ -319,6 +320,24 @@ public final class WorldgenSettings {
         public double maxAboveSea = 40.0;
     }
 
+    /** Drainage. Sizes are in coarse cells. */
+    public static final class Rivers {
+        /** Cell size of the routing grid; a multiple of general.cellSize that divides general.regionSize. */
+        public int flowCellSize = 256;
+        /** How far upstream of a cell catchments reach, in blocks. */
+        public int flowLookAhead = 16384;
+        public int streamCells = 20;
+        public int tributaryCells = 150;
+        public int trunkCells = 1000;
+        /** A trunk with more tributaries than this is a major trunk. */
+        public int majorTrunkTributaries = 5;
+        /** Height noise drainage routes over, so water gathers instead of running in parallel lines on even slopes. */
+        public double routeNoise = 4.0;
+        public double routeWavelength = 512.0;
+        /** Water at least this deep over the ground of a filled depression is a lake. */
+        public double lakeMinDepth = 2.0;
+    }
+
     public static final class Climate {
         public double temperatureWavelength = 8192.0;
         /** Area shares of the zones; polar takes the remainder. */
@@ -369,6 +388,11 @@ public final class WorldgenSettings {
         require(general.maxSurfaceHeight + BUILD_HEADROOM + 15 <= MAX_BUILD_TOP,
                 "general.maxSurfaceHeight is too large for Minecraft's build limit of " + MAX_BUILD_TOP);
         require(general.regionCacheSize > 0, "general.regionCacheSize must be positive");
+        require(rivers.flowCellSize > 0 && rivers.flowCellSize % general.cellSize == 0 && general.regionSize % rivers.flowCellSize == 0,
+                "rivers.flowCellSize must be a multiple of general.cellSize and divide general.regionSize");
+        require(rivers.flowLookAhead > 0, "rivers.flowLookAhead must be positive");
+        require(rivers.streamCells < rivers.tributaryCells && rivers.tributaryCells < rivers.trunkCells,
+                "river cell thresholds must rise from stream to trunk");
         require(general.softCapFraction > 0.0 && general.softCapFraction < 1.0, "general.softCapFraction must be in (0, 1)");
         require(continents.oceanRatio > 0.0 && continents.oceanRatio < 1.0, "continents.oceanRatio must be in (0, 1)");
         require(mountains.peakMin > 0.0 && mountains.peakMax >= mountains.peakMin,

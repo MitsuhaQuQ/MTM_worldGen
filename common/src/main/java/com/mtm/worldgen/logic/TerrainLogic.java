@@ -39,7 +39,8 @@ public final class TerrainLogic {
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
     private final Fbm rockPatchNoise;
-    private final RegionCache regions;
+    private final RegionCache<LogicRegion> regions;
+    private final RegionCache<FlowRegion> flowRegions;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<ColumnCache> columns = ThreadLocal.withInitial(ColumnCache::new);
 
@@ -53,7 +54,9 @@ public final class TerrainLogic {
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
-        this.regions = new RegionCache(this::generateRegion, settings.general.regionCacheSize);
+        this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
+        FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight);
+        this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
     }
 
     /** Shared instance for a world, identified by its seed and settings. */
@@ -72,6 +75,11 @@ public final class TerrainLogic {
 
     public LogicRegion region(int regionX, int regionZ) {
         return regions.get(regionX, regionZ);
+    }
+
+    /** Drainage of a logic region. Computed apart from {@link #region} because terrain does not depend on it yet. */
+    public FlowRegion flowRegion(int regionX, int regionZ) {
+        return flowRegions.get(regionX, regionZ);
     }
 
     /** Coarse surface height at a cell center, by global cell index. */
@@ -117,6 +125,15 @@ public final class TerrainLogic {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double skeletonHeight = skeleton.height(x, z, base - (settings.general.seaLevel - 1));
         return softCap(base + skeletonHeight);
+    }
+
+    /**
+     * Surface height without ridge texture, for drainage. Drainage windows span more regions than the region cache
+     * holds, so the base comes straight from the continents instead of through the cache.
+     */
+    private double sampleDrainageHeight(double x, double z) {
+        double base = continents.height(continents.value(x, z));
+        return softCap(base + skeleton.coarseHeight(x, z, base - (settings.general.seaLevel - 1)));
     }
 
     /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */

@@ -205,6 +205,65 @@ class TerrainLogicTest {
     }
 
     @Test
+    void drainageDoesNotDependOnRegionOrder() {
+        TerrainLogic forward = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic backward = new TerrainLogic(SEED, SETTINGS);
+        FlowRegion first = forward.flowRegion(0, 0);
+        forward.flowRegion(1, 0);
+        FlowRegion second = forward.flowRegion(1, 0);
+        backward.flowRegion(1, 0);
+        assertTrue(first.contentEquals(backward.flowRegion(0, 0)), "region 0,0 depends on the order");
+        assertTrue(second.contentEquals(backward.flowRegion(1, 0)), "region 1,0 depends on the order");
+    }
+
+    /** Catchments only grow downstream, and a river leaving a region must not shrink in the next one. */
+    @Test
+    void riversKeepTheirSizeAcrossRegionBorders() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        int cells = logic.flowRegion(0, 0).cells();
+        int crossings = 0;
+        for (int rx = -2; rx < 2; rx++) {
+            for (int rz = -2; rz < 2; rz++) {
+                FlowRegion west = logic.flowRegion(rx, rz);
+                FlowRegion east = logic.flowRegion(rx + 1, rz);
+                FlowRegion south = logic.flowRegion(rx, rz + 1);
+                for (int i = 1; i < cells - 1; i++) {
+                    if (west.flows(cells - 1, i) && west.downstreamX(cells - 1, i) == 1
+                            && west.catchment(cells - 1, i) >= SETTINGS.rivers.tributaryCells) {
+                        assertKeepsSize(west.catchment(cells - 1, i), east.catchment(0, i + west.downstreamZ(cells - 1, i)));
+                        crossings++;
+                    }
+                    if (west.flows(i, cells - 1) && west.downstreamZ(i, cells - 1) == 1
+                            && west.catchment(i, cells - 1) >= SETTINGS.rivers.tributaryCells) {
+                        assertKeepsSize(west.catchment(i, cells - 1), south.catchment(i + west.downstreamX(i, cells - 1), 0));
+                        crossings++;
+                    }
+                }
+            }
+        }
+        assertTrue(crossings > 10, "only " + crossings + " rivers cross borders");
+    }
+
+    private static void assertKeepsSize(int upstream, int downstream) {
+        assertTrue(downstream >= 0.8 * upstream, "river shrinks from " + upstream + " to " + downstream);
+    }
+
+    @Test
+    void landDrainsWithoutSinks() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        FlowRegion flow = logic.flowRegion(0, 0);
+        int cells = flow.cells();
+        int size = SETTINGS.general.regionSize / cells;
+        double sea = SETTINGS.general.seaLevel - 1;
+        for (int lz = 0; lz < cells; lz++) {
+            for (int lx = 0; lx < cells; lx++) {
+                double height = logic.sampleSurfaceHeight((lx + 0.5) * size, (lz + 0.5) * size);
+                assertTrue(flow.flows(lx, lz) || height < sea + 2 * SETTINGS.rivers.routeNoise, "land sink at height " + height);
+            }
+        }
+    }
+
+    @Test
     void settingsSurviveJsonAndKeepDefaultsForMissingFields() {
         WorldgenSettings partial = WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 500}}");
         assertEquals(500, partial.general.maxSurfaceHeight);

@@ -1,8 +1,13 @@
 package com.mtm.worldgen.logic.debug;
 
+import com.mtm.worldgen.logic.FlowRegion;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 
 /** Renders the terrain logic's surface height as a hillshaded hypsometric map, for tuning without flying around. */
@@ -11,6 +16,8 @@ public final class HeightMapRenderer {
     private static final int BEACH_RGB = 0xE8D8A0;
     private static final int SNOW_RGB = 0xFFFFFF;
     private static final int ROCK_RGB = 0x8C8C8C;
+    private static final Color LAKE_COLOR = new Color(0x40E0D0);
+    private static final Color[] RIVER_COLORS = {null, new Color(0x7FD0FF), new Color(0x2080FF), new Color(0x0020C0), new Color(0xE00020)};
     /** Light from the north-west; brightness change per unit of grade across one pixel. */
     private static final double SHADE_STRENGTH = 1.2;
 
@@ -62,7 +69,52 @@ public final class HeightMapRenderer {
                 image.setRGB(px, py, rgb);
             }
         }
+        drawRivers(image, logic, originX, originZ, sizePx, blocksPerPixel);
         return image;
+    }
+
+    /** Draws the drainage network, thicker and redder as rivers rise in class, and lakes as turquoise cells. */
+    private static void drawRivers(BufferedImage image, TerrainLogic logic, int originX, int originZ, int sizePx, int blocksPerPixel) {
+        WorldgenSettings settings = logic.settings();
+        int cellSize = settings.rivers.flowCellSize;
+        int cells = settings.general.regionSize / cellSize;
+        int firstX = Math.floorDiv(originX, settings.general.regionSize);
+        int firstZ = Math.floorDiv(originZ, settings.general.regionSize);
+        int lastX = Math.floorDiv(originX + sizePx * blocksPerPixel, settings.general.regionSize);
+        int lastZ = Math.floorDiv(originZ + sizePx * blocksPerPixel, settings.general.regionSize);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        for (int regionX = firstX; regionX <= lastX; regionX++) {
+            for (int regionZ = firstZ; regionZ <= lastZ; regionZ++) {
+                FlowRegion flow = logic.flowRegion(regionX, regionZ);
+                for (int lz = 0; lz < cells; lz++) {
+                    for (int lx = 0; lx < cells; lx++) {
+                        int cellX = regionX * cells + lx;
+                        int cellZ = regionZ * cells + lz;
+                        double fromX = ((cellX + 0.5) * cellSize - originX) / blocksPerPixel;
+                        double fromZ = ((cellZ + 0.5) * cellSize - originZ) / blocksPerPixel;
+                        FlowRegion.RiverClass riverClass = flow.riverClass(lx, lz);
+                        if (flow.isLake(lx, lz)) {
+                            int cellPixels = Math.max(1, cellSize / blocksPerPixel);
+                            graphics.setColor(LAKE_COLOR);
+                            graphics.fillRect((int) fromX - cellPixels / 2, (int) fromZ - cellPixels / 2, cellPixels, cellPixels);
+                        }
+                        if (!flow.flows(lx, lz)) {
+                            continue;
+                        }
+                        if (riverClass == FlowRegion.RiverClass.NONE) {
+                            continue;
+                        }
+                        double toX = fromX + (double) flow.downstreamX(lx, lz) * cellSize / blocksPerPixel;
+                        double toZ = fromZ + (double) flow.downstreamZ(lx, lz) * cellSize / blocksPerPixel;
+                        graphics.setColor(RIVER_COLORS[riverClass.ordinal()]);
+                        graphics.setStroke(new BasicStroke(riverClass.ordinal()));
+                        graphics.drawLine((int) fromX, (int) fromZ, (int) toX, (int) toZ);
+                    }
+                }
+            }
+        }
+        graphics.dispose();
     }
 
     private static boolean onRegionBorder(int coordinate, int blocksPerPixel, WorldgenSettings settings) {

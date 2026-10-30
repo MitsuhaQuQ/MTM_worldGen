@@ -129,6 +129,15 @@ final class SkeletonLayer {
      * @param baseAboveSea continent base height above the sea surface in blocks
      */
     double height(double x, double z, double baseAboveSea) {
+        return height(x, z, baseAboveSea, true);
+    }
+
+    /** Elevation without ridge texture: much cheaper, and all that drainage needs at its scale. */
+    double coarseHeight(double x, double z, double baseAboveSea) {
+        return height(x, z, baseAboveSea, false);
+    }
+
+    private double height(double x, double z, double baseAboveSea, boolean detailed) {
         double land = smoothstep(0.0, settings.general.coastFadeHeight, baseAboveSea);
         if (land <= 0.0) {
             return 0.0;
@@ -138,12 +147,12 @@ final class SkeletonLayer {
         // Warp the lookup so ridges between sites curve instead of running dead straight
         double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
         double wz = z + m.ridgeWarp * ridgeWarpZ.sample(x, z);
-        double[] mountain = mountains(wx, wz);
+        double[] mountain = mountains(wx, wz, detailed);
         double peaks = mountain[0];
         double textured = peaks + m.massifTextureShare * massif;
         double summitCalm = 1.0 - m.summitTextureReduction * mountain[2];
         double rugged = 0.0;
-        if (textured > 0.0) {
+        if (detailed && textured > 0.0) {
             // Spurs near ridges fade into crease-free noise on the open massif, where they have no direction to follow
             double openWeight = scale * m.massifHeight;
             openWeight *= openWeight;
@@ -166,7 +175,7 @@ final class SkeletonLayer {
      * Tallest mountain profile at a position with the strongest foothill and summit weights, plus the spur texture
      * summed over nearby ridges weighted by squared height and distance, as {height, belt, summit, spurSum, spurWeight}.
      */
-    private double[] mountains(double x, double z) {
+    private double[] mountains(double x, double z, boolean detailed) {
         int cellX = (int) Math.floor(x / m.siteSpacing);
         int cellZ = (int) Math.floor(z / m.siteSpacing);
         double peak = 0.0;
@@ -185,7 +194,7 @@ final class SkeletonLayer {
                     peak = smoothMax(peak, profile[0]);
                     belt = Math.max(belt, profile[1]);
                     summit = Math.max(summit, profile[2]);
-                    if (profile[3] < m.textureReach) {
+                    if (detailed && profile[3] < m.textureReach) {
                         double weight = profile[4] * (1.0 - smoothstep(0.0, m.textureReach, profile[3]));
                         weight *= weight;
                         spurSum += weight * spurTexture(x, z, site, other);
