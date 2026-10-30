@@ -1,5 +1,6 @@
 package com.mtm.worldgen.logic;
 
+import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
 
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ final class RiverLayer {
     private final long nodeSeed;
     private final long meanderSeed;
     private final long sizeSeed;
+    private final Fbm widthNoise;
     private final int cellSize;
     private final int cells;
 
@@ -39,6 +41,7 @@ final class RiverLayer {
         this.nodeSeed = nodeSeed(seed);
         this.meanderSeed = Hashing.derive(seed, MEANDER_SALT);
         this.sizeSeed = Hashing.derive(seed, SIZE_SALT);
+        this.widthNoise = new Fbm(Hashing.derive(seed, SIZE_SALT + 1), 2, config.widthWavelength);
         this.cellSize = config.flowCellSize;
         this.cells = settings.general.regionSize / cellSize;
     }
@@ -50,7 +53,7 @@ final class RiverLayer {
 
         int originX = regionX * cells;
         int originZ = regionZ * cells;
-        int margin = Math.max(1, ceilDiv(config.queryReach, cellSize) + 2);
+        int margin = Math.max(1, ceilDiv(config.queryReach, cellSize) + 3);
         // Rows run in parallel into their own lists and join in row order, so the result does not depend on timing
         int rows = cells + 2 * margin;
         Curves[] parts = new Curves[rows];
@@ -109,6 +112,9 @@ final class RiverLayer {
         double phase1 = 2.0 * Math.PI * Hashing.unit(hash);
         double phase2 = 2.0 * Math.PI * Hashing.unit(Hashing.mix(hash));
         double swing = (Hashing.unit(Hashing.derive(hash, 2)) - 0.5) * 2.0;
+        // Meanders this short only read as bulges on a river wider than they are
+        double relative = Math.max(startSize[0], endSize[0]) / config.meanderWidth;
+        double meanderShare = 1.0 / (1.0 + relative * relative);
 
         double length = Math.hypot(b[0] - a[0], b[1] - a[1]);
         double normalX = -(b[1] - a[1]) / length;
@@ -130,7 +136,7 @@ final class RiverLayer {
             double x = u * u * u * a[0] + 3.0 * u * u * t * c1x + 3.0 * u * t * t * c2x + t * t * t * b[0];
             double z = u * u * u * a[1] + 3.0 * u * u * t * c1z + 3.0 * u * t * t * c2z + t * t * t * b[1];
             double envelope = Math.sin(Math.PI * t);
-            double meander = length * config.meander * envelope * envelope
+            double meander = meanderShare * length * config.meander * envelope * envelope
                     * (swing + Math.sin(2.0 * Math.PI * t + phase1) + 0.5 * Math.sin(4.0 * Math.PI * t + phase2));
             x += normalX * meander;
             z += normalZ * meander;
@@ -157,24 +163,64 @@ final class RiverLayer {
     }
 
     /**
-     * Node moved toward the middle of the river's neighbors before and after it. Routes only have eight directions
-     * and can double back, which even a smooth curve cannot round when it has to pass through the raw node.
+     * Node moved toward the middle of the river around it. Routes only have eight directions and can double back,
+     * which even a smooth curve cannot round when it has to pass through the raw node. Big rivers average over a
+     * longer stretch: a river much wider than the node spacing would otherwise show every turn as a round bulge.
      */
     private double[] smoothNode(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
         double[] node = node(cellX, cellZ);
         FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
-        if (flow == null) {
-            return node;
-        }
         int lx = Math.floorMod(cellX, cells);
         int lz = Math.floorMod(cellZ, cells);
-        if (!flow.flows(lx, lz) || !flow.hasInflow(lx, lz)) {
+        if (flow == null || !flow.flows(lx, lz) || !flow.hasInflow(lx, lz)) {
             return node;
         }
-        double[] before = node(cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz));
-        double[] after = node(cellX + flow.downstreamX(lx, lz), cellZ + flow.downstreamZ(lx, lz));
+        int reach = reach(flow.riverClass(lx, lz));
+        double sumX = reach * node[0];
+        double sumZ = reach * node[1];
+        double weights = reach;
+        for (int direction = -1; direction <= 1; direction += 2) {
+            int x = cellX;
+            int z = cellZ;
+            for (int step = 1; step <= reach; step++) {
+                int[] next = step(around, regionX, regionZ, x, z, direction);
+                if (next == null) {
+                    break;
+                }
+                x = next[0];
+                z = next[1];
+                double[] other = node(x, z);
+                double weight = reach + 1 - step;
+                sumX += weight * other[0];
+                sumZ += weight * other[1];
+                weights += weight;
+            }
+        }
         double s = config.nodeSmoothing;
-        return new double[]{node[0] + s * (0.5 * (before[0] + after[0]) - node[0]), node[1] + s * (0.5 * (before[1] + after[1]) - node[1])};
+        return new double[]{node[0] + s * (sumX / weights - node[0]), node[1] + s * (sumZ / weights - node[1])};
+    }
+
+    /** Nodes averaged on each side of a river node. */
+    private int reach(FlowRegion.RiverClass riverClass) {
+        return switch (riverClass) {
+            case MAJOR_TRUNK -> config.majorTrunkSmoothing;
+            case TRUNK -> config.trunkSmoothing;
+            default -> 1;
+        };
+    }
+
+    /** The next cell along a river's main stem, downstream or upstream, or null where it ends or leaves the view. */
+    private int[] step(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, int direction) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
+        int lx = Math.floorMod(cellX, cells);
+        int lz = Math.floorMod(cellZ, cells);
+        if (flow == null) {
+            return null;
+        }
+        if (direction > 0) {
+            return flow.flows(lx, lz) ? new int[]{cellX + flow.downstreamX(lx, lz), cellZ + flow.downstreamZ(lx, lz)} : null;
+        }
+        return flow.hasInflow(lx, lz) ? new int[]{cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz)} : null;
     }
 
     private double[] node(int cellX, int cellZ) {
@@ -220,8 +266,10 @@ final class RiverLayer {
                 depth = config.majorTrunkDepthMin + roll * (config.majorTrunkDepthMax - config.majorTrunkDepthMin);
             }
         }
-        double spread = widthFactor(slopeAt(around, regionX, regionZ, cellX, cellZ));
-        return new double[]{spread * width * (1.0 + config.widthVariation * (2.0 * Hashing.unit(hash) - 1.0)), depth};
+        double spread = widthFactor(slopeAt(around, regionX, regionZ, cellX, cellZ, reach(riverClass)));
+        double[] position = node(cellX, cellZ);
+        double variation = Math.max(-1.0, Math.min(1.0, 2.0 * widthNoise.sample(position[0], position[1])));
+        return new double[]{spread * width * (1.0 + config.widthVariation * variation), depth};
     }
 
     private double widthFactor(double slope) {
@@ -230,22 +278,24 @@ final class RiverLayer {
         return config.plainWidthFactor + t * (config.steepWidthFactor - config.plainWidthFactor);
     }
 
-    /** Fall of the water from a cell to the next one, per block. */
-    private double slopeAt(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
-        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
-        int lx = Math.floorMod(cellX, cells);
-        int lz = Math.floorMod(cellZ, cells);
-        if (flow == null || !flow.flows(lx, lz)) {
+    /** Fall of the water per block over a stretch of river around a cell, so width does not jump from node to node. */
+    private double slopeAt(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, int reach) {
+        int[] top = {cellX, cellZ};
+        int[] bottom = {cellX, cellZ};
+        for (int i = 0; i < reach; i++) {
+            int[] up = step(around, regionX, regionZ, top[0], top[1], -1);
+            top = up != null ? up : top;
+            int[] down = step(around, regionX, regionZ, bottom[0], bottom[1], 1);
+            bottom = down != null ? down : bottom;
+        }
+        FlowRegion high = flowAt(around, regionX, regionZ, top[0], top[1]);
+        FlowRegion low = flowAt(around, regionX, regionZ, bottom[0], bottom[1]);
+        if (high == null || low == null || top[0] == bottom[0] && top[1] == bottom[1]) {
             return 0.0;
         }
-        int dx = flow.downstreamX(lx, lz);
-        int dz = flow.downstreamZ(lx, lz);
-        FlowRegion next = flowAt(around, regionX, regionZ, cellX + dx, cellZ + dz);
-        if (next == null) {
-            return 0.0;
-        }
-        double fall = flow.waterLevel(lx, lz) - next.waterLevel(Math.floorMod(cellX + dx, cells), Math.floorMod(cellZ + dz, cells));
-        return fall / (Math.hypot(dx, dz) * cellSize);
+        double fall = high.waterLevel(Math.floorMod(top[0], cells), Math.floorMod(top[1], cells))
+                - low.waterLevel(Math.floorMod(bottom[0], cells), Math.floorMod(bottom[1], cells));
+        return fall / (Math.hypot(top[0] - bottom[0], top[1] - bottom[1]) * cellSize);
     }
 
     private static double[] unit(double x, double z) {

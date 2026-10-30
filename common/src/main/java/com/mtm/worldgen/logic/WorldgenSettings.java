@@ -354,11 +354,15 @@ public final class WorldgenSettings {
         public double nodeJitter = 0.6;
         /** Sideways swing of river courses, as a fraction of the distance between nodes. */
         public double meander = 0.14;
+        /** Meanders fade on rivers wider than this. */
+        public double meanderWidth = 100.0;
         public int curveSegments = 12;
         /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
         public int queryReach = 768;
         /** Rivers vary by this fraction of their width. */
         public double widthVariation = 0.1;
+        /** Distance over which a river's width wanders along its length. */
+        public double widthWavelength = 2048.0;
         /** Rivers on a slope of at most gentleRiverSlope are plainWidthFactor times their base width, those at
          * steepRiverSlope or more steepWidthFactor times, with a smooth change between. */
         public double gentleRiverSlope = 0.01;
@@ -394,6 +398,9 @@ public final class WorldgenSettings {
         public double textureFadePerWidth = 2.0;
         /** How far a river node moves toward the middle of its neighbors, rounding sharp bends. */
         public double nodeSmoothing = 0.6;
+        /** River nodes averaged on each side when smoothing big rivers. */
+        public int trunkSmoothing = 2;
+        public int majorTrunkSmoothing = 4;
         /** Height of the valley floor above the water. */
         public double bankHeight = 1.0;
     }
