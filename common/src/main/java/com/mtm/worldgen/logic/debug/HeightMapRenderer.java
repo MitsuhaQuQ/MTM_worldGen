@@ -9,6 +9,8 @@ import java.awt.image.BufferedImage;
 public final class HeightMapRenderer {
     private static final int REGION_BORDER_RGB = 0xFF00FF;
     private static final int BEACH_RGB = 0xE8D8A0;
+    private static final int SNOW_RGB = 0xFFFFFF;
+    private static final int ROCK_RGB = 0x8C8C8C;
     /** Light from the north-west; brightness change per unit of grade across one pixel. */
     private static final double SHADE_STRENGTH = 1.2;
 
@@ -43,6 +45,11 @@ public final class HeightMapRenderer {
                 double height = heights[py * (sizePx + 1) + px];
                 boolean beach = height >= sea && logic.sampleBeach(x, z);
                 int rgb = beach ? BEACH_RGB : color(height, settings);
+                if (height >= sea && logic.sampleSnow(x, z)) {
+                    rgb = SNOW_RGB;
+                } else if (height >= sea && logic.sampleRock(x, z)) {
+                    rgb = ROCK_RGB;
+                }
                 if (height >= sea) {
                     double gradeX = (heights[py * (sizePx + 1) + px + 1] - height) / blocksPerPixel;
                     double gradeZ = (heights[(py + 1) * (sizePx + 1) + px] - height) / blocksPerPixel;

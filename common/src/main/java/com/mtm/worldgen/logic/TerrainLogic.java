@@ -14,6 +14,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class TerrainLogic {
 
     private static final long BEACH_SALT = 0x4245414348L;
+    private static final long SNOW_SALT = 0x534E4F57L;
+    private static final long ROCK_SALT = 0x524F434BL;
+    private static final long ROCK_PATCH_SALT = 0x5041544348L;
+    /** Block spacing of the finite difference used for the surface grade. */
+    private static final double GRADE_STEP = 2.0;
 
     private static final int CHUNK_SIZE = 16;
     /** Horizontal spacing of the corners the terrain density is evaluated at. */
@@ -28,7 +33,12 @@ public final class TerrainLogic {
     private final WorldgenSettings settings;
     private final ContinentLayer continents;
     private final SkeletonLayer skeleton;
+    private final ClimateLayer climate;
+    private final BiomeLayer biomes;
     private final Fbm beachWidth;
+    private final Fbm snowLineNoise;
+    private final Fbm rockNoise;
+    private final Fbm rockPatchNoise;
     private final RegionCache regions;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<ColumnCache> columns = ThreadLocal.withInitial(ColumnCache::new);
@@ -37,7 +47,12 @@ public final class TerrainLogic {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
         this.skeleton = new SkeletonLayer(seed, settings);
+        this.climate = new ClimateLayer(seed, settings);
+        this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
+        this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
+        this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
+        this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
         this.regions = new RegionCache(this::generateRegion, settings.general.regionCacheSize);
     }
 
@@ -120,7 +135,93 @@ public final class TerrainLogic {
     }
 
     /**
-     * Beaches run along every coast with a depth inland that varies along the coast, occasionally
+     * Biome id at a block position: the column's surface biome, or a cave biome deep underground in some areas.
+     * Memoized per column, because biomes are queried many times per column.
+     */
+    public String biomeAt(int x, int y, int z) {
+        Column column = columns.get().column(this, x, z);
+        if (y < column.height - settings.biomes.caveDepth && biomes.isCave(x, z)) {
+            return biomes.caveBiome(climate.humidity(x, z));
+        }
+        return column.biome();
+    }
+
+    /** Surface biome id of a position. */
+    public String sampleBiome(double x, double z) {
+        double temperature = climate.temperature(x, z);
+        return biomes.surfaceBiome(x, z, climate.zone(temperature), sampleSurfaceHeight(x, z), sampleCoastDistance(x, z),
+                sampleSnowLine(x, z), climate.humidity(x, z));
+    }
+
+    /** Climate zone name of a position. */
+    public String sampleClimateZone(double x, double z) {
+        return climate.zone(climate.temperature(x, z)).name();
+    }
+
+    /** Whether a block column has a snow surface, memoized
+ per thread like {@link #surfaceHeight}. */
+    public boolean isSnow(int x, int z) {
+        return columns.get().column(this, x, z).snow();
+    }
+
+    /** Whether a block column has a bare rock surface, memoized per thread like {@link #surfaceHeight}. */
+    public boolean isRock(int x, int z) {
+        return columns.get().column(this, x, z).rock();
+    }
+
+    /** Whether a rock column uses the patch stone. */
+    public boolean isRockPatch(int x, int z) {
+        return rockPatchNoise.sample(x, z) > settings.surface.rockPatchThreshold;
+    }
+
+    /** Surface grade at a position as a fraction (1 = 100%). */
+    public double sampleGrade(double x, double z) {
+        double height = sampleSurfaceHeight(x, z);
+        double dx = sampleSurfaceHeight(x + GRADE_STEP, z) - height;
+        double dz = sampleSurfaceHeight(x, z + GRADE_STEP) - height;
+        return Math.hypot(dx, dz) / GRADE_STEP;
+    }
+
+    /** Local snow line height. */
+    public double sampleSnowLine(double x, double z) {
+        WorldgenSettings.Surface surface = settings.surface;
+        double line = climate.snowLine(climate.temperature(x, z));
+        return settings.heightScale() * line * (1.0 + surface.snowLineVariation * snowLineNoise.sample(x, z));
+    }
+
+    /** Snow covers ground above the snow line, except faces too steep to hold it. */
+    public boolean sampleSnow(double x, double z) {
+        return isSnow(x, z, sampleSurfaceHeight(x, z), sampleGrade(x, z));
+    }
+
+    /** Bare rock covers steep ground, and gentler faces close to the snow line. */
+    public boolean sampleRock(double x, double z) {
+        return isRock(x, z, sampleSurfaceHeight(x, z), sampleGrade(x, z));
+    }
+
+    private boolean isSnow(double x, double z, double height, double grade) {
+        return height >= settings.general.seaLevel - 1 && height >= sampleSnowLine(x, z)
+                && grade * 100.0 < settings.surface.snowMaxSlope;
+    }
+
+    private boolean isRock(double x, double z, double height, double grade) {
+        WorldgenSettings.Surface surface = settings.surface;
+        if (height < settings.general.seaLevel - 1 + surface.rockMinAboveSea) {
+            return false;
+        }
+        double slope = surface.rockSlope;
+        double snowLine = sampleSnowLine(x, z);
+        if (snowLine > 0.0) {
+            // Blends on the height itself so the threshold changes without tracing a contour line
+            double high = (height / snowLine - surface.bareRockLine) / (1.0 - surface.bareRockLine);
+            slope += (surface.highRockSlope - surface.rockSlope) * Math.max(0.0, Math.min(1.0, high));
+        }
+        return grade * 100.0 > slope + surface.rockSlopeVariation * rockNoise.sample(x, z);
+    }
+
+    /**
+     * Beaches run along every coast
+ with a depth inland that varies along the coast, occasionally
      * dropping to nothing, and extend a little offshore as shallow sandy sea floor.
      */
     public boolean sampleBeach(double x, double z) {
@@ -286,6 +387,10 @@ public final class TerrainLogic {
         final double height;
         private double coastDistance = Double.NaN;
         private int beach = -1;
+        private double grade = Double.NaN;
+        private int snow = -1;
+        private int rock = -1;
+        private String biome;
 
         Column(TerrainLogic owner, int x, int z) {
             this.owner = owner;
@@ -299,6 +404,34 @@ public final class TerrainLogic {
                 coastDistance = owner.sampleCoastDistance(x, z);
             }
             return coastDistance;
+        }
+
+        private double grade() {
+            if (Double.isNaN(grade)) {
+                grade = owner.sampleGrade(x, z);
+            }
+            return grade;
+        }
+
+        String biome() {
+            if (biome == null) {
+                biome = owner.sampleBiome(x, z);
+            }
+            return biome;
+        }
+
+        boolean snow() {
+            if (snow < 0) {
+                snow = owner.isSnow(x, z, height, grade()) ? 1 : 0;
+            }
+            return snow == 1;
+        }
+
+        boolean rock() {
+            if (rock < 0) {
+                rock = owner.isRock(x, z, height, grade()) ? 1 : 0;
+            }
+            return rock == 1;
         }
 
         boolean beach() {

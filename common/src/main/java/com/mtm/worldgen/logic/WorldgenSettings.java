@@ -4,6 +4,11 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
 /**
  * Every terrain parameter of a world, read from config/mtm_worldgen.json when a world is created and then locked
  * into that world's level.dat. Field defaults are the design values; fields missing from a JSON file keep them.
@@ -30,8 +35,10 @@ public final class WorldgenSettings {
     public final Plateaus plateaus = new Plateaus();
     public final Hills hills = new Hills();
     public final Beaches beaches = new Beaches();
+    public final Surface surface = new Surface();
     public final Spawn spawn = new Spawn();
     public final Climate climate = new Climate();
+    public final Biomes biomes = new Biomes();
 
     public static final class General {
         /** Vanilla sea level field; the top water block sits at seaLevel - 1 (y=62). */
@@ -110,11 +117,27 @@ public final class WorldgenSettings {
         public double ridgeVariation = 0.2;
         /** Spur and gully texture amplitude, as a fraction of the local mountain height. */
         public double textureShare = 0.25;
-        public double textureWavelength = 1400.0;
+        public double textureWavelength = 900.0;
+        /** The texture is this many times longer across a ridge than along it, so its creases run down the flanks. */
+        public double textureStretch = 3.0;
+        /** How far spurs wander sideways on their way down, in blocks. */
+        public double textureBend = 700.0;
+        /** Wavelength of the texture on open massif land away from ridges. */
+        public double massifTextureWavelength = 1400.0;
+        /** Height of the fine relief in mountain zones that keeps smooth slopes from showing contour-like block steps. */
+        public double detailHeight = 2.0;
+        public double detailWavelength = 64.0;
         /** Share of the massif uplift the texture also applies to, so land between ridges is not a flat table. */
         public double massifTextureShare = 0.5;
         /** Mix between a rounded (0) and a sharp, concave (1) mountain cross section. */
-        public double crestSharpness = 0.35;
+        public double crestSharpness = 0.15;
+        /** Width in blocks of the gentle band along the crest, centered on the ridge line. */
+        public double summitWidth = 120.0;
+        /** How much the texture is reduced on the summit band, from 0 (not at all) to 1 (fully). */
+        public double summitTextureReduction = 0.75;
+        /** Range width in blocks at half the mountain height, chosen per site. Taller mountains may exceed it to respect the slope limit. */
+        public double widthMin = 500.0;
+        public double widthMax = 1000.0;
         /** Share of the slope limit used by the main profile; the rest is headroom for texture and foothills. */
         public double profileSlopeShare = 0.38;
         /** Blend width in blocks where two mountain profiles meet. */
@@ -152,6 +175,131 @@ public final class WorldgenSettings {
         public double maxHeight = 6.0;
     }
 
+    /** Bare rock and snow on high or steep ground. Heights are for a 300 block surface and scale with it. */
+    public static final class Surface {
+        /** Permanent snow line of each climate zone. Polar 0 means snow down to the sea. */
+        public double snowLineTropical = 280.0;
+        public double snowLineTemperate = 250.0;
+        public double snowLineCold = 150.0;
+        public double snowLinePolar = 0.0;
+        /** The snow line varies by this fraction. */
+        public double snowLineVariation = 0.05;
+        public double snowLineWavelength = 512.0;
+        /** Snow does not stay on faces steeper than this, in percent. */
+        public double snowMaxSlope = 130.0;
+        /** Ground steeper than this is bare rock, in percent. */
+        public double rockSlope = 70.0;
+        /** The rock slope threshold varies by this many percentage points. */
+        public double rockSlopeVariation = 20.0;
+        public double rockNoiseWavelength = 96.0;
+        /** Land within this many blocks of the sea stays soil, however steep. */
+        public double rockMinAboveSea = 12.0;
+        /** From this fraction of the snow line up to the snow line, the rock slope falls to highRockSlope. */
+        public double bareRockLine = 0.93;
+        /** Rock slope at the snow line, in percent: thin high ground exposes rock on gentler faces. */
+        public double highRockSlope = 45.0;
+        public double rockPatchWavelength = 64.0;
+        /** Noise level above which rock turns into the patch stone. */
+        public double rockPatchThreshold = 0.1;
+    }
+
+    /** Biome ids of one climate zone, by landform. Several ids in a list form large patches of each. */
+    public static final class BiomeZone {
+        public String[] ocean = {"minecraft:ocean"};
+        public String[] deepOcean = {"minecraft:deep_ocean"};
+        public String[] beach = {"minecraft:beach"};
+        public String[] dry = {"minecraft:plains"};
+        public String[] medium = {"minecraft:forest"};
+        public String[] wet = {"minecraft:forest"};
+        /** Optional: wet lowland just above the sea. */
+        public String[] swamp = {};
+        public String[] highland = {"minecraft:forest"};
+        public String[] alpine = {"minecraft:meadow"};
+        public String[] snowPeak = {"minecraft:frozen_peaks"};
+
+        BiomeZone with(String[] ocean, String[] deepOcean, String[] beach, String[] dry, String[] medium, String[] wet,
+                       String[] swamp, String[] highland, String[] alpine, String[] snowPeak) {
+            this.ocean = ocean;
+            this.deepOcean = deepOcean;
+            this.beach = beach;
+            this.dry = dry;
+            this.medium = medium;
+            this.wet = wet;
+            this.swamp = swamp;
+            this.highland = highland;
+            this.alpine = alpine;
+            this.snowPeak = snowPeak;
+            return this;
+        }
+
+        String[][] lists() {
+            return new String[][]{ocean, deepOcean, beach, dry, medium, wet, swamp, highland, alpine, snowPeak};
+        }
+    }
+
+    public static final class Biomes {
+        /** Size of the patches when a list holds several biomes. */
+        public double patchWavelength = 1536.0;
+        /** Lowland below this humidity counts as dry, at or above wetHumidity as wet. */
+        public double dryHumidity = 0.35;
+        public double wetHumidity = 0.65;
+        public double swampMaxAboveSea = 5.0;
+        /** Land this far inland from the coast and low enough is beach biome. */
+        public double beachDepth = 48.0;
+        /** Sea this much deeper than the surface uses the deep ocean biome. */
+        public double deepOceanDepth = 18.0;
+        /** Above this fraction of the snow line is the alpine band, where trees stop. */
+        public double treeLine = 0.85;
+        /** Highland starts this fraction of the way from the sea to the snow line. */
+        public double highlandLine = 0.4;
+        /** Blocks below the surface where cave biomes can start. */
+        public double caveDepth = 48.0;
+        public double caveWavelength = 1024.0;
+        public double caveThreshold = 0.1;
+        /** Cave biomes from dry to humid. */
+        public String[] caves = {"minecraft:dripstone_caves", "minecraft:lush_caves"};
+
+        public BiomeZone tropical = new BiomeZone().with(
+                ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
+                ids("desert", "badlands", "savanna"), ids("savanna", "sparse_jungle"), ids("jungle", "bamboo_jungle"),
+                ids("swamp"), ids("savanna_plateau", "wooded_badlands", "eroded_badlands", "windswept_savanna"),
+                ids("meadow"), ids("jagged_peaks"));
+        public BiomeZone temperate = new BiomeZone().with(
+                ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach", "stony_shore"),
+                ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
+                ids("dark_forest", "old_growth_birch_forest"), ids("swamp"),
+                ids("windswept_forest", "windswept_hills", "forest"),
+                ids("meadow"), ids("frozen_peaks", "jagged_peaks"));
+        public BiomeZone cold = new BiomeZone().with(
+                ids("cold_ocean"), ids("deep_cold_ocean"), ids("stony_shore", "beach"),
+                ids("taiga", "windswept_gravelly_hills"), ids("taiga", "old_growth_spruce_taiga"),
+                ids("old_growth_pine_taiga", "old_growth_spruce_taiga"), new String[0],
+                ids("grove", "windswept_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes"));
+        public BiomeZone polar = new BiomeZone().with(
+                ids("frozen_ocean"), ids("deep_frozen_ocean"), ids("snowy_beach"),
+                ids("snowy_plains", "ice_spikes"), ids("snowy_plains", "snowy_taiga"), ids("snowy_taiga", "grove"),
+                new String[0], ids("snowy_slopes"), ids("snowy_slopes"), ids("frozen_peaks"));
+
+        private static String[] ids(String... names) {
+            String[] ids = new String[names.length];
+            for (int i = 0; i < names.length; i++) {
+                ids[i] = "minecraft:" + names[i];
+            }
+            return ids;
+        }
+
+        /** Every biome id the world can use, without duplicates, in a stable order. */
+        public List<String> allBiomes() {
+            Set<String> all = new LinkedHashSet<>(List.of(caves));
+            for (BiomeZone zone : List.of(tropical, temperate, cold, polar)) {
+                for (String[] list : zone.lists()) {
+                    all.addAll(List.of(list));
+                }
+            }
+            return new ArrayList<>(all);
+        }
+    }
+
     public static final class Spawn {
         /** Search radius in coarse cells. */
         public int searchRings = 64;
@@ -160,6 +308,15 @@ public final class WorldgenSettings {
     }
 
     public static final class Climate {
+        public double temperatureWavelength = 8192.0;
+        /** Area shares of the zones; polar takes the remainder. */
+        public double tropicalShare = 0.30;
+        public double temperateShare = 0.35;
+        public double coldShare = 0.25;
+        /** Fine temperature noise that dithers zone borders. */
+        public double zoneJitterWavelength = 128.0;
+        public double zoneJitterAmplitude = 0.03;
+        public double humidityWavelength = 6144.0;
         /**
          * Coast distances in blocks mapped to {@link #continentalness}, piecewise linear. The default values pass
          * through vanilla's category boundaries and stay above -1.05, where mushroom fields would start.
@@ -202,9 +359,22 @@ public final class WorldgenSettings {
         require(continents.oceanRatio > 0.0 && continents.oceanRatio < 1.0, "continents.oceanRatio must be in (0, 1)");
         require(mountains.peakMin > 0.0 && mountains.peakMax >= mountains.peakMin,
                 "mountains.peakMin must be positive and not above mountains.peakMax");
+        require(mountains.widthMin > 0.0 && mountains.widthMax >= mountains.widthMin,
+                "mountains.widthMin must be positive and not above mountains.widthMax");
+        require(mountains.summitWidth >= 0.0 && mountains.summitWidth < mountains.widthMin,
+                "mountains.summitWidth must be below mountains.widthMin");
         require(mountains.zoneCoverage > 0.0 && mountains.zoneCoverage < 1.0, "mountains.zoneCoverage must be in (0, 1)");
         require(slopes.plains > 0.0 && slopes.hills > 0.0 && slopes.plateau > 0.0 && slopes.mountain > 0.0,
                 "slopes must be positive");
+        require(climate.tropicalShare + climate.temperateShare + climate.coldShare < 1.0,
+                "climate zone shares must leave room for the polar zone");
+        require(biomes.caves.length > 0, "biomes.caves must not be empty");
+        for (BiomeZone zone : List.of(biomes.tropical, biomes.temperate, biomes.cold, biomes.polar)) {
+            String[][] lists = zone.lists();
+            for (int i = 0; i < lists.length; i++) {
+                require(lists[i].length > 0 || lists[i] == zone.swamp, "biome lists must not be empty, except swamp");
+            }
+        }
         require(beaches.maxWidth > beaches.minWidth, "beaches.maxWidth must be above beaches.minWidth");
         require(climate.coastDistances.length >= 2 && climate.coastDistances.length == climate.continentalness.length,
                 "climate.coastDistances and climate.continentalness must have the same length of at least 2");

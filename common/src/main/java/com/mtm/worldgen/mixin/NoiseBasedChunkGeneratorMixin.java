@@ -1,7 +1,7 @@
 package com.mtm.worldgen.mixin;
 
 import com.mtm.worldgen.logic.TerrainLogic;
-import com.mtm.worldgen.world.BeachCondition;
+import com.mtm.worldgen.world.TerrainCondition;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.WorldGenRegion;
@@ -37,14 +37,14 @@ public abstract class NoiseBasedChunkGeneratorMixin {
                                            CallbackInfo ci) {
         TerrainLogic logic = MtmGenerators.terrainLogic((ChunkGenerator) (Object) this);
         if (logic != null) {
-            BeachCondition.begin(logic);
+            TerrainCondition.begin(logic);
         }
     }
 
     @Inject(method = "buildSurface", at = @At("RETURN"))
     private void mtm_worldgen$endSurface(WorldGenRegion region, StructureFeatureManager structures, ChunkAccess chunk,
                                          CallbackInfo ci) {
-        BeachCondition.end();
+        TerrainCondition.end();
     }
 
     /**

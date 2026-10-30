@@ -2,7 +2,8 @@ package com.mtm.worldgen.fabric;
 
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.command.MtmCommands;
-import com.mtm.worldgen.world.BeachCondition;
+import com.mtm.worldgen.world.TerrainCondition;
+import com.mtm.worldgen.world.MtmBiomeSource;
 import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.TerrainClimate;
 import com.mtm.worldgen.world.TerrainDensity;
@@ -16,7 +17,8 @@ public final class MtmWorldgenFabric implements ModInitializer {
         MtmWorldgen.init();
         Registry.register(Registry.DENSITY_FUNCTION_TYPES, MtmGenerators.TERRAIN_DENSITY_ID, TerrainDensity.CODEC);
         Registry.register(Registry.DENSITY_FUNCTION_TYPES, MtmGenerators.CLIMATE_DENSITY_ID, TerrainClimate.CODEC);
-        Registry.register(Registry.CONDITION, MtmGenerators.BEACH_CONDITION_ID, BeachCondition.CODEC);
+        Registry.register(Registry.CONDITION, MtmGenerators.TERRAIN_CONDITION_ID, TerrainCondition.CODEC);
+        Registry.register(Registry.BIOME_SOURCE, MtmGenerators.BIOME_SOURCE_ID, MtmBiomeSource.CODEC);
         CommandRegistrationCallback.EVENT.register((dispatcher, dedicated) -> MtmCommands.register(dispatcher));
     }
 }

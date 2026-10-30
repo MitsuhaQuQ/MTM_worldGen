@@ -9,7 +9,6 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.biome.BiomeSource;
-import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -35,8 +34,10 @@ public final class MtmGenerators {
     public static final ResourceLocation TERRAIN_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
     /** Density function type of {@link TerrainClimate}, registered by each loader like the terrain density. */
     public static final ResourceLocation CLIMATE_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "climate");
-    /** Surface rule condition type of {@link BeachCondition}, registered by each loader like the density type. */
-    public static final ResourceLocation BEACH_CONDITION_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "beach");
+    /** Biome source type of {@link MtmBiomeSource}, registered by each loader like the density types. */
+    public static final ResourceLocation BIOME_SOURCE_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+    /** Surface rule condition type of {@link TerrainCondition}, registered by each loader like the density type. */
+    public static final ResourceLocation TERRAIN_CONDITION_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
 
     private MtmGenerators() {
     }
@@ -107,22 +108,37 @@ public final class MtmGenerators {
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,
-                SurfaceRules.sequence(beachRule(), vanilla.surfaceRule()), worldSettings.general.seaLevel, vanilla.disableMobGeneration(),
+                SurfaceRules.sequence(terrainSurfaceRule(), vanilla.surfaceRule()), worldSettings.general.seaLevel, vanilla.disableMobGeneration(),
                 vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
 
-        BiomeSource biomes = MultiNoiseBiomeSource.Preset.OVERWORLD.biomeSource(access.registryOrThrow(Registry.BIOME_REGISTRY));
+        BiomeSource biomes = new MtmBiomeSource(access.registryOrThrow(Registry.BIOME_REGISTRY), seed, worldSettings);
         return new NoiseBasedChunkGenerator(
                 access.registryOrThrow(Registry.STRUCTURE_SET_REGISTRY),
                 access.registryOrThrow(Registry.NOISE_REGISTRY),
                 biomes, seed, Holder.direct(settings));
     }
 
-    /** Sand over sandstone on beach columns; runs before the vanilla rules so it wins over biome surfaces. */
-    private static SurfaceRules.RuleSource beachRule() {
-        return SurfaceRules.ifTrue(SurfaceRules.abovePreliminarySurface(),
-                SurfaceRules.ifTrue(BeachCondition.INSTANCE, SurfaceRules.sequence(
+    /**
+     * Terrain driven surfaces, ahead of the vanilla rules so they win over biome surfaces: snow, then bare rock
+     * with stone patches, then beaches. Features need soil, so trees and grass stay off rock by themselves.
+     */
+    private static SurfaceRules.RuleSource terrainSurfaceRule() {
+        SurfaceRules.RuleSource stone = SurfaceRules.state(Blocks.STONE.defaultBlockState());
+        SurfaceRules.RuleSource patchStone = SurfaceRules.state(Blocks.ANDESITE.defaultBlockState());
+        return SurfaceRules.ifTrue(SurfaceRules.abovePreliminarySurface(), SurfaceRules.sequence(
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.SNOW), SurfaceRules.sequence(
+                        SurfaceRules.ifTrue(SurfaceRules.ON_FLOOR, SurfaceRules.state(Blocks.SNOW_BLOCK.defaultBlockState())),
+                        SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, stone))),
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
+                        SurfaceRules.sequence(
+                                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.BEACH), SurfaceRules.sequence(
                         SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.SAND.defaultBlockState())),
                         SurfaceRules.ifTrue(SurfaceRules.DEEP_UNDER_FLOOR,
-                                SurfaceRules.state(Blocks.SANDSTONE.defaultBlockState())))));
+                                SurfaceRules.state(Blocks.SANDSTONE.defaultBlockState()))))));
+    }
+
+    private static TerrainCondition condition(TerrainCondition.Kind kind) {
+        return new TerrainCondition(kind);
     }
 }

@@ -148,6 +148,63 @@ class TerrainLogicTest {
     }
 
     @Test
+    void rockAndSnowFollowHeightAndSlope() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        WorldgenSettings.Surface surface = SETTINGS.surface;
+        double sea = SETTINGS.general.seaLevel - 1;
+        int rockCount = 0;
+        for (int x = -8000; x < 8000; x += 37) {
+            for (int z = -8000; z < 8000; z += 37) {
+                double height = logic.sampleSurfaceHeight(x, z);
+                if (logic.sampleSnow(x, z)) {
+                    assertTrue(height >= sea, "snow under the sea at height " + height);
+                }
+                if (logic.sampleRock(x, z)) {
+                    rockCount++;
+                    assertTrue(height >= sea + surface.rockMinAboveSea, "rock at height " + height);
+                }
+            }
+        }
+        assertTrue(rockCount > 0, "mountains should expose rock");
+    }
+
+    @Test
+    void tropicalAndColdZonesNeverTouch() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        int step = 512;
+        for (int x = -30000; x < 30000; x += step) {
+            for (int z = -30000; z < 30000; z += step) {
+                String here = logic.sampleClimateZone(x, z);
+                String east = logic.sampleClimateZone(x + step, z);
+                String south = logic.sampleClimateZone(x, z + step);
+                assertTrue(!touch(here, east) && !touch(here, south), "tropical next to cold at " + x + "," + z);
+            }
+        }
+    }
+
+    private static boolean touch(String a, String b) {
+        return a.equals("TROPICAL") && (b.equals("COLD") || b.equals("POLAR"))
+                || b.equals("TROPICAL") && (a.equals("COLD") || a.equals("POLAR"));
+    }
+
+    @Test
+    void biomesFollowAltitudeAndWater() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double sea = SETTINGS.general.seaLevel - 1;
+        for (int x = -8000; x < 8000; x += 97) {
+            for (int z = -8000; z < 8000; z += 97) {
+                String biome = logic.sampleBiome(x, z);
+                double height = logic.sampleSurfaceHeight(x, z);
+                if (height < sea) {
+                    assertTrue(biome.contains("ocean"), biome + " under the sea at " + x + "," + z);
+                } else {
+                    assertTrue(!biome.contains("ocean"), biome + " on land at " + x + "," + z);
+                }
+            }
+        }
+    }
+
+    @Test
     void settingsSurviveJsonAndKeepDefaultsForMissingFields() {
         WorldgenSettings partial = WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 500}}");
         assertEquals(500, partial.general.maxSurfaceHeight);

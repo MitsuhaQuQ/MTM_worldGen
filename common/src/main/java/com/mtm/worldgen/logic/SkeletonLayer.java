@@ -50,6 +50,9 @@ final class SkeletonLayer {
     private static final double STATS_SPACING = 1536.0;
     private static final int SITE_CACHE_LIMIT = 4096;
 
+    /** Position in the cross section where the summit weight reaches zero. */
+    private static final double SUMMIT_FADE = 0.3;
+
     private static final int NONE = 0;
     private static final int RANGE = 1;
 
@@ -60,6 +63,8 @@ final class SkeletonLayer {
     private final Fbm ridgeWarpX;
     private final Fbm ridgeWarpZ;
     private final RidgedNoise texture;
+    private final Fbm massifTexture;
+    private final Fbm surfaceDetail;
     private final Fbm foothills;
     private final Fbm plateauZone;
     private final Fbm plateauHeight;
@@ -75,6 +80,7 @@ final class SkeletonLayer {
      */
     private final double scale;
     private final double mountainGrade;
+    private final double halfHeightU;
     private final double zoneLow;
     private final double zoneHigh;
     private final double plateauLow;
@@ -96,12 +102,15 @@ final class SkeletonLayer {
         this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, m.ridgeWarpWavelength);
         this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength);
         this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 4);
+        this.massifTexture = new Fbm(Hashing.derive(seed, DETAIL_SALT + 1), 3, m.massifTextureWavelength);
+        this.surfaceDetail = new Fbm(Hashing.derive(seed, DETAIL_SALT + 2), 2, m.detailWavelength);
         this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
         this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
         this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, hillSettings.zoneWavelength);
         this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
+        this.halfHeightU = findHalfHeightU();
 
         NoiseStats zoneStats = new NoiseStats(zone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.zoneLow = zoneStats.quantile(1.0 - m.zoneCoverage - m.zoneFade);
@@ -132,7 +141,17 @@ final class SkeletonLayer {
         double[] mountain = mountains(wx, wz);
         double peaks = mountain[0];
         double textured = peaks + m.massifTextureShare * massif;
-        double rugged = textured > 0.0 ? m.textureShare * textured * (2.0 * texture.sample(wx / m.textureWavelength, wz / m.textureWavelength) - 1.0) : 0.0;
+        double summitCalm = 1.0 - m.summitTextureReduction * mountain[2];
+        double rugged = 0.0;
+        if (textured > 0.0) {
+            // Spurs near ridges fade into crease-free noise on the open massif, where they have no direction to follow
+            double openWeight = scale * m.massifHeight;
+            openWeight *= openWeight;
+            double open = 0.5 + 0.5 * massifTexture.sample(wx, wz);
+            double relief = (mountain[3] + openWeight * open) / (mountain[4] + openWeight);
+            rugged = summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
+        }
+        double detail = scale * m.detailHeight * mountainZone * surfaceDetail.sample(x, z);
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
@@ -141,15 +160,21 @@ final class SkeletonLayer {
         double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
         double rolling = scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
 
-        return land * (massif + peaks + rugged + foothill + plateau + rolling);
+        return land * (massif + peaks + rugged + detail + foothill + plateau + rolling);
     }
 
-    /** Tallest mountain profile at a position, and the strongest foothill belt weight, as {height, weight}. */
+    /**
+     * Tallest mountain profile at a position with the strongest foothill and summit weights, plus the spur texture
+     * summed over all ridges weighted by their squared height, as {height, belt, summit, spurSum, spurWeight}.
+     */
     private double[] mountains(double x, double z) {
         int cellX = (int) Math.floor(x / m.siteSpacing);
         int cellZ = (int) Math.floor(z / m.siteSpacing);
         double peak = 0.0;
         double belt = 0.0;
+        double summit = 0.0;
+        double spurSum = 0.0;
+        double spurWeight = 0.0;
         for (int dx = -SITE_SEARCH; dx <= SITE_SEARCH; dx++) {
             for (int dz = -SITE_SEARCH; dz <= SITE_SEARCH; dz++) {
                 Site site = site(cellX + dx, cellZ + dz);
@@ -160,13 +185,33 @@ final class SkeletonLayer {
                     double[] profile = ridgeProfile(x, z, site, other);
                     peak = smoothMax(peak, profile[0]);
                     belt = Math.max(belt, profile[1]);
+                    summit = Math.max(summit, profile[2]);
+                    if (profile[0] > 0.0) {
+                        double weight = profile[0] * profile[0];
+                        spurSum += weight * spurTexture(x, z, site, other);
+                        spurWeight += weight;
+                    }
                 }
             }
         }
-        return new double[]{peak, belt};
+        return new double[]{peak, belt, summit, spurSum, spurWeight};
     }
 
-    /** Height and foothill weight of the ridge between two linked sites at a position. */
+    /**
+     * Ridged texture in the frame of a ridge, stretched across it. Plain ridged noise creases along closed loops
+     * that read as rings on a slope; stretched like this the creases run down the flanks as spurs and gullies.
+     */
+    private double spurTexture(double x, double z, Site a, Site b) {
+        double sx = b.x - a.x;
+        double sz = b.z - a.z;
+        double length = Math.hypot(sx, sz);
+        // The bend keeps spurs from running ruler straight; it adds no rotation, so it cannot wind them into spirals
+        double along = ((x - a.x) * sx + (z - a.z) * sz) / length + m.textureBend * massifTexture.sample(x, z);
+        double across = ((x - a.x) * sz - (z - a.z) * sx) / length;
+        return texture.sample(along / m.textureWavelength, across / (m.textureWavelength * m.textureStretch));
+    }
+
+    /** Height, foothill weight and summit weight of the ridge between two linked sites at a position. */
     private double[] ridgeProfile(double x, double z, Site a, Site b) {
         double sx = b.x - a.x;
         double sz = b.z - a.z;
@@ -175,17 +220,40 @@ final class SkeletonLayer {
         double distance = Math.hypot(x - (a.x + t * sx), z - (a.z + t * sz));
         double crest = a.height + t * (b.height - a.height);
         double height = crest * ridgeFactor(x, z);
-        double u = distance / halfWidth(height);
-        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax)};
+        // The profile starts at the edge of the summit band, leaving the band itself at crest height
+        double slopeDistance = Math.max(0.0, distance - 0.5 * m.summitWidth);
+        double u = slopeDistance / halfWidth(height, a.width + t * (b.width - a.width));
+        double summit = 1.0 - smoothstep(0.0, SUMMIT_FADE, u);
+        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax), summit};
     }
 
     private double ridgeFactor(double x, double z) {
         return 1.0 - m.ridgeVariation + m.ridgeVariation * ridge.sample(x, z);
     }
 
-    /** Half-width that keeps {@link #profile}'s steepest grade, at most (1.5 + 0.5 sharpness) H / W, at the mountain grade. */
-    private double halfWidth(double height) {
-        return Math.max(1.0, (1.5 + 0.5 * m.crestSharpness) * height / mountainGrade);
+    /**
+     * Base half-width of a mountain whose width at half height is the given value, widened if needed so that
+     * {@link #profile}'s steepest grade, at most (1.5 + 0.5 sharpness) H / W, stays at the mountain grade.
+     */
+    private double halfWidth(double height, double width) {
+        double fromWidth = 0.5 * (width - m.summitWidth) / halfHeightU;
+        double fromSlope = (1.5 + 0.5 * m.crestSharpness) * height / mountainGrade;
+        return Math.max(fromWidth, fromSlope);
+    }
+
+    /** Position u in the cross section where {@link #profile} falls to one half. */
+    private double findHalfHeightU() {
+        double low = 0.0;
+        double high = 1.0;
+        for (int i = 0; i < 32; i++) {
+            double mid = 0.5 * (low + high);
+            if (profile(mid) > 0.5) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
     }
 
     /**
@@ -245,11 +313,12 @@ final class SkeletonLayer {
         double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
         double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z));
         if (zoneWeight < m.siteMinZone) {
-            return new Site(x, z, NONE, 0.0, new Site[0]);
+            return new Site(x, z, NONE, 0.0, 0.0, new Site[0]);
         }
         double strength = 0.4 + 0.6 * zoneWeight;
         double height = scale * strength * (m.peakMin + (m.peakMax - m.peakMin) * Hashing.unit(Hashing.derive(hash, 2)));
-        return new Site(x, z, RANGE, height, new Site[0]);
+        double width = m.widthMin + (m.widthMax - m.widthMin) * Hashing.unit(Hashing.derive(hash, 3));
+        return new Site(x, z, RANGE, height, width, new Site[0]);
     }
 
     /**
@@ -281,7 +350,7 @@ final class SkeletonLayer {
             }
         }
         Site[] links = ahead != null ? new Site[]{ahead} : new Site[0];
-        return new Site(site.x, site.z, site.type, site.height, links);
+        return new Site(site.x, site.z, site.type, site.height, site.width, links);
     }
 
     private static double smoothstep(double edge0, double edge1, double value) {
@@ -289,6 +358,6 @@ final class SkeletonLayer {
         return t * t * (3.0 - 2.0 * t);
     }
 
-    private record Site(double x, double z, int type, double height, Site[] links) {
+    private record Site(double x, double z, int type, double height, double width, Site[] links) {
     }
 }
