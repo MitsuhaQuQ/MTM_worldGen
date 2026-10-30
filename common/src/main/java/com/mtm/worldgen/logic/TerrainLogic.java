@@ -12,40 +12,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * Everything is a function of seed + coordinates + settings, independent of evaluation order.
  */
 public final class TerrainLogic {
-    private static final int CACHE_CAPACITY = 64;
-    /** Spawn search radius in coarse cells (64 * 64 blocks = 4096 blocks by default). */
-    private static final int SPAWN_SEARCH_RINGS = 64;
-    private static final double SPAWN_MIN_ABOVE_SEA = 3.0;
-    private static final double SPAWN_MAX_ABOVE_SEA = 40.0;
 
     private static final long BEACH_SALT = 0x4245414348L;
-    /**
-     * Beach depth inland from the coastline varies along the coast between these values in blocks;
-     * negative widths leave stretches of coast without a beach.
-     */
-    private static final double BEACH_MIN_WIDTH = -8.0;
-    private static final double BEACH_MAX_WIDTH = 96.0;
-    private static final double BEACH_WIDTH_WAVELENGTH = 768.0;
-    /** Fractal noise clusters around zero; stretch it so beach widths actually reach both ends of the range. */
-    private static final double BEACH_WIDTH_CONTRAST = 2.0;
-    /** Sand continues this far offshore as shallow sea floor. */
-    private static final double BEACH_OFFSHORE = 32.0;
-    /** No beach on land rising more than this above sea level, such as coastal hills. */
-    private static final double BEACH_MAX_HEIGHT = 6.0;
 
     private static final int CHUNK_SIZE = 16;
     /** Horizontal spacing of the corners the terrain density is evaluated at. */
     private static final int NOISE_CELL_WIDTH = 4;
-    /** Vanilla adds density around structure pieces, which can lift terrain above the plain surface. */
-    private static final int STRUCTURE_TERRAIN_MARGIN = 32;
 
-    /** The top fraction of the height range is compressed so peaks approach but never exceed the maximum. */
-    private static final double SOFT_CAP_FRACTION = 0.13;
 
     private static final int FIELD_HEIGHT = 0;
     private static final int FIELD_COAST_DISTANCE = 1;
 
-    private static final Map<Long, TerrainLogic> BY_SEED = new ConcurrentHashMap<>();
+    private static final Map<WorldKey, TerrainLogic> WORLDS = new ConcurrentHashMap<>();
 
     private final WorldgenSettings settings;
     private final ContinentLayer continents;
@@ -59,18 +37,18 @@ public final class TerrainLogic {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
         this.skeleton = new SkeletonLayer(seed, settings);
-        this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, BEACH_WIDTH_WAVELENGTH);
-        this.regions = new RegionCache(this::generateRegion, CACHE_CAPACITY);
+        this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
+        this.regions = new RegionCache(this::generateRegion, settings.general.regionCacheSize);
     }
 
-    /** Shared instance for a world seed, using the default settings until per-world config exists. */
-    public static TerrainLogic forSeed(long seed) {
-        return BY_SEED.computeIfAbsent(seed, s -> new TerrainLogic(s, WorldgenSettings.DEFAULT));
+    /** Shared instance for a world, identified by its seed and settings. */
+    public static TerrainLogic forWorld(long seed, WorldgenSettings settings) {
+        return WORLDS.computeIfAbsent(new WorldKey(seed, settings.toJson()), key -> new TerrainLogic(seed, settings));
     }
 
-    /** Drops the shared instance for a seed so the next {@link #forSeed} starts with cold caches. For tests. */
-    public static void forget(long seed) {
-        BY_SEED.remove(seed);
+    /** Drops the shared instance of a world so the next {@link #forWorld} starts with cold caches. For tests. */
+    public static void forget(long seed, WorldgenSettings settings) {
+        WORLDS.remove(new WorldKey(seed, settings.toJson()));
     }
 
     public WorldgenSettings settings() {
@@ -92,13 +70,13 @@ public final class TerrainLogic {
      * structures. Everything above is known to be air, which lets chunk filling stop early.
      */
     public int highestBlockInChunk(int chunkX, int chunkZ) {
-        double highest = settings.seaLevel();
+        double highest = settings.general.seaLevel;
         for (int dx = 0; dx <= CHUNK_SIZE; dx += NOISE_CELL_WIDTH) {
             for (int dz = 0; dz <= CHUNK_SIZE; dz += NOISE_CELL_WIDTH) {
                 highest = Math.max(highest, sampleSurfaceHeight(chunkX * CHUNK_SIZE + dx, chunkZ * CHUNK_SIZE + dz));
             }
         }
-        return (int) Math.ceil(highest) + STRUCTURE_TERRAIN_MARGIN;
+        return (int) Math.ceil(highest) + settings.general.structureTerrainMargin;
     }
 
     /** Surface height at a block column, memoized per thread for repeated queries of the same column. */
@@ -122,14 +100,14 @@ public final class TerrainLogic {
      */
     public double sampleSurfaceHeight(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        double skeletonHeight = skeleton.height(x, z, base - (settings.seaLevel() - 1));
+        double skeletonHeight = skeleton.height(x, z, base - (settings.general.seaLevel - 1));
         return softCap(base + skeletonHeight);
     }
 
     /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */
     private double softCap(double height) {
-        double band = SOFT_CAP_FRACTION * settings.maxSurfaceHeight();
-        double start = settings.maxSurfaceHeight() - band;
+        double band = settings.general.softCapFraction * settings.general.maxSurfaceHeight;
+        double start = settings.general.maxSurfaceHeight - band;
         if (height <= start) {
             return height;
         }
@@ -147,12 +125,12 @@ public final class TerrainLogic {
      */
     public boolean sampleBeach(double x, double z) {
         double distance = sampleCoastDistance(x, z);
-        if (distance < -BEACH_OFFSHORE) {
+        if (distance < -settings.beaches.offshore) {
             return false;
         }
-        double noise = Math.max(-1.0, Math.min(1.0, BEACH_WIDTH_CONTRAST * beachWidth.sample(x, z)));
-        double width = BEACH_MIN_WIDTH + (BEACH_MAX_WIDTH - BEACH_MIN_WIDTH) * (0.5 + 0.5 * noise);
-        return distance < width && sampleSurfaceHeight(x, z) < settings.seaLevel() - 1 + BEACH_MAX_HEIGHT;
+        double noise = Math.max(-1.0, Math.min(1.0, settings.beaches.widthContrast * beachWidth.sample(x, z)));
+        double width = settings.beaches.minWidth + (settings.beaches.maxWidth - settings.beaches.minWidth) * (0.5 + 0.5 * noise);
+        return distance < width && sampleSurfaceHeight(x, z) < settings.general.seaLevel - 1 + settings.beaches.maxHeight;
     }
 
     /**
@@ -162,13 +140,13 @@ public final class TerrainLogic {
      * @return block column at the center of the chosen cell, or the origin if no land is found in range
      */
     public BlockColumn findSpawn() {
-        double sea = settings.seaLevel() - 1;
-        for (int ring = 0; ring <= SPAWN_SEARCH_RINGS; ring++) {
+        double sea = settings.general.seaLevel - 1;
+        for (int ring = 0; ring <= settings.spawn.searchRings; ring++) {
             for (int dx = -ring; dx <= ring; dx++) {
                 for (int dz = -ring; dz <= ring; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) == ring && isSpawnCell(dx, dz, sea)) {
-                        int half = settings.cellSize() / 2;
-                        return new BlockColumn(dx * settings.cellSize() + half, dz * settings.cellSize() + half);
+                        int half = settings.general.cellSize / 2;
+                        return new BlockColumn(dx * settings.general.cellSize + half, dz * settings.general.cellSize + half);
                     }
                 }
             }
@@ -210,7 +188,7 @@ public final class TerrainLogic {
 
     private boolean isSpawnCell(int cellX, int cellZ, double sea) {
         double height = cellCenterSurface(cellX, cellZ);
-        if (height < sea + SPAWN_MIN_ABOVE_SEA || height > sea + SPAWN_MAX_ABOVE_SEA) {
+        if (height < sea + settings.spawn.minAboveSea || height > sea + settings.spawn.maxAboveSea) {
             return false;
         }
         for (int dx = -1; dx <= 1; dx++) {
@@ -224,7 +202,7 @@ public final class TerrainLogic {
     }
 
     private double cellCenterSurface(int cellX, int cellZ) {
-        double size = settings.cellSize();
+        double size = settings.general.cellSize;
         return sampleSurfaceHeight((cellX + 0.5) * size, (cellZ + 0.5) * size);
     }
 
@@ -244,7 +222,7 @@ public final class TerrainLogic {
 
     /** Catmull-Rom interpolation of a cell field from the 4x4 surrounding cell centers. */
     private double interpolate(int field, double x, double z) {
-        double size = settings.cellSize();
+        double size = settings.general.cellSize;
         double u = x / size - 0.5;
         double v = z / size - 0.5;
         int cellX = (int) Math.floor(u);
@@ -262,7 +240,7 @@ public final class TerrainLogic {
 
     private LogicRegion generateRegion(int regionX, int regionZ) {
         int cells = settings.cellsPerRegion();
-        int size = settings.cellSize();
+        int size = settings.general.cellSize;
         float[] heights = new float[cells * cells];
         float[] coastDistances = new float[cells * cells];
         for (int lz = 0; lz < cells; lz++) {
@@ -279,6 +257,9 @@ public final class TerrainLogic {
 
     private static double catmullRom(double p0, double p1, double p2, double p3, double t) {
         return p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)));
+    }
+
+    private record WorldKey(long seed, String settingsJson) {
     }
 
     /** Direct-mapped per-thread cache of recently sampled columns (one chunk's worth of slots). */

@@ -12,8 +12,7 @@ import java.util.Map;
  * seed + block coordinates, evaluated per block column so ridges and peaks stay sharp.
  *
  * <ul>
- *   <li>Mountain sites sit on a jittered grid inside low-frequency orogeny zones. Each site is either part of
- *       a range or an isolated peak. Range sites link to the neighbor best aligned with a low-frequency
+ *   <li>Mountain sites sit on a jittered grid inside low-frequency orogeny zones. Sites link to the neighbor best aligned with a low-frequency
  *       orientation field, so neighboring ranges run roughly parallel and chain into long ridges.</li>
  *   <li>Mountains stand on a broad massif uplift of their zone. Cross sections are S-shaped, with the half-width
  *       derived from the slope limit; overlapping ridges merge through a smooth maximum, and a ridged texture
@@ -35,72 +34,17 @@ final class SkeletonLayer {
     private static final long HILLS_ZONE_SALT = 0x48494C4C5AL;
     private static final long HILLS_SALT = 0x48494C4CL;
 
-    // Mountain zones and sites
-    private static final double ZONE_WAVELENGTH = 7168.0;
-    /** Fraction of the world inside orogeny zones (roughly the share of land with mountains). */
-    private static final double ZONE_COVERAGE = 0.32;
-    private static final double ZONE_FADE = 0.05;
-    private static final double SITE_SPACING = 1536.0;
-    private static final double SITE_JITTER = 0.8;
     /**
      * Sites searched in each direction. A link spans up to about 2.8 cells (diagonal neighbor plus jitter), so
      * a point near one end of a ridge can be almost 3 cells from the site that owns it; a smaller window cuts
      * ridges off and leaves cliffs.
      */
     private static final int SITE_SEARCH = 3;
-    /** Sites need at least this much zone weight to carry a mountain. */
-    private static final double SITE_MIN_ZONE = 0.1;
-    /** Broad uplift of the whole orogeny zone that ranges and peaks stand on. */
-    private static final double MASSIF_HEIGHT = 70.0;
-    /** Ridge and peak height above the massif. */
-    private static final double PEAK_MIN = 60.0;
-    private static final double PEAK_MAX = 170.0;
-    private static final double RIDGE_WARP = 700.0;
-    private static final double RIDGE_WARP_WAVELENGTH = 3072.0;
-    /** Minimum cosine between a link and the orientation field for two range sites to join. */
-    private static final double LINK_MIN_ALIGNMENT = 0.5;
-    private static final double ORIENTATION_WAVELENGTH = 16384.0;
-    private static final double RIDGE_WAVELENGTH = 1024.0;
-    /** Ridge height varies along the range by this fraction, giving summits and saddles. */
-    private static final double RIDGE_VARIATION = 0.2;
-    /**
-     * Spur-and-gully texture on mountain flanks: ridged noise stretched along the range orientation, with an
-     * amplitude proportional to the local mountain height so it fades out at the foot.
-     */
-    private static final double TEXTURE_SHARE = 0.15;
-    private static final double TEXTURE_ACROSS = 640.0;
-    private static final double TEXTURE_ALONG = 1920.0;
-    /** Share of the mountain slope limit used by the main profile; the rest is headroom for texture and foothills. */
-    private static final double MOUNTAIN_SLOPE_SHARE = 0.45;
-    /** Blend width in blocks where two mountain profiles meet, so overlapping ridges merge without a crease. */
-    private static final double MERGE_WIDTH = 24.0;
 
-    private static final double FOOTHILL_HEIGHT = 32.0;
-    private static final double FOOTHILL_WAVELENGTH = 512.0;
 
-    // Plateaus
-    private static final double PLATEAU_ZONE_WAVELENGTH = 9216.0;
-    private static final double PLATEAU_COVERAGE = 0.07;
-    private static final double PLATEAU_FADE = 0.2;
-    private static final double PLATEAU_MIN = 40.0;
-    private static final double PLATEAU_MAX = 80.0;
 
-    // Hills
-    private static final double HILLS_ZONE_WAVELENGTH = 5120.0;
-    private static final double HILLS_COVERAGE = 0.35;
-    private static final double HILLS_FADE = 0.15;
-    private static final double HILLS_HEIGHT = 26.0;
-    private static final double HILLS_WAVELENGTH = 640.0;
 
-    /**
-     * Skeleton fades in while the continent base rises this many blocks above sea level, so mountains do not
-     * rise straight out of the sea. Uses the smooth base height rather than the coast distance estimate,
-     * which is only reliable close to the coast.
-     */
-    private static final double COAST_FADE_HEIGHT = 8.0;
 
-    /** Maximum surface height the height constants in this class are designed for. */
-    private static final double BASELINE_MAX_SURFACE = 300.0;
 
     private static final int STATS_SAMPLES_PER_AXIS = 96;
     private static final double STATS_SPACING = 1536.0;
@@ -108,7 +52,6 @@ final class SkeletonLayer {
 
     private static final int NONE = 0;
     private static final int RANGE = 1;
-    private static final int PEAK = 2;
 
     private final long siteSeed;
     private final Fbm zone;
@@ -123,6 +66,9 @@ final class SkeletonLayer {
     private final Fbm hillsZone;
     private final Fbm hills;
     private final WorldgenSettings settings;
+    private final WorldgenSettings.Mountains m;
+    private final WorldgenSettings.Plateaus plateaus;
+    private final WorldgenSettings.Hills hillSettings;
     /**
      * Heights above (and the hill wavelengths that keep their slopes) are designed for a 300 block maximum
      * surface and scaled by maxSurfaceHeight / 300, as the design document specifies.
@@ -139,30 +85,33 @@ final class SkeletonLayer {
 
     SkeletonLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
-        this.scale = settings.maxSurfaceHeight() / BASELINE_MAX_SURFACE;
+        this.m = settings.mountains;
+        this.plateaus = settings.plateaus;
+        this.hillSettings = settings.hills;
+        this.scale = settings.heightScale();
         this.siteSeed = Hashing.derive(seed, SITE_SALT);
-        this.zone = new Fbm(Hashing.derive(seed, ZONE_SALT), 3, ZONE_WAVELENGTH);
-        this.orientation = new Fbm(Hashing.derive(seed, ORIENTATION_SALT), 2, ORIENTATION_WAVELENGTH);
-        this.ridge = new Fbm(Hashing.derive(seed, RIDGE_SALT), 2, RIDGE_WAVELENGTH);
-        this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, RIDGE_WARP_WAVELENGTH);
-        this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, RIDGE_WARP_WAVELENGTH);
+        this.zone = new Fbm(Hashing.derive(seed, ZONE_SALT), 3, m.zoneWavelength);
+        this.orientation = new Fbm(Hashing.derive(seed, ORIENTATION_SALT), 2, m.orientationWavelength);
+        this.ridge = new Fbm(Hashing.derive(seed, RIDGE_SALT), 2, m.ridgeWavelength);
+        this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, m.ridgeWarpWavelength);
+        this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength);
         this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 3);
-        this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, FOOTHILL_WAVELENGTH * scale);
-        this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, PLATEAU_ZONE_WAVELENGTH);
-        this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, PLATEAU_ZONE_WAVELENGTH);
-        this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, HILLS_ZONE_WAVELENGTH);
-        this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, HILLS_WAVELENGTH * scale);
-        this.mountainGrade = settings.mountainSlope() / 100.0 * MOUNTAIN_SLOPE_SHARE;
+        this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
+        this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
+        this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
+        this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, hillSettings.zoneWavelength);
+        this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
+        this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
 
         NoiseStats zoneStats = new NoiseStats(zone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
-        this.zoneLow = zoneStats.quantile(1.0 - ZONE_COVERAGE - ZONE_FADE);
-        this.zoneHigh = zoneStats.quantile(1.0 - ZONE_COVERAGE + ZONE_FADE);
+        this.zoneLow = zoneStats.quantile(1.0 - m.zoneCoverage - m.zoneFade);
+        this.zoneHigh = zoneStats.quantile(1.0 - m.zoneCoverage + m.zoneFade);
         NoiseStats plateauStats = new NoiseStats(plateauZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
-        this.plateauLow = plateauStats.quantile(1.0 - PLATEAU_COVERAGE - PLATEAU_FADE / 2.0);
-        this.plateauHigh = plateauStats.quantile(1.0 - PLATEAU_COVERAGE + PLATEAU_FADE / 2.0);
+        this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
+        this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
         NoiseStats hillsStats = new NoiseStats(hillsZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
-        this.hillsLow = hillsStats.quantile(1.0 - HILLS_COVERAGE - HILLS_FADE / 2.0);
-        this.hillsHigh = hillsStats.quantile(1.0 - HILLS_COVERAGE + HILLS_FADE / 2.0);
+        this.hillsLow = hillsStats.quantile(1.0 - hillSettings.coverage - hillSettings.fade / 2.0);
+        this.hillsHigh = hillsStats.quantile(1.0 - hillSettings.coverage + hillSettings.fade / 2.0);
     }
 
     /**
@@ -171,33 +120,33 @@ final class SkeletonLayer {
      * @param baseAboveSea continent base height above the sea surface in blocks
      */
     double height(double x, double z, double baseAboveSea) {
-        double land = smoothstep(0.0, COAST_FADE_HEIGHT, baseAboveSea);
+        double land = smoothstep(0.0, settings.general.coastFadeHeight, baseAboveSea);
         if (land <= 0.0) {
             return 0.0;
         }
         double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z));
-        double massif = scale * MASSIF_HEIGHT * mountainZone;
+        double massif = scale * m.massifHeight * mountainZone;
         // Warp the lookup so ridges between sites curve instead of running dead straight
-        double wx = x + RIDGE_WARP * ridgeWarpX.sample(x, z);
-        double wz = z + RIDGE_WARP * ridgeWarpZ.sample(x, z);
+        double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
+        double wz = z + m.ridgeWarp * ridgeWarpZ.sample(x, z);
         double[] mountain = mountains(wx, wz);
         double peaks = mountain[0];
-        double rugged = peaks > 0.0 ? TEXTURE_SHARE * peaks * (2.0 * orientedTexture(x, z) - 1.0) : 0.0;
-        double foothill = scale * FOOTHILL_HEIGHT * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
+        double rugged = peaks > 0.0 ? m.textureShare * peaks * (2.0 * orientedTexture(x, z) - 1.0) : 0.0;
+        double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
-        double plateau = scale * plateauWeight * (PLATEAU_MIN + (PLATEAU_MAX - PLATEAU_MIN) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
+        double plateau = scale * plateauWeight * (plateaus.minHeight + (plateaus.maxHeight - plateaus.minHeight) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
 
         double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
-        double rolling = scale * HILLS_HEIGHT * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
+        double rolling = scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
 
         return land * (massif + peaks + rugged + foothill + plateau + rolling);
     }
 
     /** Tallest mountain profile at a position, and the strongest foothill belt weight, as {height, weight}. */
     private double[] mountains(double x, double z) {
-        int cellX = (int) Math.floor(x / SITE_SPACING);
-        int cellZ = (int) Math.floor(z / SITE_SPACING);
+        int cellX = (int) Math.floor(x / m.siteSpacing);
+        int cellZ = (int) Math.floor(z / m.siteSpacing);
         double peak = 0.0;
         double belt = 0.0;
         for (int dx = -SITE_SEARCH; dx <= SITE_SEARCH; dx++) {
@@ -206,17 +155,10 @@ final class SkeletonLayer {
                 if (site.type == NONE) {
                     continue;
                 }
-                if (site.type == RANGE && site.links.length > 0) {
-                    for (Site other : site.links) {
-                        double[] profile = ridgeProfile(x, z, site, other);
-                        peak = smoothMax(peak, profile[0]);
-                        belt = Math.max(belt, profile[1]);
-                    }
-                } else {
-                    double height = site.height * ridgeFactor(x, z);
-                    double u = Math.hypot(x - site.x, z - site.z) / halfWidth(height);
-                    peak = smoothMax(peak, profile(u) * height);
-                    belt = Math.max(belt, foothillBelt(u) * site.height / (scale * PEAK_MAX));
+                for (Site other : site.links) {
+                    double[] profile = ridgeProfile(x, z, site, other);
+                    peak = smoothMax(peak, profile[0]);
+                    belt = Math.max(belt, profile[1]);
                 }
             }
         }
@@ -233,11 +175,11 @@ final class SkeletonLayer {
         double crest = a.height + t * (b.height - a.height);
         double height = crest * ridgeFactor(x, z);
         double u = distance / halfWidth(height);
-        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * PEAK_MAX)};
+        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax)};
     }
 
     private double ridgeFactor(double x, double z) {
-        return 1.0 - RIDGE_VARIATION + RIDGE_VARIATION * ridge.sample(x, z);
+        return 1.0 - m.ridgeVariation + m.ridgeVariation * ridge.sample(x, z);
     }
 
     /** Half-width that keeps {@link #profile}'s steepest grade (1.5 H / W) at the mountain grade. */
@@ -252,7 +194,7 @@ final class SkeletonLayer {
         double sin = Math.sin(angle);
         double along = x * cos + z * sin;
         double across = -x * sin + z * cos;
-        return texture.sample(along / TEXTURE_ALONG, across / TEXTURE_ACROSS);
+        return texture.sample(along / m.textureAlong, across / m.textureAcross);
     }
 
     /**
@@ -268,8 +210,8 @@ final class SkeletonLayer {
      * within it. The blend width shrinks with the smaller value, so a profile fading to zero never lifts the
      * terrain around it.
      */
-    private static double smoothMax(double a, double b) {
-        double k = Math.min(MERGE_WIDTH, Math.min(a, b));
+    private double smoothMax(double a, double b) {
+        double k = Math.min(m.mergeWidth, Math.min(a, b));
         if (k <= 0.0) {
             return Math.max(a, b);
         }
@@ -303,17 +245,15 @@ final class SkeletonLayer {
     /** Position, type and height of a site, without links. */
     private Site basicSite(int cellX, int cellZ) {
         long hash = Hashing.hash(siteSeed, cellX, cellZ);
-        double x = (cellX + 0.5 + SITE_JITTER * (Hashing.unit(hash) - 0.5)) * SITE_SPACING;
-        double z = (cellZ + 0.5 + SITE_JITTER * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * SITE_SPACING;
+        double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * m.siteSpacing;
+        double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
         double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z));
-        if (zoneWeight < SITE_MIN_ZONE) {
+        if (zoneWeight < m.siteMinZone) {
             return new Site(x, z, NONE, 0.0, new Site[0]);
         }
-        long typeHash = Hashing.derive(hash, 1);
-        int type = Hashing.unit(typeHash) < settings.mountainRangeProbability() ? RANGE : PEAK;
         double strength = 0.4 + 0.6 * zoneWeight;
-        double height = scale * strength * (PEAK_MIN + (PEAK_MAX - PEAK_MIN) * Hashing.unit(Hashing.derive(hash, 2)));
-        return new Site(x, z, type, height, new Site[0]);
+        double height = scale * strength * (m.peakMin + (m.peakMax - m.peakMin) * Hashing.unit(Hashing.derive(hash, 2)));
+        return new Site(x, z, RANGE, height, new Site[0]);
     }
 
     /**
@@ -325,7 +265,7 @@ final class SkeletonLayer {
         double dirX = Math.cos(angle);
         double dirZ = Math.sin(angle);
         Site ahead = null;
-        double bestAhead = LINK_MIN_ALIGNMENT;
+        double bestAhead = m.linkMinAlignment;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 if (dx == 0 && dz == 0) {

@@ -11,6 +11,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerrainLogicTest {
@@ -70,7 +71,7 @@ class TerrainLogicTest {
     @Test
     void surfaceIsContinuousAcrossRegionBorders() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
-        int border = SETTINGS.regionSize();
+        int border = SETTINGS.general.regionSize;
         double maxStep = 0.0;
         for (int z = -border; z <= border; z += 7) {
             double west = logic.sampleSurfaceHeight(border - 1, z);
@@ -78,7 +79,7 @@ class TerrainLogicTest {
             maxStep = Math.max(maxStep, Math.abs(east - west));
         }
         // One block apart, so the step is the grade: anything beyond twice the steepest allowed slope is a seam
-        double limit = 2.0 * SETTINGS.mountainSlope() / 100.0;
+        double limit = 2.0 * SETTINGS.slopes.mountain / 100.0;
         assertTrue(maxStep < limit, "height jumps by " + maxStep + " across a region border");
     }
 
@@ -91,8 +92,8 @@ class TerrainLogicTest {
                 highest = Math.max(highest, logic.sampleSurfaceHeight(x, z));
             }
         }
-        assertTrue(highest <= SETTINGS.maxSurfaceHeight(), "surface reaches " + highest);
-        assertTrue(highest > SETTINGS.maxSurfaceHeight() / 2.0, "no tall mountains, highest is " + highest);
+        assertTrue(highest <= SETTINGS.general.maxSurfaceHeight, "surface reaches " + highest);
+        assertTrue(highest > SETTINGS.general.maxSurfaceHeight / 2.0, "no tall mountains, highest is " + highest);
     }
 
     /**
@@ -102,10 +103,10 @@ class TerrainLogicTest {
     @Test
     void slopesStayWithinLimits() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
-        double limit = SETTINGS.mountainSlope() / 100.0;
+        double limit = SETTINGS.slopes.mountain / 100.0;
         Random random = new Random(7);
         List<Double> grades = new ArrayList<>();
-        double sea = SETTINGS.seaLevel() - 1;
+        double sea = SETTINGS.general.seaLevel - 1;
         for (int i = 0; i < 40000; i++) {
             int x = random.nextInt(16000) - 8000;
             int z = random.nextInt(16000) - 8000;
@@ -137,7 +138,7 @@ class TerrainLogicTest {
 
     @Test
     void spawnIsOnLandForManySeeds() {
-        double sea = SETTINGS.seaLevel() - 1;
+        double sea = SETTINGS.general.seaLevel - 1;
         for (long seed = 0; seed < 20; seed++) {
             TerrainLogic logic = new TerrainLogic(seed * 0x9E3779B97F4A7C15L, SETTINGS);
             BlockColumn spawn = logic.findSpawn();
@@ -147,11 +148,32 @@ class TerrainLogicTest {
     }
 
     @Test
-    void oceanCoversRoughlyTheConfiguredRatio() {
+    void settingsSurviveJsonAndKeepDefaultsForMissingFields() {
+        WorldgenSettings partial = WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 500}}");
+        assertEquals(500, partial.general.maxSurfaceHeight);
+        assertEquals(SETTINGS.general.seaLevel, partial.general.seaLevel);
+        assertEquals(SETTINGS.mountains.peakMax, partial.mountains.peakMax);
+        assertEquals(partial.toJson(), WorldgenSettings.fromJson(partial.toJson()).toJson());
+        assertEquals(0, partial.buildHeight() % 16, "build height must be a multiple of 16");
+        assertTrue(partial.minBuildY() + partial.buildHeight() > 500, "build range must contain the surface");
+    }
+
+    @Test
+    void invalidSettingsAreRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> WorldgenSettings.fromJson("{\"general\": {\"cellSize\": 63}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 40}}"));
+        assertThrows(IllegalArgumentException.class, () -> WorldgenSettings.fromJson("{not json"));
+    }
+
+    @Test
+    void oceanCoversRoughlyTheConfiguredRatio
+() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         int ocean = 0;
         int total = 0;
-        double sea = SETTINGS.seaLevel() - 1;
+        double sea = SETTINGS.general.seaLevel - 1;
         for (int x = -40000; x < 40000; x += 400) {
             for (int z = -40000; z < 40000; z += 400) {
                 if (logic.sampleSurfaceHeight(x, z) < sea) {
@@ -161,6 +183,6 @@ class TerrainLogicTest {
             }
         }
         double ratio = (double) ocean / total;
-        assertTrue(Math.abs(ratio - SETTINGS.oceanRatio()) < 0.08, "ocean ratio was " + ratio);
+        assertTrue(Math.abs(ratio - SETTINGS.continents.oceanRatio) < 0.08, "ocean ratio was " + ratio);
     }
 }

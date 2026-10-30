@@ -6,6 +6,7 @@ import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.benchmark.GenerationBenchmark;
 import com.mtm.worldgen.logic.BlockColumn;
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -56,6 +57,8 @@ public final class MtmGameTests {
     private static final int TIMEOUT_TICKS = 400;
 
     private static final long SEED = 20261029L;
+    /** Fixed defaults, so a local config file cannot change what the tests and the golden hash see. */
+    private static final WorldgenSettings SETTINGS = WorldgenSettings.DEFAULT;
     private static final int SAMPLE_ORIGIN = -6000;
     private static final int SAMPLE_STEP = 397;
     private static final int SAMPLES_PER_AXIS = 32;
@@ -63,7 +66,7 @@ public final class MtmGameTests {
      * Hash of all sampled columns for {@link #SEED}. Changes whenever terrain generation changes on purpose:
      * update it then, together with LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0xc95fcb0fea348ab2L;
+    private static final long EXPECTED_COLUMN_HASH = 0xc660882bf230bedeL;
 
     private static final int SEA_SURFACE_Y = 62;
     private static final double DEEP_OCEAN_COAST_DISTANCE = -1200.0;
@@ -75,18 +78,18 @@ public final class MtmGameTests {
     private static final LevelHeightAccessor MTM_HEIGHT = new LevelHeightAccessor() {
         @Override
         public int getHeight() {
-            return MtmGenerators.HEIGHT;
+            return SETTINGS.buildHeight();
         }
 
         @Override
         public int getMinBuildHeight() {
-            return MtmGenerators.MIN_Y;
+            return SETTINGS.minBuildY();
         }
     };
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void columnsMatchExpectedHash(GameTestHelper helper) {
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, SETTINGS);
         long actual = hashColumns(generator(helper), samplePoints());
         if (actual != EXPECTED_COLUMN_HASH) {
             helper.fail("Column hash 0x" + Long.toHexString(actual) + " != expected 0x"
@@ -99,10 +102,10 @@ public final class MtmGameTests {
     public void columnsDoNotDependOnSamplingOrder(GameTestHelper helper) {
         List<int[]> points = samplePoints();
 
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, SETTINGS);
         List<Long> forward = columnHashes(generator(helper), points);
 
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, SETTINGS);
         List<int[]> reversed = new ArrayList<>(points);
         Collections.reverse(reversed);
         List<Long> backward = columnHashes(generator(helper), reversed);
@@ -118,10 +121,10 @@ public final class MtmGameTests {
     public void columnsDoNotDependOnThreads(GameTestHelper helper) throws Exception {
         List<int[]> points = samplePoints();
 
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, SETTINGS);
         List<Long> sequential = columnHashes(generator(helper), points);
 
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, SETTINGS);
         ChunkGenerator shared = generator(helper);
         ExecutorService pool = Executors.newFixedThreadPool(4);
         try {
@@ -143,7 +146,7 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void surfaceIsContinuousAcrossRegionBorders(GameTestHelper helper) {
         ChunkGenerator generator = generator(helper);
-        int border = TerrainLogic.forSeed(SEED).settings().regionSize();
+        int border = SETTINGS.general.regionSize;
         for (int z = -border; z <= border; z += 61) {
             int west = generator.getBaseHeight(border - 1, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
             int east = generator.getBaseHeight(border, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
@@ -174,7 +177,7 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void biomesFollowTerrain(GameTestHelper helper) {
         ChunkGenerator generator = generator(helper);
-        TerrainLogic logic = TerrainLogic.forSeed(SEED);
+        TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
         int checkedOcean = 0;
         int checkedInland = 0;
         for (int[] p : samplePoints()) {
@@ -224,11 +227,11 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void filledChunksMatchColumns(GameTestHelper helper) {
         ChunkGenerator generator = generator(helper);
-        TerrainLogic logic = TerrainLogic.forSeed(SEED);
+        TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
         Registry<Biome> biomes = helper.getLevel().registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
         StructureFeatureManager structures = GenerationBenchmark.noStructures(helper.getLevel());
 
-        BlockColumn mountain = logic.findNearestAbove(logic.settings().maxSurfaceHeight() / 2.0, 0, 0, 64, 16384);
+        BlockColumn mountain = logic.findNearestAbove(SETTINGS.general.maxSurfaceHeight / 2.0, 0, 0, 64, 16384);
         if (mountain == null) {
             helper.fail("No mountain found near the origin to test against");
         }
@@ -259,7 +262,7 @@ public final class MtmGameTests {
     }
 
     private static ChunkGenerator generator(GameTestHelper helper) {
-        return MtmGenerators.create(helper.getLevel().registryAccess(), SEED);
+        return MtmGenerators.create(helper.getLevel().registryAccess(), SEED, SETTINGS);
     }
 
     private static List<int[]> samplePoints() {

@@ -35,7 +35,7 @@ public final class HeightMapRenderer {
             }
         }
 
-        double sea = settings.seaLevel() - 1;
+        double sea = settings.general.seaLevel - 1;
         for (int py = 0; py < sizePx; py++) {
             for (int px = 0; px < sizePx; px++) {
                 int x = originX + px * blocksPerPixel;
@@ -59,16 +59,16 @@ public final class HeightMapRenderer {
     }
 
     private static boolean onRegionBorder(int coordinate, int blocksPerPixel, WorldgenSettings settings) {
-        return Math.floorMod(coordinate, settings.regionSize()) < blocksPerPixel;
+        return Math.floorMod(coordinate, settings.general.regionSize) < blocksPerPixel;
     }
 
     private static int color(double height, WorldgenSettings settings) {
-        double sea = settings.seaLevel() - 1;
+        double sea = settings.general.seaLevel - 1;
         if (height < sea) {
             double depth = Math.min(1.0, (sea - height) / 40.0);
             return blend(0x5AA0E0, 0x0B2E6B, depth);
         }
-        double t = Math.min(1.0, (height - sea) / (settings.maxSurfaceHeight() - sea));
+        double t = Math.min(1.0, (height - sea) / (settings.general.maxSurfaceHeight - sea));
         if (t < 0.3) {
             return blend(0x5DA040, 0xB0B050, t / 0.3);
         }

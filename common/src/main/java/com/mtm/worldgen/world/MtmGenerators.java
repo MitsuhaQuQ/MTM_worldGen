@@ -2,6 +2,7 @@ package com.mtm.worldgen.world;
 
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.WorldgenSettings;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -37,11 +38,6 @@ public final class MtmGenerators {
     /** Surface rule condition type of {@link BeachCondition}, registered by each loader like the density type. */
     public static final ResourceLocation BEACH_CONDITION_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "beach");
 
-    /** Bottom of MTM worlds: unchanged from vanilla. */
-    public static final int MIN_Y = -64;
-    /** Total build height of MTM worlds: -64 .. 640, room for surfaces up to 600 plus headroom. */
-    public static final int HEIGHT = 704;
-
     private MtmGenerators() {
     }
 
@@ -67,43 +63,51 @@ public final class MtmGenerators {
 
     /**
      * World settings for a new MTM world: the vanilla nether and end, and an overworld that uses the MTM generator
-     * and the taller MTM dimension type. Both loaders' world presets build worlds through this.
+     * and the taller MTM dimension type. Both loaders' world presets build worlds through this. Reads the config
+     * file once, so the generator and the dimension type always agree on the build height.
      */
     public static WorldGenSettings createSettings(RegistryAccess access, long seed, boolean generateFeatures,
                                                   boolean bonusChest) {
+        WorldgenSettings settings = MtmConfig.load();
         Registry<LevelStem> dimensions = DimensionType.defaultDimensions(access, seed);
         return new WorldGenSettings(seed, generateFeatures, bonusChest,
-                WorldGenSettings.withOverworld(dimensions, dimensionType(), create(access, seed)));
+                WorldGenSettings.withOverworld(dimensions, dimensionType(settings), create(access, seed, settings)));
     }
 
     /**
-     * Vanilla overworld dimension type with the build range raised to {@link #MIN_Y} .. MIN_Y + {@link #HEIGHT}.
-     * Stored inline in level.dat, so it needs no registration and leaves vanilla worlds untouched.
+     * Vanilla overworld dimension type with the build range derived from the settings. Stored inline in level.dat,
+     * so it needs no registration and leaves vanilla worlds untouched.
      */
-    public static Holder<DimensionType> dimensionType() {
+    public static Holder<DimensionType> dimensionType(WorldgenSettings settings) {
         return Holder.direct(DimensionType.create(OptionalLong.empty(), true, false, false, true, 1.0, false, false,
-                true, false, true, MIN_Y, HEIGHT, HEIGHT, BlockTags.INFINIBURN_OVERWORLD,
-                DimensionType.OVERWORLD_EFFECTS, 0.0F));
+                true, false, true, settings.minBuildY(), settings.buildHeight(), settings.buildHeight(),
+                BlockTags.INFINIBURN_OVERWORLD, DimensionType.OVERWORLD_EFFECTS, 0.0F));
     }
 
     public static ChunkGenerator create(RegistryAccess access, long seed) {
+        return create(access, seed, MtmConfig.load());
+    }
+
+    public static ChunkGenerator create(RegistryAccess access, long seed, WorldgenSettings worldSettings) {
         NoiseGeneratorSettings vanilla = access.registryOrThrow(Registry.NOISE_GENERATOR_SETTINGS_REGISTRY)
                 .getOrThrow(NoiseGeneratorSettings.OVERWORLD);
         NoiseSettings vanillaNoise = vanilla.noiseSettings();
-        NoiseSettings noise = NoiseSettings.create(MIN_Y, HEIGHT, vanillaNoise.noiseSamplingSettings(),
+        NoiseSettings noise = NoiseSettings.create(worldSettings.minBuildY(), worldSettings.buildHeight(), vanillaNoise.noiseSamplingSettings(),
                 vanillaNoise.topSlideSettings(), vanillaNoise.bottomSlideSettings(),
                 vanillaNoise.noiseSizeHorizontal(), vanillaNoise.noiseSizeVertical(), vanillaNoise.terrainShaper());
         NoiseRouterWithOnlyNoises r = vanilla.noiseRouter();
         NoiseRouterWithOnlyNoises router = new NoiseRouterWithOnlyNoises(
                 r.barrierNoise(), r.fluidLevelFloodednessNoise(), r.fluidLevelSpreadNoise(), r.lavaNoise(),
-                r.temperature(), r.vegetation(), TerrainClimate.CONTINENTS, r.erosion(), TerrainClimate.DEPTH, r.ridges(),
+                r.temperature(), r.vegetation(), TerrainClimate.unbound(TerrainClimate.Kind.CONTINENTS, worldSettings), r.erosion(),
+                TerrainClimate.unbound(TerrainClimate.Kind.DEPTH, worldSettings), r.ridges(),
                 // Interpolated like vanilla's final density: evaluated on the sparse noise cell grid instead of for
                 // every block. The density is linear around the surface, so interpolation keeps the surface in place
-                TerrainDensity.INITIAL, DensityFunctions.interpolated(TerrainDensity.FINAL),
+                TerrainDensity.unbound(true, worldSettings),
+                DensityFunctions.interpolated(TerrainDensity.unbound(false, worldSettings)),
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,
-                SurfaceRules.sequence(beachRule(), vanilla.surfaceRule()), vanilla.seaLevel(), vanilla.disableMobGeneration(),
+                SurfaceRules.sequence(beachRule(), vanilla.surfaceRule()), worldSettings.general.seaLevel, vanilla.disableMobGeneration(),
                 vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
 
         BiomeSource biomes = MultiNoiseBiomeSource.Preset.OVERWORLD.biomeSource(access.registryOrThrow(Registry.BIOME_REGISTRY));

@@ -1,6 +1,7 @@
 package com.mtm.worldgen.benchmark;
 
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -70,14 +71,15 @@ public final class GenerationBenchmark {
         RegistryAccess access = level.registryAccess();
         StructureFeatureManager structures = noStructures(level);
         LevelHeightAccessor vanillaHeight = LevelHeightAccessor.create(VANILLA_MIN_Y, VANILLA_HEIGHT);
-        LevelHeightAccessor mtmHeight = LevelHeightAccessor.create(MtmGenerators.MIN_Y, MtmGenerators.HEIGHT);
+        WorldgenSettings settings = WorldgenSettings.DEFAULT;
+        LevelHeightAccessor mtmHeight = LevelHeightAccessor.create(settings.minBuildY(), settings.buildHeight());
 
         ChunkGenerator vanilla = WorldGenSettings.makeDefaultOverworld(access, SEED);
         StageTimes vanillaTimes = measure(vanilla, vanillaHeight, access, structures);
 
-        TerrainLogic.forget(SEED);
+        TerrainLogic.forget(SEED, settings);
         long start = System.nanoTime();
-        ChunkGenerator mtm = MtmGenerators.create(access, SEED);
+        ChunkGenerator mtm = MtmGenerators.create(access, SEED, settings);
         double logicStartMs = (System.nanoTime() - start) / 1.0e6;
         StageTimes mtmCold = pass(mtm, mtmHeight, access, structures);
         StageTimes mtmTimes = measure(mtm, mtmHeight, access, structures);

@@ -1,7 +1,9 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.WorldgenSettings;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.levelgen.DensityFunction;
 
@@ -10,11 +12,10 @@ import net.minecraft.world.level.levelgen.DensityFunction;
  * the seed is bound when vanilla maps the router during chunk generator construction.
  */
 public final class TerrainDensity implements DensityFunction.SimpleFunction {
-    public static final TerrainDensity FINAL = new TerrainDensity(null, false);
-    public static final TerrainDensity INITIAL = new TerrainDensity(null, true);
-    public static final Codec<TerrainDensity> CODEC = Codec.BOOL.optionalFieldOf("initial", false)
-            .xmap(initial -> initial ? INITIAL : FINAL, TerrainDensity::initial)
-            .codec();
+    public static final Codec<TerrainDensity> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.BOOL.optionalFieldOf("initial", false).forGetter(density -> density.initial),
+            Codec.STRING.fieldOf("settings").forGetter(density -> density.settingsJson)
+    ).apply(instance, (initial, settings) -> new TerrainDensity(null, initial, settings)));
 
     private static final double FALLOFF = 8.0;
     /**
@@ -32,26 +33,31 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
     private static final double INITIAL_LIMIT = 64.0;
 
     private final boolean initial;
+    /** The world's locked settings; serialized with the function, so they live in level.dat. */
+    private final String settingsJson;
     /** Null until the seed is bound; unbound instances only exist as serialized router placeholders. */
     private final TerrainLogic logic;
 
     /**
-     * @param seed    world seed, or null for the unbound placeholder
-     * @param initial true for the router's initialDensityWithoutJaggedness slot, which vanilla scans to find the
-     *                preliminary surface level used by surface rules (grass, dirt, sand)
+     * @param seed         world seed, or null for the unbound placeholder
+     * @param initial      true for the router's initialDensityWithoutJaggedness slot, which vanilla scans to find the
+     *                     preliminary surface level used by surface rules (grass, dirt, sand)
+     * @param settingsJson the world's settings
      */
-    private TerrainDensity(Long seed, boolean initial) {
+    private TerrainDensity(Long seed, boolean initial, String settingsJson) {
         this.initial = initial;
-        this.logic = seed != null ? TerrainLogic.forSeed(seed) : null;
+        this.settingsJson = settingsJson;
+        this.logic = seed != null ? TerrainLogic.forWorld(seed, WorldgenSettings.fromJson(settingsJson)) : null;
     }
 
-    public boolean initial() {
-        return initial;
+    /** Unbound placeholder for a router; vanilla binds it to the seed when building the generator. */
+    public static TerrainDensity unbound(boolean initial, WorldgenSettings settings) {
+        return new TerrainDensity(null, initial, settings.toJson());
     }
 
     @Override
     public double compute(FunctionContext context) {
-        TerrainLogic terrain = logic != null ? logic : TerrainLogic.forSeed(0L);
+        TerrainLogic terrain = logic != null ? logic : TerrainLogic.forWorld(0L, WorldgenSettings.fromJson(settingsJson));
         double depth = terrain.surfaceHeight(context.blockX(), context.blockZ()) - context.blockY();
         if (initial) {
             return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + (depth - PRELIMINARY_SURFACE_DEPTH) / FALLOFF,
@@ -63,7 +69,7 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
     @Override
     public DensityFunction mapAll(Visitor visitor) {
         Long captured = SeedCapture.current();
-        return visitor.apply(captured != null ? new TerrainDensity(captured, initial) : this);
+        return visitor.apply(captured != null ? new TerrainDensity(captured, initial, settingsJson) : this);
     }
 
     @Override

@@ -99,7 +99,7 @@ public final class MtmCommands {
         }
         MinecraftServer server = source.getServer();
         Vec3 position = source.getPosition();
-        double minHeight = logic.settings().maxSurfaceHeight() / 2.0;
+        double minHeight = logic.settings().general.maxSurfaceHeight / 2.0;
         CompletableFuture.supplyAsync(() -> logic.findNearestAbove(minHeight, (int) Math.floor(position.x),
                         (int) Math.floor(position.z), LOCATE_STEP, LOCATE_RADIUS), Util.backgroundExecutor())
                 .whenComplete((found, error) -> server.execute(() -> {
@@ -125,7 +125,11 @@ public final class MtmCommands {
     /** Renders the terrain logic around the source position to a PNG in the world folder, off the server thread. */
     private static int exportDebugMap(CommandSourceStack source, int blocksPerPixel) {
         MinecraftServer server = source.getServer();
-        long seed = source.getLevel().getSeed();
+        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel().getChunkSource().getGenerator());
+        if (logic == null) {
+            source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.not_mtm_world"));
+            return 0;
+        }
         Vec3 position = source.getPosition();
         int centerX = (int) Math.floor(position.x);
         int centerZ = (int) Math.floor(position.z);
@@ -135,7 +139,7 @@ public final class MtmCommands {
         source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.debugmap.started",
                 DEBUG_MAP_SIZE_PX * blocksPerPixel), false);
         CompletableFuture.runAsync(() -> {
-            BufferedImage image = HeightMapRenderer.render(TerrainLogic.forSeed(seed), centerX, centerZ,
+            BufferedImage image = HeightMapRenderer.render(logic, centerX, centerZ,
                     DEBUG_MAP_SIZE_PX, blocksPerPixel);
             try {
                 Files.createDirectories(file.getParent());

@@ -21,14 +21,6 @@ final class ContinentLayer {
     private static final long DETAIL_SALT = 0x44455441494CL;
     private static final long STRAIT_SALT = 0x535452414954L;
 
-    /** Average distance between plate centers in blocks: the typical continent size. */
-    private static final double PLATE_SPACING = 8192.0;
-    /** How far plate centers may move from their grid cell center, as a fraction of the spacing. */
-    private static final double PLATE_JITTER = 0.85;
-    /** Fraction of plates that are open ocean instead of continent. */
-    private static final double OCEAN_PLATE_FRACTION = 0.18;
-    /** Spacing of continent group sites, in plate units: roughly how many plates wide a continent is. */
-    private static final double GROUP_SPACING = 2.6;
     private static final long OCEAN_GROUP = 0L;
     /** Plates searched in each direction around the containing plate cell. */
     private static final int PLATE_SEARCH = 2;
@@ -39,14 +31,6 @@ final class ContinentLayer {
      */
     private static final double PLATE_VALUE_CAP = 1.2;
 
-    private static final double WARP_WAVELENGTH = 4096.0;
-    private static final double WARP_AMPLITUDE = 2600.0;
-    /** Strait half-width offset between continent groups, in plate units: mean and noise amplitude. */
-    private static final double STRAIT_MEAN = 0.02;
-    private static final double STRAIT_VARIATION = 0.16;
-    private static final double STRAIT_WAVELENGTH = 6144.0;
-    private static final double DETAIL_WAVELENGTH = 2048.0;
-    private static final double DETAIL_AMPLITUDE = 0.06;
 
     private static final int THRESHOLD_SAMPLES_PER_AXIS = 128;
     private static final double THRESHOLD_SAMPLE_SPACING = 1024.0;
@@ -56,16 +40,8 @@ final class ContinentLayer {
 
     /** Finite difference step in blocks for the continent value gradient. */
     private static final double GRADIENT_STEP = 16.0;
-    /**
-     * Floor for the gradient in the distance estimate, half the typical plate gradient. Inland the gradient can
-     * approach zero, and dividing by it made the estimate jump by tens of blocks per block.
-     */
-    private static final double MIN_GRADIENT = 0.5 / PLATE_SPACING;
     private static final double MAX_COAST_DISTANCE = 4096.0;
 
-    /** Land rises this far above sea level in continent interiors (mountains come later). */
-    private static final double LAND_RANGE = 72.0;
-    private static final double OCEAN_DEPTH = 36.0;
 
     private final long plateSeed;
     private final long groupSeed;
@@ -74,30 +50,36 @@ final class ContinentLayer {
     private final Fbm detail;
     private final Fbm straits;
     private final WorldgenSettings settings;
+    private final WorldgenSettings.Continents config;
+    private final double minGradient;
     private final double threshold;
     private final double high;
     private final double low;
 
     ContinentLayer(long seed, WorldgenSettings settings) {
+        this.settings = settings;
+        this.config = settings.continents;
         this.plateSeed = Hashing.derive(seed, PLATE_SALT);
         this.groupSeed = Hashing.derive(seed, GROUP_SALT);
-        this.warpX = new Fbm(Hashing.derive(seed, WARP_X_SALT), 3, WARP_WAVELENGTH);
-        this.warpZ = new Fbm(Hashing.derive(seed, WARP_Z_SALT), 3, WARP_WAVELENGTH);
-        this.detail = new Fbm(Hashing.derive(seed, DETAIL_SALT), 4, DETAIL_WAVELENGTH);
-        this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, STRAIT_WAVELENGTH);
-        this.settings = settings;
+        this.warpX = new Fbm(Hashing.derive(seed, WARP_X_SALT), 3, config.warpWavelength);
+        this.warpZ = new Fbm(Hashing.derive(seed, WARP_Z_SALT), 3, config.warpWavelength);
+        this.detail = new Fbm(Hashing.derive(seed, DETAIL_SALT), 4, config.detailWavelength);
+        this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, config.straitWavelength);
+        // Floor for the gradient in the distance estimate, half the typical plate gradient: inland the gradient
+        // can approach zero, and dividing by it made the estimate jump by tens of blocks per block
+        this.minGradient = 0.5 / config.plateSpacing;
 
         NoiseStats stats = new NoiseStats(this::value, THRESHOLD_SAMPLES_PER_AXIS, THRESHOLD_SAMPLE_SPACING);
-        this.threshold = stats.quantile(settings.oceanRatio());
+        this.threshold = stats.quantile(config.oceanRatio);
         this.high = stats.quantile(HIGH_QUANTILE);
         this.low = stats.quantile(LOW_QUANTILE);
     }
 
     double value(double x, double z) {
-        double wx = x + WARP_AMPLITUDE * warpX.sample(x, z);
-        double wz = z + WARP_AMPLITUDE * warpZ.sample(x, z);
-        double strait = STRAIT_MEAN + STRAIT_VARIATION * straits.sample(x, z);
-        return plateValue(wx / PLATE_SPACING, wz / PLATE_SPACING, strait) + DETAIL_AMPLITUDE * detail.sample(x, z);
+        double wx = x + config.warpAmplitude * warpX.sample(x, z);
+        double wz = z + config.warpAmplitude * warpZ.sample(x, z);
+        double strait = config.straitMean + config.straitVariation * straits.sample(x, z);
+        return plateValue(wx / config.plateSpacing, wz / config.plateSpacing, strait) + config.detailAmplitude * detail.sample(x, z);
     }
 
     /**
@@ -108,7 +90,7 @@ final class ContinentLayer {
     double coastDistance(double x, double z, double value) {
         double gx = (value(x + GRADIENT_STEP, z) - value(x - GRADIENT_STEP, z)) / (2.0 * GRADIENT_STEP);
         double gz = (value(x, z + GRADIENT_STEP) - value(x, z - GRADIENT_STEP)) / (2.0 * GRADIENT_STEP);
-        double gradient = Math.max(Math.hypot(gx, gz), MIN_GRADIENT);
+        double gradient = Math.max(Math.hypot(gx, gz), minGradient);
         double distance = (value - threshold) / gradient;
         return Math.max(-MAX_COAST_DISTANCE, Math.min(MAX_COAST_DISTANCE, distance));
     }
@@ -119,11 +101,11 @@ final class ContinentLayer {
      * grid-aligned stair steps along the coast.
      */
     double height(double c) {
-        double sea = settings.seaLevel() - 1;
+        double sea = settings.general.seaLevel - 1;
         if (c >= threshold) {
-            return sea + LAND_RANGE * Math.min(1.0, (c - threshold) / (high - threshold));
+            return sea + config.landRange * Math.min(1.0, (c - threshold) / (high - threshold));
         }
-        return sea - OCEAN_DEPTH * Math.min(1.0, (threshold - c) / (threshold - low));
+        return sea - config.oceanDepth * Math.min(1.0, (threshold - c) / (threshold - low));
     }
 
     /**
@@ -148,10 +130,10 @@ final class ContinentLayer {
         for (int du = -PLATE_SEARCH; du <= PLATE_SEARCH; du++) {
             for (int dv = -PLATE_SEARCH; dv <= PLATE_SEARCH; dv++) {
                 long hash = Hashing.hash(plateSeed, cellU + du, cellV + dv);
-                double pu = cellU + du + 0.5 + PLATE_JITTER * (Hashing.unit(hash) - 0.5);
-                double pv = cellV + dv + 0.5 + PLATE_JITTER * (Hashing.unit(Hashing.mix(hash)) - 0.5);
+                double pu = cellU + du + 0.5 + config.plateJitter * (Hashing.unit(hash) - 0.5);
+                double pv = cellV + dv + 0.5 + config.plateJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5);
                 distances[count] = Math.hypot(u - pu, v - pv);
-                boolean ocean = Hashing.unit(Hashing.derive(hash, OCEAN_PLATE_SALT)) < OCEAN_PLATE_FRACTION;
+                boolean ocean = Hashing.unit(Hashing.derive(hash, OCEAN_PLATE_SALT)) < config.oceanPlateFraction;
                 groups[count] = ocean ? OCEAN_GROUP : continentGroup(pu, pv);
                 if (distances[count] < distances[owner]) {
                     owner = count;
@@ -174,8 +156,8 @@ final class ContinentLayer {
 
     /** Id of the continent group a plate center belongs to: the nearest site of the group grid. */
     private long continentGroup(double pu, double pv) {
-        double gu = pu / GROUP_SPACING;
-        double gv = pv / GROUP_SPACING;
+        double gu = pu / config.groupSpacing;
+        double gv = pv / config.groupSpacing;
         int cellU = (int) Math.floor(gu);
         int cellV = (int) Math.floor(gv);
         double best = Double.MAX_VALUE;
@@ -183,8 +165,8 @@ final class ContinentLayer {
         for (int du = -1; du <= 1; du++) {
             for (int dv = -1; dv <= 1; dv++) {
                 long hash = Hashing.hash(groupSeed, cellU + du, cellV + dv);
-                double su = cellU + du + 0.5 + PLATE_JITTER * (Hashing.unit(hash) - 0.5);
-                double sv = cellV + dv + 0.5 + PLATE_JITTER * (Hashing.unit(Hashing.mix(hash)) - 0.5);
+                double su = cellU + du + 0.5 + config.plateJitter * (Hashing.unit(hash) - 0.5);
+                double sv = cellV + dv + 0.5 + config.plateJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5);
                 double d = (gu - su) * (gu - su) + (gv - sv) * (gv - sv);
                 if (d < best) {
                     best = d;
