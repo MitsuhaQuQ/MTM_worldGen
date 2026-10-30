@@ -1,35 +1,96 @@
 # MTM Worldgen
 
-A Minecraft mod that replaces terrain generation with realistic, continuous landforms, river networks and climate zones.
+A Minecraft mod that replaces overworld generation with continuous, believable landforms: continents, plains, hills and mountains, river networks that run from the uplands to the sea, and climate zones. It is designed at real scale, with one block as one metre, so that long transit lines have room to run, while keeping mountains exaggerated enough to be worth looking at.
 
-- Minecraft 1.18.2 (primary), later versions to follow
-- Forge and Fabric, built from a shared `common` module with Architectury Loom
-- License: MIT
+The mod adds a new world type. Existing vanilla worlds, the Nether and the End are not affected.
 
-## Status
+> **Early development.** Terrain changes between versions, and worlds made with one version may not load in the next. Do not use it for worlds you want to keep yet.
 
-Early development; worlds from one version may not load in the next. Working on Minecraft 1.18.2 with Fabric and Forge:
+## Requirements
 
-- Continents, climate zones and biomes assigned from terrain
-- Mountain ranges, plateaus and hills, with a surface height of 750 by default
-- Drainage: rivers from streams to major trunks, lakes, carved valleys
-- Generation is deterministic and identical across loaders, and fills chunks in about 27% of the vanilla time
-  (biome and noise stages only)
+| | |
+|---|---|
+| Minecraft | 1.18.2 |
+| Java | 17 |
+| Fabric | Loader 0.14.25, Fabric API 0.77.0 |
+| Forge | 40.2.10 |
 
-Not done yet: plains shaped by rivers, deltas, coast types and islands, sinkholes and karst, vegetation zones, saving
-terrain logic to disk, and blending into existing worlds.
+Later Minecraft versions and NeoForge are planned. No other mods are required.
 
-## Building
+## Using the mod
+
+1. Install the jar for your loader.
+2. In the Create World screen, choose the MTM world type under **More World Options**.
+
+Build height runs from -64 to 800 by default, following the configured maximum surface height.
+
+## Terrain
+
+- **Continents and oceans.** Land is grouped into continents separated by straits and open oceans, about 30% ocean by default.
+- **Three tiers of land.** One continuous field divides land into plains, hills and mountains, so hills always lie between plains and mountains and can also stand alone. Plains are left wide enough for big cities.
+- **Mountains.** Ranges follow winding ridges, and blend along their length between a steep igneous form and a gentle wind-worn one. Isolated peaks stand where hills meet mountains, and rounded dome hills stand among the hills. Along coasts, mountains give way to hills.
+- **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast.
+- **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity.
+- **Surface.** Bare rock on steep ground, snow above the snow line, sandy beaches. Caves and ravines stay below the surface.
+
+Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on Fabric and Forge, and in any exploration order.
+
+Not done yet: delta and coast types, islands, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds. Rivers do not freeze yet.
+
+## Configuration
+
+Settings live in `config/mtm_worldgen.json`, created with default values on first use. Missing fields use their defaults, and invalid values are reported when a world is created.
+
+The file only applies to new worlds. Each world stores its settings when created, so later edits cannot cause seams in it.
+
+| Group | Controls |
+|---|---|
+| `general` | Maximum surface height, sea level, logic region and grid sizes, cave and village limits |
+| `slopes` | Grade limits by landform |
+| `continents` | Ocean share, continent size and coastline shape |
+| `plains`, `hills`, `mountains`, `plateaus` | Tier shares, heights, ridge shape and mountain styles |
+| `isolated` | Isolated peaks and dome hills |
+| `rivers` | Routing, river classes, widths, valleys, floodplains and lakes |
+| `surface`, `beaches` | Snow lines, bare rock and beaches |
+| `climate`, `biomes` | Climate zone shares and sizes, and the biomes of each zone |
+| `spawn` | World spawn search |
+
+## Commands
+
+All commands need cheats enabled.
+
+| Command | Effect |
+|---|---|
+| `/mtm flyspeed <factor>` | Sets flying speed, 0.1 to 50 times the default. `reset` restores it, and no argument shows it |
+| `/mtm locate mountain` | Finds the nearest high mountain, with a coordinate you can click to teleport |
+| `/mtm debugmap [blocksPerPixel]` | Saves a map of the terrain and rivers around you to `<world>/mtm_worldgen/debug/` |
+| `/mtm benchmark` | Compares chunk generation time with vanilla (biome and noise stages only) |
+
+## Development
+
+Building needs a JDK 17 toolchain. Gradle itself can run on JDK 21, and toolchains are not downloaded automatically. If Gradle cannot find JDK 17, set `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`.
 
 ```
-gradlew build
-```
-
-Output jars are in `fabric/build/libs` and `forge/build/libs`.
-
-## Running in development
-
-```
-gradlew :fabric:runClient
+gradlew build                     Build all modules; jars are in fabric/build/libs and forge/build/libs
+gradlew :fabric:runClient         Run a development client
 gradlew :forge:runClient
+gradlew :common:test              Unit tests of the terrain logic
+gradlew :fabric:runGametest       In-game tests
+gradlew :forge:runGameTestServer
 ```
+
+All terrain logic lives in the `common` module, and the loader modules only register it and hook it up:
+
+| Package | Contents |
+|---|---|
+| `logic` | Terrain logic in plain Java, with no Minecraft classes |
+| `noise` | Stateless, deterministic noise |
+| `world` | Connection to the vanilla generator |
+| `command` | Debug commands |
+| `gametest` | In-game tests, run on both loaders |
+
+Both loaders are tested against the same terrain hash. After an intentional terrain change, update `EXPECTED_COLUMN_HASH` in `MtmGameTests`; the failure message prints the new value.
+
+## License
+
+[MIT](LICENSE)
