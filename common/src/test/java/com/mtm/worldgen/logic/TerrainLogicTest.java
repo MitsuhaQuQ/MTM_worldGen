@@ -248,6 +248,43 @@ class TerrainLogicTest {
         assertTrue(downstream >= 0.8 * upstream, "river shrinks from " + upstream + " to " + downstream);
     }
 
+    /** Distance to the nearest river changes by at most one block per block, or a curve goes missing somewhere. */
+    @Test
+    void riverCoursesAreContinuousAcrossRegionBorders() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        int border = SETTINGS.general.regionSize;
+        int hits = 0;
+        for (int z = -border; z < 2 * border; z += 11) {
+            RiverRegion.Hit west = logic.sampleRiver(border - 0.5, z);
+            RiverRegion.Hit east = logic.sampleRiver(border + 0.5, z);
+            assertEquals(west == null, east == null, "river seen on one side of the border only at z " + z);
+            if (west != null) {
+                assertTrue(Math.abs(west.distance() - east.distance()) <= 1.01, "river jumps at z " + z);
+                hits++;
+            }
+        }
+        assertTrue(hits > 0, "no rivers near the border");
+    }
+
+    @Test
+    void riverCoursesDoNotDependOnThreads() throws Exception {
+        TerrainLogic sequential = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic concurrent = new TerrainLogic(SEED, SETTINGS);
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        try {
+            List<Future<RiverRegion>> futures = new ArrayList<>();
+            for (int i = 0; i < 12; i++) {
+                int rx = i % 2;
+                futures.add(pool.submit(() -> concurrent.riverRegion(rx, 0)));
+            }
+            for (int i = 0; i < futures.size(); i++) {
+                assertTrue(sequential.riverRegion(i % 2, 0).contentEquals(futures.get(i).get()), "rivers differ when computed concurrently");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     @Test
     void landDrainsWithoutSinks() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);

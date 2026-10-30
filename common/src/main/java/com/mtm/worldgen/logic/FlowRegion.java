@@ -17,16 +17,18 @@ public final class FlowRegion {
     private final int regionZ;
     private final int cells;
     private final byte[] directions;
+    private final byte[] inflows;
     private final int[] catchments;
     private final int[] tributaries;
     private final byte[] classes;
     private final float[] lakeLevels;
 
-    FlowRegion(int regionX, int regionZ, int cells, byte[] directions, int[] catchments, int[] tributaries, byte[] classes, float[] lakeLevels) {
+    FlowRegion(int regionX, int regionZ, int cells, byte[] directions, byte[] inflows, int[] catchments, int[] tributaries, byte[] classes, float[] lakeLevels) {
         this.regionX = regionX;
         this.regionZ = regionZ;
         this.cells = cells;
         this.directions = directions;
+        this.inflows = inflows;
         this.catchments = catchments;
         this.tributaries = tributaries;
         this.classes = classes;
@@ -60,6 +62,21 @@ public final class FlowRegion {
         return DIRECTION_Z[directions[localZ * cells + localX]];
     }
 
+    /** Whether a cell has water flowing in from a neighbor. */
+    public boolean hasInflow(int localX, int localZ) {
+        return inflows[localZ * cells + localX] >= 0;
+    }
+
+    /** Cell offset X of the biggest inflow. Only valid where {@link #hasInflow} holds. */
+    public int inflowX(int localX, int localZ) {
+        return DIRECTION_X[inflows[localZ * cells + localX]];
+    }
+
+    /** Cell offset Z of the biggest inflow. Only valid where {@link #hasInflow} holds. */
+    public int inflowZ(int localX, int localZ) {
+        return DIRECTION_Z[inflows[localZ * cells + localX]];
+    }
+
     /** Catchment area in coarse cells. */
     public int catchment(int localX, int localZ) {
         return catchments[localZ * cells + localX];
@@ -86,7 +103,8 @@ public final class FlowRegion {
     /** Whether this region holds exactly the same values as another. */
     public boolean contentEquals(FlowRegion other) {
         return regionX == other.regionX && regionZ == other.regionZ && cells == other.cells
-                && Arrays.equals(directions, other.directions) && Arrays.equals(catchments, other.catchments)
+                && Arrays.equals(directions, other.directions) && Arrays.equals(inflows, other.inflows)
+                && Arrays.equals(catchments, other.catchments)
                 && Arrays.equals(tributaries, other.tributaries) && Arrays.equals(classes, other.classes)
                 && Arrays.equals(lakeLevels, other.lakeLevels);
     }

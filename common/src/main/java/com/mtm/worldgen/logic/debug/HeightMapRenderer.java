@@ -1,6 +1,7 @@
 package com.mtm.worldgen.logic.debug;
 
 import com.mtm.worldgen.logic.FlowRegion;
+import com.mtm.worldgen.logic.RiverRegion;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 
@@ -8,6 +9,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.Line2D;
 import java.awt.image.BufferedImage;
 
 /** Renders the terrain logic's surface height as a hillshaded hypsometric map, for tuning without flying around. */
@@ -93,24 +95,19 @@ public final class HeightMapRenderer {
                         int cellZ = regionZ * cells + lz;
                         double fromX = ((cellX + 0.5) * cellSize - originX) / blocksPerPixel;
                         double fromZ = ((cellZ + 0.5) * cellSize - originZ) / blocksPerPixel;
-                        FlowRegion.RiverClass riverClass = flow.riverClass(lx, lz);
                         if (flow.isLake(lx, lz)) {
                             int cellPixels = Math.max(1, cellSize / blocksPerPixel);
                             graphics.setColor(LAKE_COLOR);
                             graphics.fillRect((int) fromX - cellPixels / 2, (int) fromZ - cellPixels / 2, cellPixels, cellPixels);
                         }
-                        if (!flow.flows(lx, lz)) {
-                            continue;
-                        }
-                        if (riverClass == FlowRegion.RiverClass.NONE) {
-                            continue;
-                        }
-                        double toX = fromX + (double) flow.downstreamX(lx, lz) * cellSize / blocksPerPixel;
-                        double toZ = fromZ + (double) flow.downstreamZ(lx, lz) * cellSize / blocksPerPixel;
-                        graphics.setColor(RIVER_COLORS[riverClass.ordinal()]);
-                        graphics.setStroke(new BasicStroke(riverClass.ordinal()));
-                        graphics.drawLine((int) fromX, (int) fromZ, (int) toX, (int) toZ);
                     }
+                }
+                RiverRegion rivers = logic.riverRegion(regionX, regionZ);
+                for (int segment = 0; segment < rivers.segments(); segment++) {
+                    graphics.setColor(RIVER_COLORS[rivers.riverClass(segment).ordinal()]);
+                    graphics.setStroke(new BasicStroke((float) Math.max(1.0, rivers.width(segment) / blocksPerPixel)));
+                    graphics.draw(new Line2D.Double((rivers.startX(segment) - originX) / blocksPerPixel, (rivers.startZ(segment) - originZ) / blocksPerPixel,
+                            (rivers.endX(segment) - originX) / blocksPerPixel, (rivers.endZ(segment) - originZ) / blocksPerPixel));
                 }
             }
         }

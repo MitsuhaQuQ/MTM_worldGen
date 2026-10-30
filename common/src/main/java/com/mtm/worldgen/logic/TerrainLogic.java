@@ -41,6 +41,7 @@ public final class TerrainLogic {
     private final Fbm rockPatchNoise;
     private final RegionCache<LogicRegion> regions;
     private final RegionCache<FlowRegion> flowRegions;
+    private final RegionCache<RiverRegion> riverRegions;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<ColumnCache> columns = ThreadLocal.withInitial(ColumnCache::new);
 
@@ -57,6 +58,8 @@ public final class TerrainLogic {
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion);
+        this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
     }
 
     /** Shared instance for a world, identified by its seed and settings. */
@@ -80,6 +83,18 @@ public final class TerrainLogic {
     /** Drainage of a logic region. Computed apart from {@link #region} because terrain does not depend on it yet. */
     public FlowRegion flowRegion(int regionX, int regionZ) {
         return flowRegions.get(regionX, regionZ);
+    }
+
+    /** Refined river courses of a logic region. */
+    public RiverRegion riverRegion(int regionX, int regionZ) {
+        return riverRegions.get(regionX, regionZ);
+    }
+
+    /** Nearest river within rivers.queryReach of a position, or null. */
+    public RiverRegion.Hit sampleRiver(double x, double z) {
+        int size = settings.general.regionSize;
+        return riverRegion((int) Math.floorDiv((long) Math.floor(x), size),
+                (int) Math.floorDiv((long) Math.floor(z), size)).nearest(x, z);
     }
 
     /** Coarse surface height at a cell center, by global cell index. */

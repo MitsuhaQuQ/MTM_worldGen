@@ -336,6 +336,27 @@ public final class WorldgenSettings {
         public double routeWavelength = 512.0;
         /** Water at least this deep over the ground of a filled depression is a lake. */
         public double lakeMinDepth = 2.0;
+        /** How far river nodes stray from their cell center, as a fraction of the cell. */
+        public double nodeJitter = 0.6;
+        /** Sideways swing of river courses, as a fraction of the distance between nodes. */
+        public double meander = 0.14;
+        public int curveSegments = 12;
+        /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
+        public int queryReach = 384;
+        /** Rivers vary by this fraction of their width. */
+        public double widthVariation = 0.1;
+        public double streamWidthMin = 4.0;
+        public double streamWidthMax = 8.0;
+        public double streamDepthMin = 1.0;
+        public double streamDepthMax = 2.0;
+        public double tributaryWidth = 50.0;
+        public double tributaryDepth = 5.0;
+        public double trunkWidth = 100.0;
+        public double trunkDepthMin = 8.0;
+        public double trunkDepthMax = 10.0;
+        public double majorTrunkWidth = 200.0;
+        public double majorTrunkDepthMin = 15.0;
+        public double majorTrunkDepthMax = 20.0;
     }
 
     public static final class Climate {
@@ -391,6 +412,9 @@ public final class WorldgenSettings {
         require(rivers.flowCellSize > 0 && rivers.flowCellSize % general.cellSize == 0 && general.regionSize % rivers.flowCellSize == 0,
                 "rivers.flowCellSize must be a multiple of general.cellSize and divide general.regionSize");
         require(rivers.flowLookAhead > 0, "rivers.flowLookAhead must be positive");
+        require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(rivers.queryReach >= 0 && rivers.queryReach <= general.regionSize - rivers.flowCellSize * 2,
+                "rivers.queryReach must leave the rivers of neighboring regions in reach");
         require(rivers.streamCells < rivers.tributaryCells && rivers.tributaryCells < rivers.trunkCells,
                 "river cell thresholds must rise from stream to trunk");
         require(general.softCapFraction > 0.0 && general.softCapFraction < 1.0, "general.softCapFraction must be in (0, 1)");

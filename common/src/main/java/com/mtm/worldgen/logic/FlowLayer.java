@@ -70,11 +70,14 @@ final class FlowLayer {
         int radius = reach + 1;
         Grid grid = new Grid(originX - radius, originZ - radius, cells + 2 * radius);
         int[] catchment = accumulate(grid, reach);
-        int[] tributaries = countTributaries(grid, accumulate(grid, reach / 2), reach / 2,
+        int[] nearby = accumulate(grid, reach / 2);
+        int[] mainInflow = mainInflows(grid, nearby);
+        int[] tributaries = countTributaries(grid, nearby, mainInflow, reach / 2,
                 ceilDiv(config.tributaryCells, cellArea), ceilDiv(config.trunkCells, cellArea));
 
         int size = cells * cells;
         byte[] directions = new byte[size];
+        byte[] inflows = new byte[size];
         int[] regionCatchment = new int[size];
         int[] regionTributaries = new int[size];
         byte[] classes = new byte[size];
@@ -84,13 +87,14 @@ final class FlowLayer {
                 int source = grid.index(originX + lx, originZ + lz);
                 int target = lz * cells + lx;
                 directions[target] = grid.direction[source];
+                inflows[target] = mainInflow[source] < 0 ? -1 : (byte) (7 - grid.direction[mainInflow[source]]);
                 regionCatchment[target] = catchment[source] * cellArea;
                 regionTributaries[target] = tributaries[source];
                 classes[target] = (byte) classify(regionCatchment[target], tributaries[source]).ordinal();
                 lakeLevels[target] = grid.filled[source] - grid.height[source] >= config.lakeMinDepth ? grid.filled[source] : Float.NaN;
             }
         }
-        return new FlowRegion(regionX, regionZ, cells, directions, regionCatchment, regionTributaries, classes, lakeLevels);
+        return new FlowRegion(regionX, regionZ, cells, directions, inflows, regionCatchment, regionTributaries, classes, lakeLevels);
     }
 
     private FlowRegion.RiverClass classify(int catchment, int tributaries) {
@@ -114,12 +118,8 @@ final class FlowLayer {
         return catchment;
     }
 
-    /**
-     * A tributary is a side branch reaching a trunk: at least tributaryCells big, joining at a cell of at least
-     * trunkCells, and not the biggest inflow there, which is the trunk itself. Summing branches along the way makes
-     * two meeting trunks add up, plus one for the trunk that gets absorbed.
-     */
-    private int[] countTributaries(Grid grid, int[] catchment, int reach, int tributaryCells, int trunkCells) {
+    /** The biggest inflow of each cell, or -1. Ties go to the higher index, which only depends on coordinates. */
+    private static int[] mainInflows(Grid grid, int[] catchment) {
         int size = catchment.length;
         int[] mainInflow = new int[size];
         Arrays.fill(mainInflow, -1);
@@ -130,6 +130,16 @@ final class FlowLayer {
                 mainInflow[down] = cell;
             }
         }
+        return mainInflow;
+    }
+
+    /**
+     * A tributary is a side branch reaching a trunk: at least tributaryCells big, joining at a cell of at least
+     * trunkCells, and not the biggest inflow there, which is the trunk itself. Summing branches along the way makes
+     * two meeting trunks add up, plus one for the trunk that gets absorbed.
+     */
+    private int[] countTributaries(Grid grid, int[] catchment, int[] mainInflow, int reach, int tributaryCells, int trunkCells) {
+        int size = catchment.length;
         int[] tributaries = new int[size];
         for (int cell = 0; cell < size; cell++) {
             int down = grid.down[cell];
@@ -175,6 +185,10 @@ final class FlowLayer {
             this.direction = new byte[size * size];
             this.down = new int[size * size];
             int tileSize = settings.general.regionSize / config.flowCellSize;
+            int firstX = Math.floorDiv(originX, tileSize);
+            int firstZ = Math.floorDiv(originZ, tileSize);
+            int tilesAcross = Math.floorDiv(originX + size - 1, tileSize) - firstX + 1;
+            LogicThreads.forEach(tilesAcross * tilesAcross, i -> tiles.get(firstX + i % tilesAcross, firstZ + i / tilesAcross));
             for (int z = 0; z < size; z++) {
                 for (int x = 0; x < size; x++) {
                     int cellX = originX + x;
