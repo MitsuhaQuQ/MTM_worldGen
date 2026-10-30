@@ -164,7 +164,7 @@ final class SkeletonLayer {
 
     /**
      * Tallest mountain profile at a position with the strongest foothill and summit weights, plus the spur texture
-     * summed over all ridges weighted by their squared height, as {height, belt, summit, spurSum, spurWeight}.
+     * summed over nearby ridges weighted by squared height and distance, as {height, belt, summit, spurSum, spurWeight}.
      */
     private double[] mountains(double x, double z) {
         int cellX = (int) Math.floor(x / m.siteSpacing);
@@ -185,8 +185,9 @@ final class SkeletonLayer {
                     peak = smoothMax(peak, profile[0]);
                     belt = Math.max(belt, profile[1]);
                     summit = Math.max(summit, profile[2]);
-                    if (profile[0] > 0.0) {
-                        double weight = profile[0] * profile[0];
+                    if (profile[3] < m.textureReach) {
+                        double weight = profile[4] * (1.0 - smoothstep(0.0, m.textureReach, profile[3]));
+                        weight *= weight;
                         spurSum += weight * spurTexture(x, z, site, other);
                         spurWeight += weight;
                     }
@@ -211,7 +212,7 @@ final class SkeletonLayer {
                 + m.gullyShare * (gullies.sample(along / m.gullyWavelength, across / (m.gullyWavelength * m.textureStretch)) - 0.5);
     }
 
-    /** Height, foothill weight and summit weight of the ridge between two linked sites at a position. */
+    /** Height, foothill weight, summit weight, distance and crest height of the ridge between two linked sites at a position. */
     private double[] ridgeProfile(double x, double z, Site a, Site b) {
         double sx = b.x - a.x;
         double sz = b.z - a.z;
@@ -224,7 +225,7 @@ final class SkeletonLayer {
         double slopeDistance = Math.max(0.0, distance - 0.5 * m.summitWidth);
         double u = slopeDistance / halfWidth(height, a.width + t * (b.width - a.width));
         double summit = 1.0 - smoothstep(0.0, SUMMIT_FADE, u);
-        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax), summit};
+        return new double[]{profile(u) * height, foothillBelt(u) * crest / (scale * m.peakMax), summit, distance, height};
     }
 
     private double ridgeFactor(double x, double z) {

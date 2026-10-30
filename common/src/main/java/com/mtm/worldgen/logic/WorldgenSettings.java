@@ -41,6 +41,9 @@ public final class WorldgenSettings {
     public final Biomes biomes = new Biomes();
 
     public static final class General {
+        /** Villages only start where the ground within villageRadius blocks varies by at most villageMaxRelief. */
+        public int villageRadius = 48;
+        public double villageMaxRelief = 10.0;
         /** Vanilla sea level field; the top water block sits at seaLevel - 1 (y=62). */
         public int seaLevel = 63;
         /** Highest surface height terrain may reach. The build height of new worlds follows from it. */
@@ -122,6 +125,8 @@ public final class WorldgenSettings {
         public double textureStretch = 3.0;
         /** How far spurs wander sideways on their way down, in blocks. */
         public double textureBend = 700.0;
+        /** Spurs follow a ridge out to this distance, well past its foot, so open slopes run downhill too. */
+        public double textureReach = 2500.0;
         /** Wavelength of the texture on open massif land away from ridges. */
         public double massifTextureWavelength = 1400.0;
         /** Strength of the fine gullies relative to the texture; they break smooth slopes into uneven block steps. */

@@ -9,6 +9,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -132,6 +133,11 @@ public final class MtmGenerators {
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
                         SurfaceRules.sequence(
                                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
+                // Their vanilla surfaces scatter stone patches regardless of slope, which reads as rock pasted on hills
+                SurfaceRules.ifTrue(SurfaceRules.isBiome(Biomes.WINDSWEPT_HILLS, Biomes.WINDSWEPT_SAVANNA), SurfaceRules.sequence(
+                        SurfaceRules.ifTrue(SurfaceRules.ON_FLOOR, SurfaceRules.ifTrue(SurfaceRules.waterBlockCheck(-1, 0),
+                                SurfaceRules.state(Blocks.GRASS_BLOCK.defaultBlockState()))),
+                        SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.DIRT.defaultBlockState())))),
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.BEACH), SurfaceRules.sequence(
                         SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.SAND.defaultBlockState())),
                         SurfaceRules.ifTrue(SurfaceRules.DEEP_UNDER_FLOOR,

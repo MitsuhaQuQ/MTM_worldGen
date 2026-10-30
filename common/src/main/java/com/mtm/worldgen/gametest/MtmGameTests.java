@@ -66,7 +66,7 @@ public final class MtmGameTests {
      * Hash of all sampled columns for {@link #SEED}. Changes whenever terrain generation changes on purpose:
      * update it then, together with LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0xf0f4a2112744a744L;
+    private static final long EXPECTED_COLUMN_HASH = 0x1138f5107c094a62L;
 
     private static final int SEA_SURFACE_Y = 62;
     private static final double DEEP_OCEAN_COAST_DISTANCE = -1200.0;

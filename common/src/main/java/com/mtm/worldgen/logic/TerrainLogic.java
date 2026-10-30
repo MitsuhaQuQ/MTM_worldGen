@@ -153,6 +153,21 @@ public final class TerrainLogic {
                 sampleSnowLine(x, z), climate.humidity(x, z), climate.nearZoneBorder(temperature));
     }
 
+    /** Whether the ground around a position is flat enough for a village. */
+    public boolean isVillageGround(double x, double z) {
+        int radius = settings.general.villageRadius;
+        double low = Double.MAX_VALUE;
+        double high = -Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx += radius) {
+            for (int dz = -radius; dz <= radius; dz += radius) {
+                double height = sampleSurfaceHeight(x + dx, z + dz);
+                low = Math.min(low, height);
+                high = Math.max(high, height);
+            }
+        }
+        return high - low <= settings.general.villageMaxRelief;
+    }
+
     /** Climate zone name of a position. */
     public String sampleClimateZone(double x, double z) {
         return climate.zone(climate.temperature(x, z)).name();
