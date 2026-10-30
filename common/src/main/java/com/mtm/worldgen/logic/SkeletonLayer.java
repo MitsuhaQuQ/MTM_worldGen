@@ -33,7 +33,7 @@ final class SkeletonLayer {
     private static final long PLATEAU_HEIGHT_SALT = 0x504C4854L;
     private static final long HILLS_ZONE_SALT = 0x48494C4C5AL;
     private static final long HILLS_SALT = 0x48494C4CL;
-    private static final long COAST_SALT = 0x434F415354L;
+    private static final long PLAINS_SALT = 0x504C41494EL;
 
     /**
      * Sites searched in each direction. A link spans up to about 2.8 cells (diagonal neighbor plus jitter), so
@@ -71,8 +71,7 @@ final class SkeletonLayer {
     private final Fbm plateauHeight;
     private final Fbm hillsZone;
     private final Fbm hills;
-    private final Fbm coastMargin;
-    private final ContinentLayer continents;
+    private final Fbm plainsZone;
     private final WorldgenSettings settings;
     private final WorldgenSettings.Mountains m;
     private final WorldgenSettings.Plateaus plateaus;
@@ -90,11 +89,12 @@ final class SkeletonLayer {
     private final double plateauHigh;
     private final double hillsLow;
     private final double hillsHigh;
+    private final double plainsLow;
+    private final double plainsHigh;
     private final ThreadLocal<Map<Long, Site>> sites = ThreadLocal.withInitial(HashMap::new);
 
-    SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents) {
+    SkeletonLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
-        this.continents = continents;
         this.m = settings.mountains;
         this.plateaus = settings.plateaus;
         this.hillSettings = settings.hills;
@@ -113,7 +113,7 @@ final class SkeletonLayer {
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
         this.hillsZone = new Fbm(Hashing.derive(seed, HILLS_ZONE_SALT), 3, hillSettings.zoneWavelength);
         this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
-        this.coastMargin = new Fbm(Hashing.derive(seed, COAST_SALT), 2, m.coastMarginWavelength);
+        this.plainsZone = new Fbm(Hashing.derive(seed, PLAINS_SALT), 3, settings.plains.zoneWavelength);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
@@ -123,6 +123,9 @@ final class SkeletonLayer {
         NoiseStats plateauStats = new NoiseStats(plateauZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
         this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
+        NoiseStats plainsStats = new NoiseStats(plainsZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
+        this.plainsLow = plainsStats.quantile(1.0 - settings.plains.coverage - settings.plains.fade / 2.0);
+        this.plainsHigh = plainsStats.quantile(1.0 - settings.plains.coverage + settings.plains.fade / 2.0);
         NoiseStats hillsStats = new NoiseStats(hillsZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.hillsLow = hillsStats.quantile(1.0 - hillSettings.coverage - hillSettings.fade / 2.0);
         this.hillsHigh = hillsStats.quantile(1.0 - hillSettings.coverage + hillSettings.fade / 2.0);
@@ -142,7 +145,9 @@ final class SkeletonLayer {
             }
             return 0.0;
         }
-        double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * inlandWeight(x, z, baseAboveSea);
+        double plain = plainWeight(x, z);
+        double mountainZone = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * (1.0 - plain);
+        double openLand = 1.0 - plain * (1.0 - settings.plains.reliefShare);
         double massif = scale * m.massifHeight * mountainZone;
         // Warp the lookup so ridges between sites curve instead of running dead straight
         double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
@@ -163,10 +168,10 @@ final class SkeletonLayer {
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
         double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
-        double plateau = scale * plateauWeight * (plateaus.minHeight + (plateaus.maxHeight - plateaus.minHeight) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
+        double plateau = openLand * scale * plateauWeight * (plateaus.minHeight + (plateaus.maxHeight - plateaus.minHeight) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
 
         double hillsWeight = smoothstep(hillsLow, hillsHigh, hillsZone.sample(x, z)) * (1.0 - mountainZone);
-        double rolling = scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
+        double rolling = openLand * scale * hillSettings.height * hillsWeight * (0.5 + 0.5 * hills.sample(x, z));
 
         if (texture != null) {
             texture[0] = land * rugged;
@@ -174,10 +179,9 @@ final class SkeletonLayer {
         return land * (massif + peaks + foothill + plateau + rolling);
     }
 
-    /** Share of mountain building allowed at a position: none at the coast, unless the margin there runs out. */
-    private double inlandWeight(double x, double z, double baseAboveSea) {
-        double margin = m.coastMargin * Math.max(0.0, Math.min(1.0, 0.5 + 2.5 * coastMargin.sample(x, z)));
-        return margin <= 0.0 ? 1.0 : smoothstep(0.0, margin, continents.inlandDistance(baseAboveSea));
+    /** How far a position lies inside a great plain, from 0 to 1. */
+    private double plainWeight(double x, double z) {
+        return smoothstep(plainsLow, plainsHigh, plainsZone.sample(x, z));
     }
 
     /**
@@ -330,8 +334,7 @@ final class SkeletonLayer {
         long hash = Hashing.hash(siteSeed, cellX, cellZ);
         double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * m.siteSpacing;
         double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
-        double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
-        double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * inlandWeight(x, z, base);
+        double zoneWeight = smoothstep(zoneLow, zoneHigh, zone.sample(x, z)) * (1.0 - plainWeight(x, z));
         if (zoneWeight < m.siteMinZone) {
             return new Site(x, z, NONE, 0.0, 0.0, new Site[0]);
         }

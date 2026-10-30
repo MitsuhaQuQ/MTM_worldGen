@@ -89,7 +89,7 @@ class TerrainLogicTest {
         double highest = 0.0;
         for (int x = -20000; x < 20000; x += 64) {
             for (int z = -20000; z < 20000; z += 64) {
-                highest = Math.max(highest, logic.sampleSurfaceHeight(x, z));
+                highest = Math.max(highest, logic.sampleLandform(x, z));
             }
         }
         assertTrue(highest <= SETTINGS.general.maxSurfaceHeight, "surface reaches " + highest);
@@ -227,8 +227,8 @@ class TerrainLogicTest {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         int cells = logic.flowRegion(0, 0).cells();
         int crossings = 0;
-        for (int rx = -2; rx < 2; rx++) {
-            for (int rz = -2; rz < 2; rz++) {
+        for (int rx = -6; rx < 6; rx++) {
+            for (int rz = -6; rz < 6; rz++) {
                 FlowRegion west = logic.flowRegion(rx, rz);
                 FlowRegion east = logic.flowRegion(rx + 1, rz);
                 FlowRegion south = logic.flowRegion(rx, rz + 1);
@@ -442,9 +442,9 @@ class TerrainLogicTest {
         int ocean = 0;
         int total = 0;
         double sea = SETTINGS.general.seaLevel - 1;
-        for (int x = -40000; x < 40000; x += 400) {
-            for (int z = -40000; z < 40000; z += 400) {
-                if (logic.sampleSurfaceHeight(x, z) < sea) {
+        for (int x = -160000; x < 160000; x += 1600) {
+            for (int z = -160000; z < 160000; z += 1600) {
+                if (logic.sampleContinentHeight(x, z) < sea) {
                     ocean++;
                 }
                 total++;

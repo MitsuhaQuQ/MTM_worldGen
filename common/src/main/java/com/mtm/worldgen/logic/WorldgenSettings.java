@@ -37,6 +37,7 @@ public final class WorldgenSettings {
     public final Beaches beaches = new Beaches();
     public final Surface surface = new Surface();
     public final Spawn spawn = new Spawn();
+    public final Plains plains = new Plains();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -79,20 +80,20 @@ public final class WorldgenSettings {
         /** Target fraction of the surface covered by ocean. */
         public double oceanRatio = 0.30;
         /** Average distance between plate centers in blocks. */
-        public double plateSpacing = 11000.0;
+        public double plateSpacing = 27500.0;
         /** How far plate centers move from their grid cell center, as a fraction of the spacing. */
         public double plateJitter = 0.85;
         /** Fraction of plates that are open ocean instead of continent. */
         public double oceanPlateFraction = 0.18;
         /** Spacing of continent group sites in plate units: roughly how many plates wide a continent is. */
         public double groupSpacing = 2.6;
-        public double warpWavelength = 4096.0;
-        public double warpAmplitude = 2600.0;
+        public double warpWavelength = 10240.0;
+        public double warpAmplitude = 6500.0;
         /** Strait half-width offset between continent groups in plate units; negative closes it into land. */
         public double straitMean = 0.02;
         public double straitVariation = 0.16;
-        public double straitWavelength = 6144.0;
-        public double detailWavelength = 2048.0;
+        public double straitWavelength = 15360.0;
+        public double detailWavelength = 5120.0;
         public double detailAmplitude = 0.06;
         /** Land rises this far above the sea in continent interiors, before the skeleton. */
         public double landRange = 72.0;
@@ -101,11 +102,8 @@ public final class WorldgenSettings {
 
     public static final class Mountains {
         public double zoneWavelength = 7168.0;
-        /** Fraction of the world inside orogeny zones. */
-        public double zoneCoverage = 0.32;
-        /** Mountains keep this many blocks from the coast, varying along it down to nothing, so some still meet the sea. */
-        public double coastMargin = 2400.0;
-        public double coastMarginWavelength = 6144.0;
+        /** Fraction of the world inside orogeny zones, before great plains clear part of them. */
+        public double zoneCoverage = 0.60;
         public double zoneFade = 0.05;
         public double siteSpacing = 1536.0;
         public double siteJitter = 0.8;
@@ -155,6 +153,16 @@ public final class WorldgenSettings {
         public double mergeWidth = 24.0;
         public double foothillHeight = 32.0;
         public double foothillWavelength = 512.0;
+    }
+
+    /** Great plains: wide lowlands for big cities, where mountains and most relief give way. */
+    public static final class Plains {
+        public double zoneWavelength = 14336.0;
+        /** Fraction of the world in great plains. */
+        public double coverage = 0.33;
+        public double fade = 0.06;
+        /** Share of hills and plateaus that remains in great plains. */
+        public double reliefShare = 0.2;
     }
 
     public static final class Plateaus {
@@ -319,8 +327,9 @@ public final class WorldgenSettings {
     }
 
     public static final class Spawn {
-        /** Search radius in coarse cells. */
-        public int searchRings = 64;
+        /** Rings searched outward from the world center, and the distance between them in coarse cells. */
+        public int searchRings = 128;
+        public int searchStep = 8;
         public double minAboveSea = 3.0;
         public double maxAboveSea = 40.0;
     }
@@ -330,7 +339,7 @@ public final class WorldgenSettings {
         /** Cell size of the routing grid; a multiple of general.cellSize that divides general.regionSize. */
         public int flowCellSize = 256;
         /** How far upstream of a cell catchments reach, in blocks. */
-        public int flowLookAhead = 16384;
+        public int flowLookAhead = 32768;
         public int streamCells = 20;
         public int tributaryCells = 150;
         public int trunkCells = 1000;
@@ -347,9 +356,15 @@ public final class WorldgenSettings {
         public double meander = 0.14;
         public int curveSegments = 12;
         /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
-        public int queryReach = 512;
+        public int queryReach = 768;
         /** Rivers vary by this fraction of their width. */
         public double widthVariation = 0.1;
+        /** Rivers on a slope of at most gentleRiverSlope are plainWidthFactor times their base width, those at
+         * steepRiverSlope or more steepWidthFactor times, with a smooth change between. */
+        public double gentleRiverSlope = 0.01;
+        public double steepRiverSlope = 0.12;
+        public double plainWidthFactor = 2.0;
+        public double steepWidthFactor = 0.5;
         public double streamWidthMin = 4.0;
         public double streamWidthMax = 8.0;
         public double streamDepthMin = 1.0;
@@ -384,7 +399,7 @@ public final class WorldgenSettings {
     }
 
     public static final class Climate {
-        public double temperatureWavelength = 8192.0;
+        public double temperatureWavelength = 16384.0;
         /** Area shares of the zones; polar takes the remainder. */
         public double tropicalShare = 0.30;
         public double temperateShare = 0.35;
@@ -394,7 +409,7 @@ public final class WorldgenSettings {
         public double zoneJitterAmplitude = 0.03;
         /** Temperature margin on each side of a zone border where dry biomes give way, about 300 blocks wide. */
         public double zoneTransition = 0.05;
-        public double humidityWavelength = 6144.0;
+        public double humidityWavelength = 12288.0;
         /**
          * Coast distances in blocks mapped to {@link #continentalness}, piecewise linear. The default values pass
          * through vanilla's category boundaries and stay above -1.05, where mushroom fields would start.
@@ -450,6 +465,7 @@ public final class WorldgenSettings {
         require(mountains.summitWidth >= 0.0 && mountains.summitWidth < mountains.widthMin,
                 "mountains.summitWidth must be below mountains.widthMin");
         require(mountains.zoneCoverage > 0.0 && mountains.zoneCoverage < 1.0, "mountains.zoneCoverage must be in (0, 1)");
+        require(plains.coverage >= 0.0 && plains.coverage < 1.0, "plains.coverage must be in [0, 1)");
         require(slopes.plains > 0.0 && slopes.hills > 0.0 && slopes.plateau > 0.0 && slopes.mountain > 0.0,
                 "slopes must be positive");
         require(climate.tropicalShare + climate.temperateShare + climate.coldShare < 1.0,

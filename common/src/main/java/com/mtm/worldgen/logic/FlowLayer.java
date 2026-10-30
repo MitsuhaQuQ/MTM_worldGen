@@ -19,8 +19,8 @@ import java.util.PriorityQueue;
  */
 final class FlowLayer {
     private static final long ROUTE_SALT = 0x524F555445L;
-    /** Height tiles kept: enough for the window, which spans 12 tiles per axis by default. */
-    private static final int TILES = 256;
+    /** Height tiles kept: enough for the window, which spans 19 tiles per axis by default. */
+    private static final int TILES = 512;
 
     interface HeightSampler {
         double height(double x, double z);

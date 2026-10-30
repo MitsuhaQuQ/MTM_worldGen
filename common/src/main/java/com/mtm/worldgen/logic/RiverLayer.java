@@ -94,10 +94,13 @@ final class RiverLayer {
         double[] after = nextFlow.flows(nextLx, nextLz)
                 ? smoothNode(around, regionX, regionZ, nextX + nextFlow.downstreamX(nextLx, nextLz), nextZ + nextFlow.downstreamZ(nextLx, nextLz)) : b;
 
-        double[] startSize = size(flow.riverClass(lx, lz), flow.catchment(lx, lz), cellX, cellZ);
+        double[] startSize = size(around, regionX, regionZ, flow.riverClass(lx, lz), flow.catchment(lx, lz), cellX, cellZ);
         FlowRegion.RiverClass nextClass = nextFlow.riverClass(nextLx, nextLz);
-        double[] endSize = nextClass == FlowRegion.RiverClass.NONE ? startSize
-                : size(nextClass, nextFlow.catchment(nextLx, nextLz), nextX, nextZ);
+        // A side branch keeps its own size into the confluence, or it would flare out to the width of the main river
+        boolean mainStem = nextFlow.hasInflow(nextLx, nextLz) && nextX + nextFlow.inflowX(nextLx, nextLz) == cellX
+                && nextZ + nextFlow.inflowZ(nextLx, nextLz) == cellZ;
+        double[] endSize = nextClass == FlowRegion.RiverClass.NONE || !mainStem ? startSize
+                : size(around, regionX, regionZ, nextClass, nextFlow.catchment(nextLx, nextLz), nextX, nextZ);
 
         double startLevel = flow.waterLevel(lx, lz);
         double endLevel = nextFlow.waterLevel(nextLx, nextLz);
@@ -189,8 +192,11 @@ final class RiverLayer {
                 (cellZ + 0.5 + config.nodeJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * config.flowCellSize};
     }
 
-    /** Width and depth of a river at a node, varying per node so that both edges meeting there agree. */
-    private double[] size(FlowRegion.RiverClass riverClass, int catchment, int cellX, int cellZ) {
+    /**
+     * Width and depth of a river at a node, varying per node so that both edges meeting there agree. Rivers spread
+     * out on the plains and narrow on steep ground, as water does: a fast river needs less width to carry the same flow.
+     */
+    private double[] size(FlowRegion[] around, int regionX, int regionZ, FlowRegion.RiverClass riverClass, int catchment, int cellX, int cellZ) {
         long hash = Hashing.hash(sizeSeed, cellX, cellZ);
         double width;
         double depth;
@@ -214,7 +220,32 @@ final class RiverLayer {
                 depth = config.majorTrunkDepthMin + roll * (config.majorTrunkDepthMax - config.majorTrunkDepthMin);
             }
         }
-        return new double[]{width * (1.0 + config.widthVariation * (2.0 * Hashing.unit(hash) - 1.0)), depth};
+        double spread = widthFactor(slopeAt(around, regionX, regionZ, cellX, cellZ));
+        return new double[]{spread * width * (1.0 + config.widthVariation * (2.0 * Hashing.unit(hash) - 1.0)), depth};
+    }
+
+    private double widthFactor(double slope) {
+        double t = Math.max(0.0, Math.min(1.0, (slope - config.gentleRiverSlope) / (config.steepRiverSlope - config.gentleRiverSlope)));
+        t = t * t * (3.0 - 2.0 * t);
+        return config.plainWidthFactor + t * (config.steepWidthFactor - config.plainWidthFactor);
+    }
+
+    /** Fall of the water from a cell to the next one, per block. */
+    private double slopeAt(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
+        int lx = Math.floorMod(cellX, cells);
+        int lz = Math.floorMod(cellZ, cells);
+        if (flow == null || !flow.flows(lx, lz)) {
+            return 0.0;
+        }
+        int dx = flow.downstreamX(lx, lz);
+        int dz = flow.downstreamZ(lx, lz);
+        FlowRegion next = flowAt(around, regionX, regionZ, cellX + dx, cellZ + dz);
+        if (next == null) {
+            return 0.0;
+        }
+        double fall = flow.waterLevel(lx, lz) - next.waterLevel(Math.floorMod(cellX + dx, cells), Math.floorMod(cellZ + dz, cells));
+        return fall / (Math.hypot(dx, dz) * cellSize);
     }
 
     private static double[] unit(double x, double z) {

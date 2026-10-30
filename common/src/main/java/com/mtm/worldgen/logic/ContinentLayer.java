@@ -33,7 +33,8 @@ final class ContinentLayer {
 
 
     private static final int THRESHOLD_SAMPLES_PER_AXIS = 128;
-    private static final double THRESHOLD_SAMPLE_SPACING = 1024.0;
+    /** Samples per plate along an axis, so the statistics span many plates at any plate size. */
+    private static final double THRESHOLD_SAMPLES_PER_PLATE = 8.0;
     /** Quantiles used as the "highest land" and "deepest ocean" values when normalizing heights. */
     private static final double HIGH_QUANTILE = 0.995;
     private static final double LOW_QUANTILE = 0.005;
@@ -69,7 +70,7 @@ final class ContinentLayer {
         // can approach zero, and dividing by it made the estimate jump by tens of blocks per block
         this.minGradient = 0.5 / config.plateSpacing;
 
-        NoiseStats stats = new NoiseStats(this::value, THRESHOLD_SAMPLES_PER_AXIS, THRESHOLD_SAMPLE_SPACING);
+        NoiseStats stats = new NoiseStats(this::value, THRESHOLD_SAMPLES_PER_AXIS, config.plateSpacing / THRESHOLD_SAMPLES_PER_PLATE);
         this.threshold = stats.quantile(config.oceanRatio);
         this.high = stats.quantile(HIGH_QUANTILE);
         this.low = stats.quantile(LOW_QUANTILE);
@@ -93,14 +94,6 @@ final class ContinentLayer {
         double gradient = Math.max(Math.hypot(gx, gz), minGradient);
         double distance = (value - threshold) / gradient;
         return Math.max(-MAX_COAST_DISTANCE, Math.min(MAX_COAST_DISTANCE, distance));
-    }
-
-    /**
-     * Rough distance inland in blocks from a continent height. The value rises steadily away from coasts and the
-     * height follows it, which makes this cheap enough for every column, unlike {@link #coastDistance}.
-     */
-    double inlandDistance(double baseAboveSea) {
-        return baseAboveSea / config.landRange * (high - threshold) * config.plateSpacing;
     }
 
     /**

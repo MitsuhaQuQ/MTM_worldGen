@@ -53,7 +53,7 @@ public final class TerrainLogic {
     public TerrainLogic(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.continents = new ContinentLayer(seed, settings);
-        this.skeleton = new SkeletonLayer(seed, settings, continents);
+        this.skeleton = new SkeletonLayer(seed, settings);
         this.climate = new ClimateLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
@@ -152,6 +152,11 @@ public final class TerrainLogic {
         double[] texture = new double[1];
         double smooth = base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture);
         return carve(x, z, softCap(smooth), softCap(smooth + texture[0]));
+    }
+
+    /** Height of the continent layer alone, without the region cache: for sparse samples across a wide area. */
+    public double sampleContinentHeight(double x, double z) {
+        return continents.height(continents.value(x, z));
     }
 
     /** Surface height before water has shaped it. */
@@ -419,9 +424,17 @@ public final class TerrainLogic {
         for (int ring = 0; ring <= settings.spawn.searchRings; ring++) {
             for (int dx = -ring; dx <= ring; dx++) {
                 for (int dz = -ring; dz <= ring; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) == ring && isSpawnCell(dx, dz, sea)) {
-                        int half = settings.general.cellSize / 2;
-                        return new BlockColumn(dx * settings.general.cellSize + half, dz * settings.general.cellSize + half);
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                        continue;
+                    }
+                    int cellX = dx * settings.spawn.searchStep;
+                    int cellZ = dz * settings.spawn.searchStep;
+                    int half = settings.general.cellSize / 2;
+                    int x = cellX * settings.general.cellSize + half;
+                    int z = cellZ * settings.general.cellSize + half;
+                    // Most far samples are open sea, and this rules them out without touching the region cache
+                    if (sampleContinentHeight(x, z) >= sea && isSpawnCell(cellX, cellZ, sea)) {
+                        return new BlockColumn(x, z);
                     }
                 }
             }
@@ -448,7 +461,7 @@ public final class TerrainLogic {
                     int x = originX + dx * step;
                     int z = originZ + dz * step;
                     double distance = Math.hypot(dx, dz);
-                    if (distance < bestDistance && sampleSurfaceHeight(x, z) >= minHeight) {
+                    if (distance < bestDistance && sampleLandform(x, z) >= minHeight) {
                         best = new BlockColumn(x, z);
                         bestDistance = distance;
                     }
@@ -478,7 +491,7 @@ public final class TerrainLogic {
 
     private double cellCenterSurface(int cellX, int cellZ) {
         double size = settings.general.cellSize;
-        return sampleSurfaceHeight((cellX + 0.5) * size, (cellZ + 0.5) * size);
+        return sampleLandform((cellX + 0.5) * size, (cellZ + 0.5) * size);
     }
 
     private double cellValue(int field, int cellX, int cellZ) {
