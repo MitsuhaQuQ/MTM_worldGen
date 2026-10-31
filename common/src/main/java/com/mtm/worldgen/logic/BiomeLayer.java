@@ -30,22 +30,28 @@ final class BiomeLayer {
      * @param snowLine      local snow line height; zero or less means snow reaches the sea
      * @param humidity      humidity in [0, 1]
      * @param river         whether the position lies in a river channel
+     * @param rockyCoast    whether the coast here is rock or cliff rather than a beach
+     * @param island        kind of the island here, or null
      * @param zoneBorder    whether the position is close to a neighboring climate zone, where dry biomes such as
      *                      desert and badlands give way so their strong colors do not meet the next zone head on
      */
     String surfaceBiome(double x, double z, ClimateLayer.Zone zone, double height, double coastDistance,
-                        double snowLine, double humidity, boolean river, boolean zoneBorder) {
+                        double snowLine, double humidity, boolean river, boolean rockyCoast,
+                        ContinentLayer.IslandKind island, boolean zoneBorder) {
         double sea = settings.general.seaLevel - 1;
         boolean dry = humidity < config.dryHumidity && !zoneBorder;
         WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
         if (height < sea) {
             return pick(sea - height > config.deepOceanDepth ? biomes.deepOcean : biomes.ocean, x, z);
         }
+        if (island == ContinentLayer.IslandKind.MUSHROOM) {
+            return config.mushroomIsland;
+        }
         if (river) {
             return pick(biomes.river, x, z);
         }
         if (coastDistance < config.beachDepth && height < sea + settings.beaches.maxHeight) {
-            return pick(biomes.beach, x, z);
+            return pick(rockyCoast ? biomes.rockyShore : biomes.beach, x, z);
         }
         if (snowLine > 0.0) {
             if (height >= snowLine) {

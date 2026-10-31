@@ -13,11 +13,13 @@ import java.util.Locale;
  */
 public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSource {
     public enum Kind {
-        BEACH, SNOW, ROCK, ROCK_PATCH;
+        BEACH, GRAVEL_SHORE, ROCK_SHORE, SNOW, ROCK, ROCK_PATCH;
 
         boolean test(TerrainLogic logic, int x, int z) {
             return switch (this) {
                 case BEACH -> logic.isBeach(x, z);
+                case GRAVEL_SHORE -> logic.isGravelShore(x, z);
+                case ROCK_SHORE -> logic.isRockShore(x, z);
                 case SNOW -> logic.isSnow(x, z);
                 case ROCK -> logic.isRock(x, z);
                 case ROCK_PATCH -> logic.isRockPatch(x, z);

@@ -35,6 +35,7 @@ public final class WorldgenSettings {
     public final Plateaus plateaus = new Plateaus();
     public final Hills hills = new Hills();
     public final Beaches beaches = new Beaches();
+    public final Islands islands = new Islands();
     public final Surface surface = new Surface();
     public final Spawn spawn = new Spawn();
     public final Plains plains = new Plains();
@@ -221,6 +222,36 @@ public final class WorldgenSettings {
         public double offshore = 32.0;
         /** No beach on land rising more than this above the sea. */
         public double maxHeight = 6.0;
+        /** Coast types change along the shore at this wavelength. The remainder after these shares is sea cliffs. */
+        public double typeWavelength = 3072.0;
+        public double sandShare = 0.5;
+        public double gravelShare = 0.2;
+        public double rockShare = 0.2;
+        /** Sea cliffs: height on the 300 block scale, how fast they rise inland, and how far they fall away behind. */
+        public double cliffHeight = 14.0;
+        public double cliffRise = 96.0;
+        public double cliffFade = 300.0;
+    }
+
+    /** Islands in open water. */
+    public static final class Islands {
+        /** One candidate per square of this size, in blocks. */
+        public double spacing = 2500.0;
+        public double chance = 0.6;
+        public double sandShare = 0.5;
+        /** Rocky islands; the rest are mushroom islands. */
+        public double rockShare = 0.35;
+        public double radiusMin = 150.0;
+        public double radiusMax = 400.0;
+        /** Shores wander by this share of the radius, at this wavelength. */
+        public double shoreVariation = 0.45;
+        public double shoreWavelength = 256.0;
+        /** Island heights above the sea, on the 300 block scale. */
+        public double sandHeight = 4.0;
+        public double rockHeight = 14.0;
+        /** Islands keep this far from land, mushroom islands further. */
+        public double landMargin = 400.0;
+        public double mushroomMargin = 1000.0;
     }
 
     /** Bare rock and snow on high or steep ground. Heights are for a 300 block surface and scale with it. */
@@ -256,6 +287,8 @@ public final class WorldgenSettings {
         public String[] ocean = {"minecraft:ocean"};
         public String[] deepOcean = {"minecraft:deep_ocean"};
         public String[] beach = {"minecraft:beach"};
+        /** Rocky coasts and rocky islands. */
+        public String[] rockyShore = {"minecraft:stony_shore"};
         public String[] river = {"minecraft:river"};
         public String[] dry = {"minecraft:plains"};
         public String[] medium = {"minecraft:forest"};
@@ -294,7 +327,7 @@ public final class WorldgenSettings {
         }
 
         String[][] lists() {
-            return new String[][]{ocean, deepOcean, beach, river, dry, medium, wet, swamp, highland, dryHighland, alpine, snowPeak};
+            return new String[][]{ocean, deepOcean, beach, rockyShore, river, dry, medium, wet, swamp, highland, dryHighland, alpine, snowPeak};
         }
     }
 
@@ -319,6 +352,8 @@ public final class WorldgenSettings {
         public double caveThreshold = 0.1;
         /** Cave biomes from dry to humid. */
         public String[] caves = {"minecraft:dripstone_caves", "minecraft:lush_caves"};
+        /** Biome of mushroom islands. */
+        public String mushroomIsland = "minecraft:mushroom_fields";
 
         public BiomeZone tropical = new BiomeZone().with(
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
@@ -352,6 +387,7 @@ public final class WorldgenSettings {
         /** Every biome id the world can use, without duplicates, in a stable order. */
         public List<String> allBiomes() {
             Set<String> all = new LinkedHashSet<>(List.of(caves));
+            all.add(mushroomIsland);
             for (BiomeZone zone : List.of(tropical, temperate, cold, polar)) {
                 for (String[] list : zone.lists()) {
                     all.addAll(List.of(list));
@@ -504,6 +540,8 @@ public final class WorldgenSettings {
         require(rivers.flowCellSize > 0 && rivers.flowCellSize % general.cellSize == 0 && general.regionSize % rivers.flowCellSize == 0,
                 "rivers.flowCellSize must be a multiple of general.cellSize and divide general.regionSize");
         require(rivers.flowLookAhead > 0, "rivers.flowLookAhead must be positive");
+        require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
+        require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.queryReach >= 0 && rivers.queryReach <= general.regionSize - rivers.flowCellSize * 2,
                 "rivers.queryReach must leave the rivers of neighboring regions in reach");

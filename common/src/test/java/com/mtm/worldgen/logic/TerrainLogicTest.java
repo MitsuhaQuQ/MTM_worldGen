@@ -432,6 +432,40 @@ class TerrainLogicTest {
     }
 
     @Test
+    void coastsCoverAllTypes() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        java.util.EnumMap<CoastLayer.Type, Integer> counts = new java.util.EnumMap<>(CoastLayer.Type.class);
+        Random random = new Random(21);
+        for (int i = 0; i < 20000; i++) {
+            counts.merge(logic.sampleCoastType(random.nextInt(120000) - 60000, random.nextInt(120000) - 60000), 1, Integer::sum);
+        }
+        for (CoastLayer.Type type : CoastLayer.Type.values()) {
+            assertTrue(counts.getOrDefault(type, 0) > 500, type + " is too rare: " + counts);
+        }
+    }
+
+    /** Islands are scattered sparsely over the sea, away from land. */
+    @Test
+    void islandsDotTheOcean() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double sea = SETTINGS.general.seaLevel - 1;
+        int ocean = 0;
+        int island = 0;
+        for (int x = -100000; x < 100000; x += 64) {
+            for (int z = -100000; z < 100000; z += 1024) {
+                double height = logic.sampleContinentHeight(x, z);
+                if (height < sea) {
+                    ocean++;
+                } else if (logic.isIsland(x, z)) {
+                    island++;
+                }
+            }
+        }
+        double share = (double) island / (ocean + island);
+        assertTrue(share > 0.001 && share < 0.05, "islands cover " + share + " of the sea");
+    }
+
+    @Test
     void waterNeverRunsUphill() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         for (int rx = -1; rx <= 1; rx++) {
@@ -464,7 +498,7 @@ class TerrainLogicTest {
             for (int lx = 0; lx < cells; lx++) {
                 double height = logic.sampleSurfaceHeight((lx + 0.5) * size, (lz + 0.5) * size);
                 // Routing samples coarsely, so cells right at the coast can count as sea
-                assertTrue(flow.flows(lx, lz) || height < sea + 16.0, "land sink at height " + height);
+                assertTrue(flow.flows(lx, lz) || height < sea + 16.0 + SETTINGS.heightScale() * SETTINGS.beaches.cliffHeight, "land sink at height " + height);
             }
         }
     }

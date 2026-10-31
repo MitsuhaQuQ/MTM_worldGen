@@ -37,6 +37,7 @@ public final class TerrainLogic {
     private final ContinentLayer continents;
     private final SkeletonLayer skeleton;
     private final ClimateLayer climate;
+    private final CoastLayer coasts;
     private final BiomeLayer biomes;
     private final Fbm beachWidth;
     private final Fbm snowLineNoise;
@@ -55,6 +56,7 @@ public final class TerrainLogic {
         this.continents = new ContinentLayer(seed, settings);
         this.skeleton = new SkeletonLayer(seed, settings, continents);
         this.climate = new ClimateLayer(seed, settings);
+        this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
@@ -140,7 +142,20 @@ public final class TerrainLogic {
 
     /** Whether a block column gets a sand beach, memoized per thread like {@link #surfaceHeight}. */
     public boolean isBeach(int x, int z) {
-        return columns.get().column(this, x, z).beach();
+        return isShore(x, z, CoastLayer.Type.SAND);
+    }
+
+    public boolean isGravelShore(int x, int z) {
+        return isShore(x, z, CoastLayer.Type.GRAVEL);
+    }
+
+    public boolean isRockShore(int x, int z) {
+        return isShore(x, z, CoastLayer.Type.ROCK) || isShore(x, z, CoastLayer.Type.CLIFF);
+    }
+
+    private boolean isShore(int x, int z, CoastLayer.Type type) {
+        Column column = columns.get().column(this, x, z);
+        return column.beach() && column.coastType() == type;
     }
 
     /**
@@ -150,26 +165,50 @@ public final class TerrainLogic {
     public double sampleSurfaceHeight(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
-        double smooth = base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture);
+        double smooth = base + skeletonHeight(x, z, base, texture);
         return carve(x, z, softCap(smooth), softCap(smooth + texture[0]));
     }
 
     /** Height of the continent layer alone, without the region cache: for sparse samples across a wide area. */
+    /** Whether a position is on or around an island. */
+    public boolean isIsland(double x, double z) {
+        return continents.islandKind(x, z) != null;
+    }
+
     public double sampleContinentHeight(double x, double z) {
         return continents.height(continents.value(x, z));
+    }
+
+    /**
+     * Skeleton height over a continent base. Islands have none: a small dome rising from the sea could not carry the
+     * hills and mountains of the open field, which would stand on it as spikes.
+     */
+    private double skeletonHeight(double x, double z, double base, double[] texture) {
+        double clearance = continents.islandClearance(x, z);
+        if (clearance <= 0.0) {
+            if (texture != null) {
+                texture[0] = 0.0;
+            }
+            return 0.0;
+        }
+        double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture);
+        if (texture != null) {
+            texture[0] *= clearance;
+        }
+        return height;
     }
 
     /** Surface height before water has shaped it. */
     public double sampleLandform(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
-        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture) + texture[0]);
+        return softCap(base + skeletonHeight(x, z, base, texture) + texture[0]);
     }
 
     /** Surface height without ridge texture, which is the ground rivers run on. */
     public double sampleSmoothLand(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), null));
+        return softCap(base + skeletonHeight(x, z, base, null));
     }
 
     /**
@@ -180,8 +219,9 @@ public final class TerrainLogic {
      */
     private double carve(double x, double z, double smooth, double textured) {
         RiverRegion.Hit river = sampleRiver(x, z);
-        double ground = river == null ? textured : smooth + (textured - smooth) * river.texture();
-        double land = river == null ? textured : carveValley(river, ground);
+        double cliff = cliffHeight(x, z);
+        double ground = cliff + (river == null ? textured : smooth + (textured - smooth) * river.texture());
+        double land = river == null ? ground : carveValley(river, ground);
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -194,6 +234,41 @@ public final class TerrainLogic {
         double rim = smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
         return shaped < bank ? shaped + (bank - shaped) * rim : shaped;
+    }
+
+    /** Extra land height of a sea cliff: a steep rise from the shore that falls away again behind it. */
+    private double cliffHeight(double x, double z) {
+        double strength = coasts.cliffStrength(x, z);
+        double clearance = strength <= 0.0 ? 0.0 : continents.islandClearance(x, z);
+        if (clearance <= 0.0) {
+            return 0.0;
+        }
+        double distance = sampleCoastDistance(x, z);
+        if (distance <= 0.0) {
+            return 0.0;
+        }
+        WorldgenSettings.Beaches config = settings.beaches;
+        double rise = smooth(distance / config.cliffRise);
+        double behind = 1.0 - smooth((distance - config.cliffRise) / config.cliffFade);
+        return clearance * strength * settings.heightScale() * config.cliffHeight * rise * behind;
+    }
+
+    /** The kind of coast at a position. Deserts have gravel shores, and islands decide for themselves. */
+    public CoastLayer.Type sampleCoastType(double x, double z) {
+        ContinentLayer.IslandKind island = continents.islandKind(x, z);
+        if (island != null) {
+            return island == ContinentLayer.IslandKind.ROCK ? CoastLayer.Type.ROCK : CoastLayer.Type.SAND;
+        }
+        double temperature = climate.temperature(x, z);
+        if (climate.zone(temperature) == ClimateLayer.Zone.TROPICAL && climate.humidity(x, z) < settings.biomes.dryHumidity) {
+            return CoastLayer.Type.GRAVEL;
+        }
+        return coasts.type(x, z);
+    }
+
+    private boolean isRockyCoast(double x, double z) {
+        CoastLayer.Type type = sampleCoastType(x, z);
+        return type == CoastLayer.Type.ROCK || type == CoastLayer.Type.CLIFF;
     }
 
     private double carveValley(RiverRegion.Hit river, double ground) {
@@ -316,7 +391,7 @@ public final class TerrainLogic {
      */
     private double sampleDrainageHeight(double x, double z) {
         double base = continents.height(continents.value(x, z));
-        return softCap(base + skeleton.height(x, z, base - (settings.general.seaLevel - 1), null));
+        return softCap(base + skeletonHeight(x, z, base, null));
     }
 
     /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */
@@ -350,7 +425,8 @@ public final class TerrainLogic {
     public String sampleBiome(double x, double z) {
         double temperature = climate.temperature(x, z);
         return biomes.surfaceBiome(x, z, climate.zone(temperature), sampleSurfaceHeight(x, z), sampleCoastDistance(x, z),
-                sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), climate.nearZoneBorder(temperature));
+                sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), isRockyCoast(x, z), continents.islandKind(x, z),
+                climate.nearZoneBorder(temperature));
     }
 
     /** Whether the ground around a position is flat enough for a village. */
@@ -615,6 +691,7 @@ public final class TerrainLogic {
         private int snow = -1;
         private int rock = -1;
         private String biome;
+        private CoastLayer.Type coastType;
 
         Column(TerrainLogic owner, int x, int z) {
             this.owner = owner;
@@ -656,6 +733,13 @@ public final class TerrainLogic {
                 rock = owner.isRock(x, z, height, grade()) ? 1 : 0;
             }
             return rock == 1;
+        }
+
+        CoastLayer.Type coastType() {
+            if (coastType == null) {
+                coastType = owner.sampleCoastType(x, z);
+            }
+            return coastType;
         }
 
         boolean beach() {

@@ -20,6 +20,12 @@ final class ContinentLayer {
     private static final long WARP_Z_SALT = 0x574152505AL;
     private static final long DETAIL_SALT = 0x44455441494CL;
     private static final long STRAIT_SALT = 0x535452414954L;
+    private static final long ISLAND_SALT = 0x49534C414E44L;
+    private static final int ISLAND_CACHE_SIZE = 256;
+    /** Beyond the waterline, how far around an island still counts as its shore, as a share of its radius. */
+    private static final double ISLAND_REACH = 1.3;
+    /** How far land keeps clear of an island, as a share of its radius, so that hills ease off gently. */
+    private static final double ISLAND_CLEARANCE = 3.0;
 
     private static final long OCEAN_GROUP = 0L;
     /** Plates searched in each direction around the containing plate cell. */
@@ -52,6 +58,7 @@ final class ContinentLayer {
     private final Fbm warpZ;
     private final Fbm detail;
     private final Fbm straits;
+    private final Fbm islandShore;
     private final WorldgenSettings settings;
     private final WorldgenSettings.Continents config;
     private final double minGradient;
@@ -59,31 +66,129 @@ final class ContinentLayer {
     private final double high;
     private final double low;
     private final ThreadLocal<Plate[]> plates = ThreadLocal.withInitial(() -> new Plate[PLATE_CACHE_SIZE]);
+    private final ThreadLocal<Island[]> islands = ThreadLocal.withInitial(() -> new Island[ISLAND_CACHE_SIZE]);
+    private final long islandSeed;
+    private boolean islandsReady;
 
     ContinentLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.config = settings.continents;
         this.plateSeed = Hashing.derive(seed, PLATE_SALT);
         this.groupSeed = Hashing.derive(seed, GROUP_SALT);
+        this.islandSeed = Hashing.derive(seed, ISLAND_SALT);
         this.warpX = new Fbm(Hashing.derive(seed, WARP_X_SALT), 3, config.warpWavelength);
         this.warpZ = new Fbm(Hashing.derive(seed, WARP_Z_SALT), 3, config.warpWavelength);
         this.detail = new Fbm(Hashing.derive(seed, DETAIL_SALT), 4, config.detailWavelength);
         this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, config.straitWavelength);
+        this.islandShore = new Fbm(Hashing.derive(seed, ISLAND_SALT + 1), 3, settings.islands.shoreWavelength);
         // Floor for the gradient in the distance estimate, half the typical plate gradient: inland the gradient
         // can approach zero, and dividing by it made the estimate jump by tens of blocks per block
         this.minGradient = 0.5 / config.plateSpacing;
 
-        NoiseStats stats = new NoiseStats(this::value, THRESHOLD_SAMPLES_PER_AXIS, config.plateSpacing / THRESHOLD_SAMPLES_PER_PLATE);
+        NoiseStats stats = new NoiseStats(this::mainlandValue, THRESHOLD_SAMPLES_PER_AXIS, config.plateSpacing / THRESHOLD_SAMPLES_PER_PLATE);
         this.threshold = stats.quantile(config.oceanRatio);
         this.high = stats.quantile(HIGH_QUANTILE);
         this.low = stats.quantile(LOW_QUANTILE);
+        this.islandsReady = true;
     }
 
     double value(double x, double z) {
+        double value = mainlandValue(x, z);
+        // Thresholds are measured on the mainland alone, while they are still unset
+        return islandsReady && value < threshold ? Math.max(value, islandValue(x, z)) : value;
+    }
+
+    private double mainlandValue(double x, double z) {
         double wx = x + config.warpAmplitude * warpX.sample(x, z);
         double wz = z + config.warpAmplitude * warpZ.sample(x, z);
         double strait = config.straitMean + config.straitVariation * straits.sample(x, z);
         return plateValue(wx / config.plateSpacing, wz / config.plateSpacing, strait) + config.detailAmplitude * detail.sample(x, z);
+    }
+
+    /** Highest island value at a position: a dome above the land threshold over each island's radius. */
+    private double islandValue(double x, double z) {
+        double spacing = settings.islands.spacing;
+        int cellX = (int) Math.floor(x / spacing);
+        int cellZ = (int) Math.floor(z / spacing);
+        double best = -Double.MAX_VALUE;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Island island = island(cellX + dx, cellZ + dz);
+                if (island.kind != null) {
+                    double reach = island.radius * (1.0 + settings.islands.shoreVariation * islandShore.sample(x, z));
+                    double u = Math.hypot(x - island.x, z - island.z) / reach;
+                    best = Math.max(best, threshold + island.rise * (1.0 - u * u));
+                }
+            }
+        }
+        return best;
+    }
+
+    /** How far a position is clear of islands: 0 on one, rising smoothly to 1 at the edge of its shore. */
+    double islandClearance(double x, double z) {
+        double spacing = settings.islands.spacing;
+        int cellX = (int) Math.floor(x / spacing);
+        int cellZ = (int) Math.floor(z / spacing);
+        double clearance = 1.0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Island island = island(cellX + dx, cellZ + dz);
+                if (island.kind != null) {
+                    double u = Math.hypot(x - island.x, z - island.z) / island.radius;
+                    double t = Math.max(0.0, Math.min(1.0, (u - 1.0) / (ISLAND_CLEARANCE - 1.0)));
+                    clearance = Math.min(clearance, t * t * (3.0 - 2.0 * t));
+                }
+            }
+        }
+        return clearance;
+    }
+
+    /** Kind of the island around a position, or null away from islands. */
+    IslandKind islandKind(double x, double z) {
+        double spacing = settings.islands.spacing;
+        int cellX = (int) Math.floor(x / spacing);
+        int cellZ = (int) Math.floor(z / spacing);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Island island = island(cellX + dx, cellZ + dz);
+                if (island.kind != null && Math.hypot(x - island.x, z - island.z) < island.radius * ISLAND_REACH) {
+                    return island.kind;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Island island(int cellX, int cellZ) {
+        Island[] cache = islands.get();
+        int slot = (cellX * 31 + cellZ) & (ISLAND_CACHE_SIZE - 1);
+        Island island = cache[slot];
+        if (island == null || island.cellX != cellX || island.cellZ != cellZ) {
+            island = createIsland(cellX, cellZ);
+            cache[slot] = island;
+        }
+        return island;
+    }
+
+    private Island createIsland(int cellX, int cellZ) {
+        WorldgenSettings.Islands islandConfig = settings.islands;
+        long hash = Hashing.hash(islandSeed, cellX, cellZ);
+        double x = (cellX + 0.5 + 0.8 * (Hashing.unit(hash) - 0.5)) * islandConfig.spacing;
+        double z = (cellZ + 0.5 + 0.8 * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * islandConfig.spacing;
+        if (Hashing.unit(Hashing.derive(hash, 2)) >= islandConfig.chance) {
+            return new Island(cellX, cellZ, x, z, 1.0, 0.0, null);
+        }
+        double roll = Hashing.unit(Hashing.derive(hash, 3));
+        IslandKind kind = roll < islandConfig.sandShare ? IslandKind.SAND
+                : roll < islandConfig.sandShare + islandConfig.rockShare ? IslandKind.ROCK : IslandKind.MUSHROOM;
+        double offshore = (threshold - mainlandValue(x, z)) * config.plateSpacing;
+        double radius = islandConfig.radiusMin + Hashing.unit(Hashing.derive(hash, 4)) * (islandConfig.radiusMax - islandConfig.radiusMin);
+        double margin = kind == IslandKind.MUSHROOM ? islandConfig.mushroomMargin : islandConfig.landMargin;
+        if (offshore < margin + ISLAND_CLEARANCE * radius) {
+            return new Island(cellX, cellZ, x, z, 1.0, 0.0, null);
+        }
+        double height = settings.heightScale() * (kind == IslandKind.ROCK ? islandConfig.rockHeight : islandConfig.sandHeight);
+        return new Island(cellX, cellZ, x, z, radius, height / config.landRange * (high - threshold), kind);
     }
 
     /**
@@ -200,6 +305,13 @@ final class ContinentLayer {
             }
         }
         return group;
+    }
+
+    enum IslandKind {
+        SAND, ROCK, MUSHROOM
+    }
+
+    private record Island(int cellX, int cellZ, double x, double z, double radius, double rise, IslandKind kind) {
     }
 
     private record Plate(int cellU, int cellV, double u, double v, long group) {

@@ -31,11 +31,12 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 - **Mountains.** Ranges follow winding ridges, and blend along their length between a steep igneous form and a gentle wind-worn one. Isolated peaks stand where hills meet mountains, and rounded dome hills stand among the hills. Along coasts, mountains give way to hills.
 - **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast.
 - **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity.
-- **Surface.** Bare rock on steep ground, snow above the snow line, sandy beaches. Caves and ravines stay below the surface.
+- **Coasts and islands.** Sand, gravel, rock and sea cliff coasts follow each other along the shore, and sand, rock and mushroom islands dot the open sea.
+- **Surface.** Bare rock on steep ground and snow above the snow line. Caves and ravines stay below the surface.
 
 Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on Fabric and Forge, and in any exploration order.
 
-Not done yet: delta and coast types, islands, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds.
+Not done yet: deltas, harbors, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds.
 
 ## How it works
 
@@ -98,7 +99,7 @@ The file only applies to new worlds. Each world stores its settings when created
 | `plains`, `hills`, `mountains`, `plateaus` | Tier shares, heights, ridge shape and mountain styles |
 | `isolated` | Isolated peaks and dome hills |
 | `rivers` | Routing, river classes, widths, valleys, floodplains and lakes |
-| `surface`, `beaches` | Snow lines, bare rock and beaches |
+| `surface`, `beaches`, `islands` | Snow lines, bare rock, coast types and islands |
 | `climate`, `biomes` | Climate zone shares and sizes, and the biomes of each zone |
 | `spawn` | World spawn search |
 
