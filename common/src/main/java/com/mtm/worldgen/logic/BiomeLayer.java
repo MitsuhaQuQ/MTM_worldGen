@@ -29,16 +29,20 @@ final class BiomeLayer {
      * @param coastDistance distance to the coast in blocks, positive inland
      * @param snowLine      local snow line height; zero or less means snow reaches the sea
      * @param humidity      humidity in [0, 1]
+     * @param river         whether the position lies in a river channel
      * @param zoneBorder    whether the position is close to a neighboring climate zone, where dry biomes such as
      *                      desert and badlands give way so their strong colors do not meet the next zone head on
      */
     String surfaceBiome(double x, double z, ClimateLayer.Zone zone, double height, double coastDistance,
-                        double snowLine, double humidity, boolean zoneBorder) {
+                        double snowLine, double humidity, boolean river, boolean zoneBorder) {
         double sea = settings.general.seaLevel - 1;
         boolean dry = humidity < config.dryHumidity && !zoneBorder;
         WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
         if (height < sea) {
             return pick(sea - height > config.deepOceanDepth ? biomes.deepOcean : biomes.ocean, x, z);
+        }
+        if (river) {
+            return pick(biomes.river, x, z);
         }
         if (coastDistance < config.beachDepth && height < sea + settings.beaches.maxHeight) {
             return pick(biomes.beach, x, z);

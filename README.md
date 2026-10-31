@@ -35,7 +35,7 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 
 Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on Fabric and Forge, and in any exploration order.
 
-Not done yet: delta and coast types, islands, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds. Rivers do not freeze yet.
+Not done yet: delta and coast types, islands, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds.
 
 ## How it works
 

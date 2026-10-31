@@ -256,6 +256,7 @@ public final class WorldgenSettings {
         public String[] ocean = {"minecraft:ocean"};
         public String[] deepOcean = {"minecraft:deep_ocean"};
         public String[] beach = {"minecraft:beach"};
+        public String[] river = {"minecraft:river"};
         public String[] dry = {"minecraft:plains"};
         public String[] medium = {"minecraft:forest"};
         public String[] wet = {"minecraft:forest"};
@@ -282,13 +283,18 @@ public final class WorldgenSettings {
             return this;
         }
 
+        BiomeZone withRiver(String[] river) {
+            this.river = river;
+            return this;
+        }
+
         BiomeZone withDryHighland(String[] dryHighland) {
             this.dryHighland = dryHighland;
             return this;
         }
 
         String[][] lists() {
-            return new String[][]{ocean, deepOcean, beach, dry, medium, wet, swamp, highland, dryHighland, alpine, snowPeak};
+            return new String[][]{ocean, deepOcean, beach, river, dry, medium, wet, swamp, highland, dryHighland, alpine, snowPeak};
         }
     }
 
@@ -329,11 +335,11 @@ public final class WorldgenSettings {
                 ids("cold_ocean"), ids("deep_cold_ocean"), ids("beach"),
                 ids("taiga", "snowy_taiga"), ids("taiga", "old_growth_spruce_taiga"),
                 ids("old_growth_pine_taiga", "old_growth_spruce_taiga"), new String[0],
-                ids("grove", "windswept_hills", "windswept_gravelly_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes"));
+                ids("grove", "windswept_hills", "windswept_gravelly_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes")).withRiver(ids("frozen_river"));
         public BiomeZone polar = new BiomeZone().with(
                 ids("frozen_ocean"), ids("deep_frozen_ocean"), ids("snowy_beach"),
                 ids("snowy_plains", "ice_spikes"), ids("snowy_plains", "snowy_taiga"), ids("snowy_taiga", "grove"),
-                new String[0], ids("snowy_slopes"), ids("snowy_slopes"), ids("frozen_peaks"));
+                new String[0], ids("snowy_slopes"), ids("snowy_slopes"), ids("frozen_peaks")).withRiver(ids("frozen_river"));
 
         private static String[] ids(String... names) {
             String[] ids = new String[names.length];

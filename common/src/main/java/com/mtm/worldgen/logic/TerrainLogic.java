@@ -240,6 +240,22 @@ public final class TerrainLogic {
         return clamped * clamped * (3.0 - 2.0 * clamped);
     }
 
+    /** Water level of the lake at a position, or NaN away from lakes. */
+    public double sampleLakeLevel(double x, double z) {
+        double[] lake = sampleLake(x, z);
+        return lake != null && lake[0] > LAKE_EDGE ? lake[1] : Double.NaN;
+    }
+
+    /** Whether a position lies in a river channel, rather than a lake the river runs through. */
+    private boolean isRiverChannel(double x, double z) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        if (river == null || river.distance() >= river.halfWidth(settings.rivers.minChannelWidth)) {
+            return false;
+        }
+        double[] lake = sampleLake(x, z);
+        return lake == null || lake[0] <= LAKE_EDGE;
+    }
+
     /** Water surface of a column, or NaN where it holds no river or lake. */
     public double sampleWaterLevel(double x, double z) {
         double[] lake = sampleLake(x, z);
@@ -334,7 +350,7 @@ public final class TerrainLogic {
     public String sampleBiome(double x, double z) {
         double temperature = climate.temperature(x, z);
         return biomes.surfaceBiome(x, z, climate.zone(temperature), sampleSurfaceHeight(x, z), sampleCoastDistance(x, z),
-                sampleSnowLine(x, z), climate.humidity(x, z), climate.nearZoneBorder(temperature));
+                sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), climate.nearZoneBorder(temperature));
     }
 
     /** Whether the ground around a position is flat enough for a village. */

@@ -404,6 +404,33 @@ class TerrainLogicTest {
         assertTrue(p05 >= 0.0, "plains lie " + p05 + " below rivers");
     }
 
+    /** Channels carry river biomes, which freeze in the cold zones and stay open elsewhere. */
+    @Test
+    void riversCarryRiverBiomes() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        double sea = SETTINGS.general.seaLevel - 1;
+        int checked = 0;
+        for (int rx = -3; rx < 3; rx++) {
+            for (int rz = -3; rz < 3; rz++) {
+                RiverRegion rivers = logic.riverRegion(rx, rz);
+                for (int i = 0; i < rivers.segments(); i += 7) {
+                    double x = rivers.startX(i);
+                    double z = rivers.startZ(i);
+                    RiverRegion.Hit river = logic.sampleRiver(x, z);
+                    if (river == null || river.distance() > 1.0 || logic.sampleSurfaceHeight(x, z) < sea + 1.0 || !Double.isNaN(logic.sampleLakeLevel(x, z))) {
+                        continue;
+                    }
+                    String biome = logic.sampleBiome(x, z);
+                    String zone = logic.sampleClimateZone(x, z);
+                    boolean cold = zone.equals("COLD") || zone.equals("POLAR");
+                    assertEquals(cold ? "minecraft:frozen_river" : "minecraft:river", biome, "in zone " + zone + " at " + x + "," + z);
+                    checked++;
+                }
+            }
+        }
+        assertTrue(checked > 100, "only " + checked + " river points checked");
+    }
+
     @Test
     void waterNeverRunsUphill() {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
