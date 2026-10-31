@@ -42,6 +42,8 @@ final class SkeletonLayer {
     private static final long CLIFF_SALT = 0x434C494646L;
     /** Wavelength of the wander that keeps cliff bands from following contour lines. */
     private static final double CLIFF_WARP_WAVELENGTH = 320.0;
+    /** Steps of level shift across the full range of the cliff patch noise. */
+    private static final double CLIFF_LEVEL_SHIFT = 4.0;
     /** Style field values at which a range is fully eroded and fully igneous. */
     private static final double STYLE_RANGE = 0.3;
     /** Cross section used to relate a range's width at half height to its full width. */
@@ -479,7 +481,9 @@ final class SkeletonLayer {
     /** Share of cliff bands at a position: they form patches on steep igneous ranges. */
     private double cliffMask(double x, double z, double mountainZone) {
         double igneous = mountainZone > 0.0 ? style(x, z) : 0.0;
-        return igneous > 0.0 ? igneous * mountainZone * smoothstep(m.cliffLow, m.cliffHigh, cliffZone.sample(x, z)) : 0.0;
+        // Cliffs are all or nothing: half a cliff is only a slightly uneven slope
+        double strength = igneous * mountainZone * smoothstep(m.cliffLow, m.cliffHigh, cliffZone.sample(x, z));
+        return smoothstep(0.1, 0.5, strength);
     }
 
     /** Share of cliff bands at a position with the given continent base height above the sea. */
@@ -490,7 +494,8 @@ final class SkeletonLayer {
     /** Height change that gathers a slope into steps: nearly flat ledges with a steep rise between them. */
     private double cliffOffset(double x, double z, double height) {
         double step = scale * m.cliffStep;
-        double value = (height + 0.5 * step * cliffWarp.sample(x, z)) / step;
+        // The level shifts from patch to patch, so that cliffs on one mountain do not line up into rings around it
+        double value = (height + 0.5 * step * cliffWarp.sample(x, z)) / step + CLIFF_LEVEL_SHIFT * cliffZone.sample(x, z);
         double t = value - Math.floor(value);
         double stepped = t * (1.0 - m.cliffStrength) + m.cliffStrength * smoothstep(0.5 - m.cliffWidth, 0.5 + m.cliffWidth, t);
         return (stepped - t) * step;

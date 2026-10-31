@@ -465,17 +465,20 @@ public final class TerrainLogic {
     }
 
     /**
-     * Rock of a stratum at a height: 0 for plain stone and 1 to 4 for the other rocks, dark ones on igneous ranges and
+     * Rock of a stratum at a height on steep faces: 0 for plain stone and 1 to 4 for the other rocks, dark ones on igneous ranges and
      * pale ones on wind-worn ranges. Layers wander a little and repeat at no fixed order, like real bedding.
      */
     public int rockStratum(int x, int y, int z) {
         Column column = columns.get().column(this, x, z);
-        int band = (int) Math.floor((y + column.strataOffset()) / settings.surface.strataThickness);
-        double roll = Hashing.unit(Hashing.hash(strataSeed, band, 0));
-        if (roll < 0.5) {
+        if (column.grade() * 100.0 < settings.surface.strataSlope) {
             return 0;
         }
-        return (column.igneous() ? 1 : 3) + (roll < 0.8 ? 0 : 1);
+        int band = (int) Math.floor((y + column.strataOffset()) / settings.surface.strataThickness);
+        double roll = Hashing.unit(Hashing.hash(strataSeed, band, 0));
+        if (roll < 0.6) {
+            return 0;
+        }
+        return (column.igneous() ? 1 : 3) + (roll < 0.85 ? 0 : 1);
     }
 
     /** Share of cliff bands at a position, from 0 to 1. Slope limits do not hold where it is above zero. */

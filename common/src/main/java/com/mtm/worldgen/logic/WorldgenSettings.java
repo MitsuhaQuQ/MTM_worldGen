@@ -158,12 +158,12 @@ public final class WorldgenSettings {
         public double erodedTexture = 0.5;
         /** Cliff bands of igneous ranges: height of one step on the 300 block scale, patch size, and how sharp a step is. */
         public double cliffStep = 26.0;
-        public double cliffWavelength = 1536.0;
-        public double cliffStrength = 0.85;
-        public double cliffWidth = 0.08;
+        public double cliffWavelength = 640.0;
+        public double cliffStrength = 0.92;
+        public double cliffWidth = 0.05;
         /** Noise levels over which cliff patches fade in. */
-        public double cliffLow = -0.05;
-        public double cliffHigh = 0.15;
+        public double cliffLow = 0.12;
+        public double cliffHigh = 0.26;
         /** Steepest slope of wind-worn ranges, as a share of the mountain slope limit. */
         public double erodedGrade = 0.6;
         /** Width in blocks of the gentle band along the crest, centered on the ridge line. */
@@ -285,9 +285,11 @@ public final class WorldgenSettings {
         public double bareRockLine = 0.93;
         /** Rock slope at the snow line, in percent: thin high ground exposes rock on gentler faces. */
         public double highRockSlope = 45.0;
-        /** Rock strata: height of a layer in blocks, and how far layers wander up and down. */
-        public double strataThickness = 14.0;
-        public double strataWarp = 12.0;
+        /** Rock strata show on faces steeper than this grade, in percent, or they spread into wide rings on gentle slopes. */
+        public double strataSlope = 160.0;
+        /** Height of a layer in blocks, and how far layers wander up and down. */
+        public double strataThickness = 6.0;
+        public double strataWarp = 8.0;
         public double strataWavelength = 1024.0;
         public double rockPatchWavelength = 64.0;
         /** Noise level above which rock turns into the patch stone. */
@@ -491,7 +493,7 @@ public final class WorldgenSettings {
         /** River banks fade out over this many blocks of land height above the sea. */
         public double coastBlend = 6.0;
         /** Ridge texture fades in over this many blocks from a valley floor, plus this many per block of river width. */
-        public double textureFadeBase = 160.0;
+        public double textureFadeBase = 64.0;
         public double textureFadePerWidth = 2.0;
         /** How far a river node moves toward the middle of its neighbors, rounding sharp bends. */
         public double nodeSmoothing = 0.6;
