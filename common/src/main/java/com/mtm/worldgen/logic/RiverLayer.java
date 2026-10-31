@@ -86,6 +86,9 @@ final class RiverLayer {
         }
         int nextLx = Math.floorMod(nextX, cells);
         int nextLz = Math.floorMod(nextZ, cells);
+        if (isShortOutlet(around, regionX, regionZ, cellX, cellZ)) {
+            return;
+        }
         if (flow.isLake(lx, lz) && nextFlow.isLake(nextLx, nextLz)) {
             return;
         }
@@ -298,6 +301,46 @@ final class RiverLayer {
             z += here.downstreamZ(lx, lz);
         }
         return level;
+    }
+
+    /**
+     * Whether a cell lies on a short drop from a lake down to a river or lake right below it. Such a link would only
+     * be a steep gash between two bodies of water, so the upper lake is left without a visible outlet.
+     */
+    private boolean isShortOutlet(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        int length = 1;
+        int x = cellX;
+        int z = cellZ;
+        while (!flowAt(around, regionX, regionZ, x, z).isLake(Math.floorMod(x, cells), Math.floorMod(z, cells))) {
+            int[] up = step(around, regionX, regionZ, x, z, -1);
+            if (up == null || flowAt(around, regionX, regionZ, up[0], up[1]) == null || ++length > config.shortOutletLength) {
+                return false;
+            }
+            x = up[0];
+            z = up[1];
+        }
+        double lakeLevel = flowAt(around, regionX, regionZ, x, z).waterLevel(Math.floorMod(x, cells), Math.floorMod(z, cells));
+        x = cellX;
+        z = cellZ;
+        while (true) {
+            int[] down = step(around, regionX, regionZ, x, z, 1);
+            FlowRegion next = down == null ? null : flowAt(around, regionX, regionZ, down[0], down[1]);
+            if (next == null) {
+                return false;
+            }
+            int lx = Math.floorMod(down[0], cells);
+            int lz = Math.floorMod(down[1], cells);
+            boolean joins = next.isLake(lx, lz) || !next.hasInflow(lx, lz)
+                    || down[0] + next.inflowX(lx, lz) != x || down[1] + next.inflowZ(lx, lz) != z;
+            if (joins) {
+                return lakeLevel - next.waterLevel(lx, lz) >= config.shortOutletDrop;
+            }
+            if (++length > config.shortOutletLength) {
+                return false;
+            }
+            x = down[0];
+            z = down[1];
+        }
     }
 
     private double widthFactor(double slope) {

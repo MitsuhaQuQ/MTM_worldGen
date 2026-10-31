@@ -421,6 +421,9 @@ public final class WorldgenSettings {
         public double routeWavelength = 512.0;
         /** Water at least this deep over the ground of a filled depression is a lake. */
         public double lakeMinDepth = 2.0;
+        /** Lake outlets of at most this many nodes that drop at least this far into other water are left out. */
+        public int shortOutletLength = 6;
+        public double shortOutletDrop = 8.0;
         /** How far river nodes stray from their cell center, as a fraction of the cell. */
         public double nodeJitter = 0.6;
         /** Sideways swing of river courses, as a fraction of the distance between nodes. */
