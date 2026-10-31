@@ -74,6 +74,9 @@ class TerrainLogicTest {
         int border = SETTINGS.general.regionSize;
         double maxStep = 0.0;
         for (int z = -border; z <= border; z += 7) {
+            if (logic.sampleCliffShare(border, z) > 0.0) {
+                continue;
+            }
             double west = logic.sampleSurfaceHeight(border - 1, z);
             double east = logic.sampleSurfaceHeight(border, z);
             maxStep = Math.max(maxStep, Math.abs(east - west));
@@ -112,6 +115,10 @@ class TerrainLogicTest {
             int z = random.nextInt(16000) - 8000;
             double h = logic.sampleSurfaceHeight(x, z);
             if (h < sea) {
+                continue;
+            }
+            // Cliffs are exempt from slope limits by design
+            if (logic.sampleCliffShare(x, z) > 0.0) {
                 continue;
             }
             // River banks are channel structure, steeper than any slope limit by design

@@ -130,9 +130,13 @@ public final class MtmGenerators {
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.SNOW), SurfaceRules.sequence(
                         SurfaceRules.ifTrue(SurfaceRules.ON_FLOOR, SurfaceRules.state(Blocks.SNOW_BLOCK.defaultBlockState())),
                         SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, stone))),
-                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
-                        SurfaceRules.sequence(
-                                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
+                // Deep enough to cover the tall faces of cliffs, where one column shows many blocks
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK), SurfaceRules.ifTrue(SurfaceRules.DEEP_UNDER_FLOOR, SurfaceRules.sequence(
+                        SurfaceRules.ifTrue(condition(TerrainCondition.Kind.STRATUM_DARK), SurfaceRules.state(Blocks.ANDESITE.defaultBlockState())),
+                        SurfaceRules.ifTrue(condition(TerrainCondition.Kind.STRATUM_TUFF), SurfaceRules.state(Blocks.TUFF.defaultBlockState())),
+                        SurfaceRules.ifTrue(condition(TerrainCondition.Kind.STRATUM_PALE), SurfaceRules.state(Blocks.DIORITE.defaultBlockState())),
+                        SurfaceRules.ifTrue(condition(TerrainCondition.Kind.STRATUM_SAND), SurfaceRules.state(Blocks.SANDSTONE.defaultBlockState())),
+                        stone))),
                 // Their vanilla surfaces scatter stone and gravel patches regardless of slope, which reads as rock pasted on hills
                 SurfaceRules.ifTrue(SurfaceRules.isBiome(Biomes.WINDSWEPT_HILLS, Biomes.WINDSWEPT_SAVANNA, Biomes.WINDSWEPT_GRAVELLY_HILLS), SurfaceRules.sequence(
                         SurfaceRules.ifTrue(SurfaceRules.ON_FLOOR, SurfaceRules.ifTrue(SurfaceRules.waterBlockCheck(-1, 0),

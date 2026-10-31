@@ -39,6 +39,9 @@ final class SkeletonLayer {
     private static final long HILLS_SALT = 0x48494C4CL;
     private static final long ISOLATED_SALT = 0x49534F4CL;
     private static final long STYLE_SALT = 0x5354594C45L;
+    private static final long CLIFF_SALT = 0x434C494646L;
+    /** Wavelength of the wander that keeps cliff bands from following contour lines. */
+    private static final double CLIFF_WARP_WAVELENGTH = 320.0;
     /** Style field values at which a range is fully eroded and fully igneous. */
     private static final double STYLE_RANGE = 0.3;
     /** Cross section used to relate a range's width at half height to its full width. */
@@ -82,6 +85,8 @@ final class SkeletonLayer {
     private final Fbm plateauHeight;
     private final Fbm hills;
     private final Fbm style;
+    private final Fbm cliffZone;
+    private final Fbm cliffWarp;
     private final ContinentLayer continents;
     private final long isolatedSeed;
     private final WorldgenSettings settings;
@@ -127,6 +132,8 @@ final class SkeletonLayer {
         this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
         this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
         this.style = new Fbm(Hashing.derive(seed, STYLE_SALT), 2, m.styleWavelength);
+        this.cliffZone = new Fbm(Hashing.derive(seed, CLIFF_SALT), 2, m.cliffWavelength);
+        this.cliffWarp = new Fbm(Hashing.derive(seed, CLIFF_SALT + 1), 2, CLIFF_WARP_WAVELENGTH);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
@@ -176,6 +183,12 @@ final class SkeletonLayer {
             double open = 0.5 + 0.5 * massifTexture.sample(wx, wz);
             double relief = (mountain[3] + openWeight * open) / (mountain[4] + openWeight);
             rugged = mix(m.erodedTexture, m.igneousTexture, style(wx, wz)) * summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
+        }
+        if (texture != null) {
+            double cliffs = cliffMask(x, z, mountainZone);
+            if (cliffs > 0.0) {
+                rugged += cliffs * summitCalm * cliffOffset(x, z, massif + peaks + rugged);
+            }
         }
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
 
@@ -461,6 +474,31 @@ final class SkeletonLayer {
         }
         Site[] links = ahead != null ? new Site[]{ahead} : new Site[0];
         return new Site(site.x, site.z, site.type, site.height, site.width, site.style, links);
+    }
+
+    /** Share of cliff bands at a position: they form patches on steep igneous ranges. */
+    private double cliffMask(double x, double z, double mountainZone) {
+        double igneous = mountainZone > 0.0 ? style(x, z) : 0.0;
+        return igneous > 0.0 ? igneous * mountainZone * smoothstep(m.cliffLow, m.cliffHigh, cliffZone.sample(x, z)) : 0.0;
+    }
+
+    /** Share of cliff bands at a position with the given continent base height above the sea. */
+    double cliffShare(double x, double z, double baseAboveSea) {
+        return cliffMask(x, z, smoothstep(zoneLow, zoneHigh, tier(x, z, baseAboveSea)));
+    }
+
+    /** Height change that gathers a slope into steps: nearly flat ledges with a steep rise between them. */
+    private double cliffOffset(double x, double z, double height) {
+        double step = scale * m.cliffStep;
+        double value = (height + 0.5 * step * cliffWarp.sample(x, z)) / step;
+        double t = value - Math.floor(value);
+        double stepped = t * (1.0 - m.cliffStrength) + m.cliffStrength * smoothstep(0.5 - m.cliffWidth, 0.5 + m.cliffWidth, t);
+        return (stepped - t) * step;
+    }
+
+    /** Whether a position leans to the igneous style. */
+    boolean isIgneous(double x, double z) {
+        return style(x, z) >= 0.5;
     }
 
     /** How igneous a position is: 0 for smooth wind-worn ranges, 1 for steep igneous ones, blending between them. */

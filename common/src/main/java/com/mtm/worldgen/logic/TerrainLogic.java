@@ -43,6 +43,8 @@ public final class TerrainLogic {
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
     private final Fbm rockPatchNoise;
+    private final Fbm strataNoise;
+    private final long strataSeed;
     private final RegionCache<LogicRegion> regions;
     private final RegionCache<FlowRegion> flowRegions;
     private final RegionCache<RiverRegion> riverRegions;
@@ -62,6 +64,8 @@ public final class TerrainLogic {
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
+        this.strataNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT + 1), 2, settings.surface.strataWavelength);
+        this.strataSeed = Hashing.derive(seed, ROCK_PATCH_SALT + 2);
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
@@ -460,6 +464,26 @@ public final class TerrainLogic {
         return columns.get().column(this, x, z).rock();
     }
 
+    /**
+     * Rock of a stratum at a height: 0 for plain stone and 1 to 4 for the other rocks, dark ones on igneous ranges and
+     * pale ones on wind-worn ranges. Layers wander a little and repeat at no fixed order, like real bedding.
+     */
+    public int rockStratum(int x, int y, int z) {
+        Column column = columns.get().column(this, x, z);
+        int band = (int) Math.floor((y + column.strataOffset()) / settings.surface.strataThickness);
+        double roll = Hashing.unit(Hashing.hash(strataSeed, band, 0));
+        if (roll < 0.5) {
+            return 0;
+        }
+        return (column.igneous() ? 1 : 3) + (roll < 0.8 ? 0 : 1);
+    }
+
+    /** Share of cliff bands at a position, from 0 to 1. Slope limits do not hold where it is above zero. */
+    public double sampleCliffShare(double x, double z) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        return skeleton.cliffShare(x, z, base - (settings.general.seaLevel - 1));
+    }
+
     /** Whether a rock column uses the patch stone. */
     public boolean isRockPatch(int x, int z) {
         return rockPatchNoise.sample(x, z) > settings.surface.rockPatchThreshold;
@@ -692,6 +716,8 @@ public final class TerrainLogic {
         private int rock = -1;
         private String biome;
         private CoastLayer.Type coastType;
+        private double strataOffset = Double.NaN;
+        private int igneous = -1;
 
         Column(TerrainLogic owner, int x, int z) {
             this.owner = owner;
@@ -733,6 +759,20 @@ public final class TerrainLogic {
                 rock = owner.isRock(x, z, height, grade()) ? 1 : 0;
             }
             return rock == 1;
+        }
+
+        double strataOffset() {
+            if (Double.isNaN(strataOffset)) {
+                strataOffset = owner.settings.surface.strataWarp * owner.strataNoise.sample(x, z);
+            }
+            return strataOffset;
+        }
+
+        boolean igneous() {
+            if (igneous < 0) {
+                igneous = owner.skeleton.isIgneous(x, z) ? 1 : 0;
+            }
+            return igneous == 1;
         }
 
         CoastLayer.Type coastType() {

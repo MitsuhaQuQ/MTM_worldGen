@@ -156,6 +156,14 @@ public final class WorldgenSettings {
         /** Strength of the ridge texture, by style. */
         public double igneousTexture = 1.3;
         public double erodedTexture = 0.5;
+        /** Cliff bands of igneous ranges: height of one step on the 300 block scale, patch size, and how sharp a step is. */
+        public double cliffStep = 26.0;
+        public double cliffWavelength = 1536.0;
+        public double cliffStrength = 0.85;
+        public double cliffWidth = 0.08;
+        /** Noise levels over which cliff patches fade in. */
+        public double cliffLow = -0.05;
+        public double cliffHigh = 0.15;
         /** Steepest slope of wind-worn ranges, as a share of the mountain slope limit. */
         public double erodedGrade = 0.6;
         /** Width in blocks of the gentle band along the crest, centered on the ridge line. */
@@ -194,7 +202,7 @@ public final class WorldgenSettings {
     public static final class Isolated {
         /** One candidate per square of this size, in blocks. */
         public double spacing = 2048.0;
-        public double peakChance = 0.35;
+        public double peakChance = 0.1;
         public double peakMin = 50.0;
         public double peakMax = 90.0;
         /** Base radius as a multiple of the height. */
@@ -277,6 +285,10 @@ public final class WorldgenSettings {
         public double bareRockLine = 0.93;
         /** Rock slope at the snow line, in percent: thin high ground exposes rock on gentler faces. */
         public double highRockSlope = 45.0;
+        /** Rock strata: height of a layer in blocks, and how far layers wander up and down. */
+        public double strataThickness = 14.0;
+        public double strataWarp = 12.0;
+        public double strataWavelength = 1024.0;
         public double rockPatchWavelength = 64.0;
         /** Noise level above which rock turns into the patch stone. */
         public double rockPatchThreshold = 0.1;

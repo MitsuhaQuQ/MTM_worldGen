@@ -13,9 +13,9 @@ import java.util.Locale;
  */
 public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSource {
     public enum Kind {
-        BEACH, GRAVEL_SHORE, ROCK_SHORE, SNOW, ROCK, ROCK_PATCH;
+        BEACH, GRAVEL_SHORE, ROCK_SHORE, SNOW, ROCK, ROCK_PATCH, STRATUM_DARK, STRATUM_TUFF, STRATUM_PALE, STRATUM_SAND;
 
-        boolean test(TerrainLogic logic, int x, int z) {
+        boolean test(TerrainLogic logic, int x, int y, int z) {
             return switch (this) {
                 case BEACH -> logic.isBeach(x, z);
                 case GRAVEL_SHORE -> logic.isGravelShore(x, z);
@@ -23,6 +23,10 @@ public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSourc
                 case SNOW -> logic.isSnow(x, z);
                 case ROCK -> logic.isRock(x, z);
                 case ROCK_PATCH -> logic.isRockPatch(x, z);
+                case STRATUM_DARK -> logic.rockStratum(x, y, z) == 1;
+                case STRATUM_TUFF -> logic.rockStratum(x, y, z) == 2;
+                case STRATUM_PALE -> logic.rockStratum(x, y, z) == 3;
+                case STRATUM_SAND -> logic.rockStratum(x, y, z) == 4;
             };
         }
     }
@@ -47,7 +51,7 @@ public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSourc
         if (logic == null) {
             return () -> false;
         }
-        return () -> kind.test(logic, context.blockX, context.blockZ);
+        return () -> kind.test(logic, context.blockX, context.blockY, context.blockZ);
     }
 
     @Override
