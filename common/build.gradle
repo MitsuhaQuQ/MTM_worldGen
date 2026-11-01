@@ -16,4 +16,7 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    // Test methods share nothing: each builds its own terrain logic
+    systemProperty "junit.jupiter.execution.parallel.enabled", "true"
+    systemProperty "junit.jupiter.execution.parallel.mode.default", "concurrent"
 }

@@ -7,6 +7,7 @@ import com.mtm.worldgen.gametest.MtmGameTests;
 import com.mtm.worldgen.world.TerrainCondition;
 import com.mtm.worldgen.world.MtmBiomeSource;
 import com.mtm.worldgen.world.MtmGenerators;
+import com.mtm.worldgen.world.TerrainCaves;
 import com.mtm.worldgen.world.TerrainClimate;
 import com.mtm.worldgen.world.TerrainDensity;
 import net.minecraft.core.registries.Registries;
@@ -34,6 +35,7 @@ public final class MtmWorldgenForge {
     static {
         DENSITY_FUNCTION_TYPES.register(MtmGenerators.TERRAIN_DENSITY_ID.getPath(), () -> TerrainDensity.CODEC);
         DENSITY_FUNCTION_TYPES.register(MtmGenerators.CLIMATE_DENSITY_ID.getPath(), () -> TerrainClimate.CODEC);
+        DENSITY_FUNCTION_TYPES.register(MtmGenerators.CAVES_DENSITY_ID.getPath(), () -> TerrainCaves.CODEC);
         SURFACE_CONDITIONS.register(MtmGenerators.TERRAIN_CONDITION_ID.getPath(), () -> TerrainCondition.CODEC);
         BIOME_SOURCES.register(MtmGenerators.BIOME_SOURCE_ID.getPath(), () -> MtmBiomeSource.CODEC);
     }

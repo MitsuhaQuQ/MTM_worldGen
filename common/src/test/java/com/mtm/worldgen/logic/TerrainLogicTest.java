@@ -10,6 +10,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -179,6 +180,33 @@ class TerrainLogicTest {
             }
         }
         assertTrue(rockCount > 0, "mountains should expose rock");
+    }
+
+    @Test
+    void oreStretchKeepsDensity() {
+        double factor = SETTINGS.oreHeightScale();
+        Random random = new Random(11);
+        int vanillaTop = 100;
+        int attempts = 400000;
+        int[] heights = new int[(int) Math.ceil(vanillaTop * factor) + 2];
+        for (int i = 0; i < attempts; i++) {
+            int y = 1 + random.nextInt(vanillaTop);
+            for (int stretched : OreHeights.stretch(y, factor, random::nextDouble)) {
+                heights[stretched]++;
+            }
+        }
+        // Ore per block of rock stays that of vanilla, all the way up the stretched range
+        double vanillaDensity = (double) attempts / vanillaTop;
+        int stretchedTop = (int) (vanillaTop * factor);
+        for (int bin = 1; bin + 100 <= stretchedTop; bin += 100) {
+            double sum = 0.0;
+            for (int y = bin; y < bin + 100; y++) {
+                sum += heights[y];
+            }
+            assertEquals(vanillaDensity, sum / 100.0, 0.05 * vanillaDensity, "density around height " + bin);
+        }
+        assertArrayEquals(new int[]{0}, OreHeights.stretch(0, factor, random::nextDouble), "heights up to 0 stay");
+        assertArrayEquals(new int[]{-40}, OreHeights.stretch(-40, factor, random::nextDouble), "heights up to 0 stay");
     }
 
     @Test

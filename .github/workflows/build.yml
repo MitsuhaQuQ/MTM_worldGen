@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: ./gradlew :common:test
+
+  game-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      # One loader failing says nothing about the other, and both must generate the same terrain
+      fail-fast: false
+      matrix:
+        task: [":fabric:runGametest", ":forge:runGameTestServer"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: ./gradlew ${{ matrix.task }}
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: ./gradlew assemble
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod-jars
+          path: |
+            fabric/build/libs/*.jar
+            forge/build/libs/*.jar

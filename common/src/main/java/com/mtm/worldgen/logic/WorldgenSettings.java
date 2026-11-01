@@ -25,6 +25,7 @@ public final class WorldgenSettings {
     private static final int MIN_Y = -64;
     /** Vanilla limits the top of the world to this. */
     private static final int MAX_BUILD_TOP = 2032;
+    private static final double VANILLA_ORE_HEIGHT = 256.0;
     /** Empty space kept above the highest possible surface. */
     private static final int BUILD_HEADROOM = 40;
 
@@ -69,6 +70,8 @@ public final class WorldgenSettings {
         public int structureTerrainMargin = 32;
         /** Caves and ravines stay at least this many blocks below the surface. */
         public int caveSurfaceMargin = 12;
+        /** Noise caves fade in over this many blocks below that margin. */
+        public double caveFade = 16.0;
     }
 
     /** Maximum grades in percent (height difference / horizontal distance * 100). */
@@ -576,6 +579,11 @@ public final class WorldgenSettings {
             heights.add(top - MIN_Y);
         }
         return heights;
+    }
+
+    /** How far vanilla ore ranges stretch above 0: the maximum surface over vanilla's 256 blocks, never below 1. */
+    public double oreHeightScale() {
+        return Math.max(1.0, general.maxSurfaceHeight / VANILLA_ORE_HEIGHT);
     }
 
     /** Multiplier for heights designed for a 300 block maximum surface. */

@@ -77,7 +77,7 @@ public final class MtmGameTests {
      * Hash of all sampled columns for {@link #SEED}. Changes whenever terrain generation changes on purpose:
      * update it then, together with LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0x1d871718667b8ac4L;
+    private static final long EXPECTED_COLUMN_HASH = 0xa3b7c6d7142d6b7dL;
 
     private static final int SEA_SURFACE_Y = 62;
     private static final double DEEP_OCEAN_COAST_DISTANCE = -1200.0;
@@ -188,7 +188,12 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void landBelowSeaLevelIsFlooded(GameTestHelper helper) {
         World world = world(helper);
+        TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
         for (int[] p : samplePoints()) {
+            // Under land, air at this height is a cave
+            if (logic.surfaceHeight(p[0], p[1]) >= SEA_SURFACE_Y) {
+                continue;
+            }
             NoiseColumn column = world.column(p[0], p[1]);
             for (int y = SEA_SURFACE_Y; y >= MTM_HEIGHT.getMinBuildHeight(); y--) {
                 BlockState state = column.getBlock(y);

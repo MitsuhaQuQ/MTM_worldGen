@@ -1,0 +1,16 @@
+name: Set up the build
+description: JDK 21 runs Gradle, and JDK 17 compiles and runs Minecraft 1.20.1
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: |
+          17
+          21
+    - uses: gradle/actions/setup-gradle@v4
+    - shell: bash
+      run: |
+        mkdir -p ~/.gradle
+        echo "org.gradle.java.installations.fromEnv=JAVA_HOME_17_X64" >> ~/.gradle/gradle.properties

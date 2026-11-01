@@ -25,9 +25,11 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.Noises;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.SurfaceRules;
 import net.minecraft.world.level.levelgen.WorldDimensions;
+import net.minecraft.world.level.levelgen.synth.NormalNoise;
 
 /** Builds the MTM overworld generator: vanilla noise generator with MTM terrain density. */
 public final class MtmGenerators {
@@ -36,12 +38,19 @@ public final class MtmGenerators {
      * this id itself, because Forge freezes vanilla registries before mod construction.
      */
     public static final ResourceLocation TERRAIN_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+    /** Density function type of {@link TerrainCaves}, registered by each loader like the terrain density. */
+    public static final ResourceLocation CAVES_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "caves");
     /** Density function type of {@link TerrainClimate}, registered by each loader like the terrain density. */
     public static final ResourceLocation CLIMATE_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "climate");
     /** Biome source type of {@link MtmBiomeSource}, registered by each loader like the density types. */
     public static final ResourceLocation BIOME_SOURCE_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
     /** Surface rule condition type of {@link TerrainCondition}, registered by each loader like the density type. */
     public static final ResourceLocation TERRAIN_CONDITION_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+
+    /** The registries that building an MTM world reads. */
+    public record Lookups(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes,
+                          HolderGetter<DensityFunction> densityFunctions, HolderGetter<NormalNoise.NoiseParameters> noises) {
+    }
 
     private MtmGenerators() {
     }
@@ -83,8 +92,8 @@ public final class MtmGenerators {
         }
         WorldgenSettings settings = MtmConfig.load();
         return new WorldDimensions(WorldDimensions.withOverworld(dimensions.dimensions(),
-                source.dimensionTypes().getOrThrow(dimensionType(settings.buildHeight())),
-                create(source.biomes(), source.dimensionTypes(), generator.generatorSettings(), settings)));
+                source.lookups().dimensionTypes().getOrThrow(dimensionType(settings.buildHeight())),
+                create(source.lookups(), generator.generatorSettings(), settings)));
     }
 
     /**
@@ -115,12 +124,33 @@ public final class MtmGenerators {
 
     public static ChunkGenerator create(RegistryAccess access, Holder<NoiseGeneratorSettings> vanillaSettings,
                                         WorldgenSettings worldSettings) {
-        return create(access.lookupOrThrow(Registries.BIOME), access.lookupOrThrow(Registries.DIMENSION_TYPE),
-                vanillaSettings, worldSettings);
+        return create(new Lookups(access.lookupOrThrow(Registries.BIOME), access.lookupOrThrow(Registries.DIMENSION_TYPE),
+                access.lookupOrThrow(Registries.DENSITY_FUNCTION), access.lookupOrThrow(Registries.NOISE)), vanillaSettings, worldSettings);
     }
 
-    private static ChunkGenerator create(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes,
-                                         Holder<NoiseGeneratorSettings> vanillaSettings, WorldgenSettings worldSettings) {
+    /**
+     * Vanilla's cave density from NoiseRouterData#underground, which is private. The term that narrows caves close to
+     * the surface is left out, because {@link TerrainCaves} keeps them away from it altogether.
+     */
+    private static DensityFunction caves(Lookups lookups) {
+        DensityFunction layer = DensityFunctions.mul(DensityFunctions.constant(4.0),
+                DensityFunctions.noise(lookups.noises().getOrThrow(Noises.CAVE_LAYER), 8.0).square());
+        DensityFunction cheese = DensityFunctions.add(DensityFunctions.constant(0.27),
+                DensityFunctions.noise(lookups.noises().getOrThrow(Noises.CAVE_CHEESE), 2.0 / 3.0)).clamp(-1.0, 1.0);
+        DensityFunction open = DensityFunctions.min(
+                DensityFunctions.min(DensityFunctions.add(layer, cheese), vanillaCave(lookups, "entrances")),
+                DensityFunctions.add(vanillaCave(lookups, "spaghetti_2d"), vanillaCave(lookups, "spaghetti_roughness_function")));
+        DensityFunction pillars = vanillaCave(lookups, "pillars");
+        return DensityFunctions.max(open, DensityFunctions.rangeChoice(pillars, -1000000.0, 0.03,
+                DensityFunctions.constant(-1000000.0), pillars));
+    }
+
+    private static DensityFunction vanillaCave(Lookups lookups, String name) {
+        return new DensityFunctions.HolderHolder(lookups.densityFunctions().getOrThrow(
+                ResourceKey.create(Registries.DENSITY_FUNCTION, new ResourceLocation("overworld/caves/" + name))));
+    }
+
+    private static ChunkGenerator create(Lookups lookups, Holder<NoiseGeneratorSettings> vanillaSettings, WorldgenSettings worldSettings) {
         NoiseGeneratorSettings vanilla = vanillaSettings.value();
         NoiseSettings vanillaNoise = vanilla.noiseSettings();
         NoiseSettings noise = NoiseSettings.create(worldSettings.minBuildY(), worldSettings.buildHeight(),
@@ -133,14 +163,18 @@ public final class MtmGenerators {
                 // Interpolated like vanilla's final density: evaluated on the sparse noise cell grid instead of for
                 // every block. The density is linear around the surface, so interpolation keeps the surface in place
                 TerrainDensity.unbound(true, worldSettings),
-                DensityFunctions.interpolated(TerrainDensity.unbound(false, worldSettings)),
+                // Noodle caves stay outside like in vanilla: they bring interpolators of their own
+                DensityFunctions.min(
+                        DensityFunctions.interpolated(DensityFunctions.min(TerrainDensity.unbound(false, worldSettings),
+                                TerrainCaves.unbound(caves(lookups), worldSettings))),
+                        TerrainCaves.unbound(vanillaCave(lookups, "noodle"), worldSettings)),
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,
                 SurfaceRules.sequence(terrainSurfaceRule(), vanilla.surfaceRule()), vanilla.spawnTarget(),
                 worldSettings.general.seaLevel, vanilla.disableMobGeneration(), vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
 
-        return new NoiseBasedChunkGenerator(new MtmBiomeSource(biomes, dimensionTypes, worldSettings), Holder.direct(settings));
+        return new NoiseBasedChunkGenerator(new MtmBiomeSource(lookups, worldSettings), Holder.direct(settings));
     }
 
     /**

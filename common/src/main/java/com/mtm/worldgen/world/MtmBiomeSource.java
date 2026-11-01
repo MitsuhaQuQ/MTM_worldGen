@@ -13,7 +13,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
-import net.minecraft.world.level.dimension.DimensionType;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,23 +27,24 @@ public final class MtmBiomeSource extends BiomeSource {
     public static final Codec<MtmBiomeSource> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             RegistryOps.retrieveGetter(Registries.BIOME),
             RegistryOps.retrieveGetter(Registries.DIMENSION_TYPE),
+            RegistryOps.retrieveGetter(Registries.DENSITY_FUNCTION),
+            RegistryOps.retrieveGetter(Registries.NOISE),
             Codec.STRING.optionalFieldOf("settings", "").forGetter(source -> source.settingsJson)
-    ).apply(instance, MtmBiomeSource::new));
+    ).apply(instance, (biomes, dimensionTypes, densityFunctions, noises, settings) ->
+            new MtmBiomeSource(new MtmGenerators.Lookups(biomes, dimensionTypes, densityFunctions, noises), settings)));
 
-    private final HolderGetter<Biome> biomes;
-    private final HolderGetter<DimensionType> dimensionTypes;
+    private final MtmGenerators.Lookups lookups;
     private final String settingsJson;
     private final Map<String, Holder<Biome>> holders;
 
-    public MtmBiomeSource(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes, WorldgenSettings settings) {
-        this(biomes, dimensionTypes, settings.toJson());
+    public MtmBiomeSource(MtmGenerators.Lookups lookups, WorldgenSettings settings) {
+        this(lookups, settings.toJson());
     }
 
-    private MtmBiomeSource(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes, String settingsJson) {
-        this.biomes = biomes;
-        this.dimensionTypes = dimensionTypes;
+    private MtmBiomeSource(MtmGenerators.Lookups lookups, String settingsJson) {
+        this.lookups = lookups;
         this.settingsJson = settingsJson;
-        this.holders = settingsJson.isEmpty() ? Map.of() : resolve(biomes, WorldgenSettings.fromJson(settingsJson));
+        this.holders = settingsJson.isEmpty() ? Map.of() : resolve(lookups.biomes(), WorldgenSettings.fromJson(settingsJson));
     }
 
     /** Whether this is the world preset's stand-in for a source built from the config file. */
@@ -52,12 +52,8 @@ public final class MtmBiomeSource extends BiomeSource {
         return settingsJson.isEmpty();
     }
 
-    public HolderGetter<Biome> biomes() {
-        return biomes;
-    }
-
-    public HolderGetter<DimensionType> dimensionTypes() {
-        return dimensionTypes;
+    public MtmGenerators.Lookups lookups() {
+        return lookups;
     }
 
     /** Looks up every configured biome, in configuration order, which also fixes the feature order vanilla derives. */
