@@ -37,6 +37,7 @@ public final class TerrainLogic {
     private final WorldgenSettings settings;
     private final ContinentLayer continents;
     private final SkeletonLayer skeleton;
+    private final SeaStackLayer stacks;
     private final ClimateLayer climate;
     private final CoastLayer coasts;
     private final BiomeLayer biomes;
@@ -64,6 +65,7 @@ public final class TerrainLogic {
         this.biomes = new BiomeLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
+        this.stacks = new SeaStackLayer(seed, settings, this);
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
         this.valleyWallNoise = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT), 3, settings.rivers.valleyWallWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
@@ -170,6 +172,18 @@ public final class TerrainLogic {
      * plus the terrain skeleton evaluated at the exact position, softly capped below the maximum height.
      */
     public double sampleSurfaceHeight(double x, double z) {
+        return stacks.raise(x, z, sampleShapedLand(x, z));
+    }
+
+    /**
+     * Surface height for vanilla's preliminary surface, without sea stacks, which stand too thin for its coarse grid.
+     */
+    public double preliminaryHeight(int x, int z) {
+        return columns.get().column(this, x, z).shaped;
+    }
+
+    /** Surface height before sea stacks stand on it. */
+    private double sampleShapedLand(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
         double smooth = base + skeletonHeight(x, z, base, texture);
@@ -241,6 +255,16 @@ public final class TerrainLogic {
         double rim = smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
         return shaped < bank ? shaped + (bank - shaped) * rim : shaped;
+    }
+
+    /** Whether a sea stack can stand at a position: in the water a little way off a rocky coast. */
+    boolean isStackSite(double x, double z) {
+        double coast = sampleCoastDistance(x, z);
+        return -coast >= settings.seaStacks.distanceMin && -coast <= settings.seaStacks.distanceMax && isRockyCoast(x, z);
+    }
+
+    double seaSurface() {
+        return settings.general.seaLevel - 1;
     }
 
     /** Extra land height of a sea cliff: a steep rise from the shore that falls away again behind it. */
@@ -500,6 +524,9 @@ public final class TerrainLogic {
 
     /** Share of cliff bands at a position, from 0 to 1. Slope limits do not hold where it is above zero. */
     public double sampleCliffShare(double x, double z) {
+        if (stacks.raise(x, z, Double.NEGATIVE_INFINITY) != Double.NEGATIVE_INFINITY) {
+            return 1.0;
+        }
         double base = interpolate(FIELD_HEIGHT, x, z);
         return skeleton.cliffShare(x, z, base - (settings.general.seaLevel - 1));
     }
@@ -540,6 +567,9 @@ public final class TerrainLogic {
     }
 
     private boolean isRock(double x, double z, double height, double grade) {
+        if (stacks.contains(x, z)) {
+            return true;
+        }
         WorldgenSettings.Surface surface = settings.surface;
         if (height < settings.general.seaLevel - 1 + surface.rockMinAboveSea) {
             return false;
@@ -729,6 +759,7 @@ public final class TerrainLogic {
         final int x;
         final int z;
         final double height;
+        final double shaped;
         private double coastDistance = Double.NaN;
         private int beach = -1;
         private double grade = Double.NaN;
@@ -743,7 +774,8 @@ public final class TerrainLogic {
             this.owner = owner;
             this.x = x;
             this.z = z;
-            this.height = owner.sampleSurfaceHeight(x, z);
+            this.shaped = owner.sampleShapedLand(x, z);
+            this.height = owner.stacks.raise(x, z, shaped);
         }
 
         double coastDistance() {

@@ -40,6 +40,7 @@ public final class WorldgenSettings {
     public final Spawn spawn = new Spawn();
     public final Plains plains = new Plains();
     public final Isolated isolated = new Isolated();
+    public final SeaStacks seaStacks = new SeaStacks();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -207,6 +208,11 @@ public final class WorldgenSettings {
         public double peakMax = 90.0;
         /** Base radius as a multiple of the height. */
         public double peakSpread = 2.2;
+        /** Spurs running down a peak: how far they push its outline, as a share of the radius. */
+        public double peakSpur = 0.3;
+        /** Wander of a peak's outline, as a share of the radius, and its wavelength. */
+        public double peakWarp = 0.2;
+        public double peakWarpWavelength = 320.0;
         public double domeChance = 0.3;
         public double domeMin = 14.0;
         public double domeMax = 34.0;
@@ -214,6 +220,23 @@ public final class WorldgenSettings {
     }
 
     /** The hill tier, between plains and mountains. */
+    /** Sea stacks. Heights are on the 300 block scale, other sizes in blocks. */
+    public static final class SeaStacks {
+        /** One candidate per square of this size, standing this far off rocky coasts. */
+        public double spacing = 256.0;
+        public double chance = 0.8;
+        public double distanceMin = 24.0;
+        public double distanceMax = 260.0;
+        /** Height above the water, and radius. */
+        public double heightMin = 8.0;
+        public double heightMax = 24.0;
+        public double radiusMin = 8.0;
+        public double radiusMax = 16.0;
+        /** Wander of the outline, as a share of the radius, and its wavelength. */
+        public double warp = 0.3;
+        public double warpWavelength = 48.0;
+    }
+
     public static final class Hills {
         public double height = 44.0;
         public double wavelength = 640.0;

@@ -44,6 +44,10 @@ final class SkeletonLayer {
     private static final double CLIFF_WARP_WAVELENGTH = 320.0;
     /** Steps of level shift across the full range of the cliff patch noise. */
     private static final double CLIFF_LEVEL_SHIFT = 4.0;
+    /** Spurs on a peak: their number, and how far the noise swings them around the summit, in radians. */
+    private static final int PEAK_LOBES_MIN = 4;
+    private static final int PEAK_LOBES_RANGE = 4;
+    private static final double PEAK_BEND = 3.0;
     /** Style field values at which a range is fully eroded and fully igneous. */
     private static final double STYLE_RANGE = 0.3;
     /** Cross section used to relate a range's width at half height to its full width. */
@@ -89,6 +93,7 @@ final class SkeletonLayer {
     private final Fbm style;
     private final Fbm cliffZone;
     private final Fbm cliffWarp;
+    private final Fbm peakWarp;
     private final ContinentLayer continents;
     private final long isolatedSeed;
     private final WorldgenSettings settings;
@@ -136,6 +141,7 @@ final class SkeletonLayer {
         this.style = new Fbm(Hashing.derive(seed, STYLE_SALT), 2, m.styleWavelength);
         this.cliffZone = new Fbm(Hashing.derive(seed, CLIFF_SALT), 2, m.cliffWavelength);
         this.cliffWarp = new Fbm(Hashing.derive(seed, CLIFF_SALT + 1), 2, CLIFF_WARP_WAVELENGTH);
+        this.peakWarp = new Fbm(Hashing.derive(seed, ISOLATED_SALT + 1), 2, settings.isolated.peakWarpWavelength);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
@@ -233,7 +239,7 @@ final class SkeletonLayer {
             for (int dz = -1; dz <= 1; dz++) {
                 Isolated hill = isolated(cellX + dx, cellZ + dz);
                 if (hill.height > 0.0) {
-                    double u = Math.hypot(x - hill.x, z - hill.z) / hill.radius;
+                    double u = Math.hypot(x - hill.x, z - hill.z) / (hill.peak ? hill.radius * peakOutline(hill, x, z) : hill.radius);
                     if (u < 1.0) {
                         total += hill.height * (hill.peak ? (1.0 - u) * (1.0 - u) : 0.5 + 0.5 * Math.cos(Math.PI * u));
                     }
@@ -241,6 +247,17 @@ final class SkeletonLayer {
             }
         }
         return total;
+    }
+
+    /**
+     * How far a peak reaches toward a position, as a share of its radius. Lobes around the summit run straight down the
+     * slopes as spurs, and the noise bends them so that no two peaks are the same cone.
+     */
+    private double peakOutline(Isolated hill, double x, double z) {
+        WorldgenSettings.Isolated config = settings.isolated;
+        double wander = peakWarp.sample(x, z);
+        double spoke = Math.sin(hill.lobes * Math.atan2(z - hill.z, x - hill.x) + hill.phase + PEAK_BEND * wander);
+        return 1.0 + config.peakSpur * spoke + config.peakWarp * wander;
     }
 
     private Isolated isolated(int cellX, int cellZ) {
@@ -266,19 +283,20 @@ final class SkeletonLayer {
         double size = Hashing.unit(Hashing.derive(hash, 3));
         double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
         if (base <= settings.general.coastFadeHeight) {
-            return new Isolated(x, z, 0.0, 1.0, false);
+            return new Isolated(x, z, 0.0, 1.0, false, 0, 0.0);
         }
         double tier = tier(x, z, base);
         if (tier >= hillsMiddle && tier < zoneHigh) {
             if (roll < config.peakChance) {
                 double height = scale * (config.peakMin + size * (config.peakMax - config.peakMin));
-                return new Isolated(x, z, height, config.peakSpread * height, true);
+                return new Isolated(x, z, height, config.peakSpread * height, true, PEAK_LOBES_MIN + (int) (Hashing.unit(Hashing.derive(hash, 4)) * PEAK_LOBES_RANGE),
+                        2.0 * Math.PI * Hashing.unit(Hashing.derive(hash, 5)));
             }
         } else if (tier >= plainsHigh && tier < hillsMiddle && roll < config.domeChance) {
             double height = scale * (config.domeMin + size * (config.domeMax - config.domeMin));
-            return new Isolated(x, z, height, config.domeSpread * height, false);
+            return new Isolated(x, z, height, config.domeSpread * height, false, 0, 0.0);
         }
-        return new Isolated(x, z, 0.0, 1.0, false);
+        return new Isolated(x, z, 0.0, 1.0, false, 0, 0.0);
     }
 
     /**
@@ -526,7 +544,7 @@ final class SkeletonLayer {
         final long[] keys = new long[SITE_CACHE_SIZE];
     }
 
-    private record Isolated(double x, double z, double height, double radius, boolean peak) {
+    private record Isolated(double x, double z, double height, double radius, boolean peak, int lobes, double phase) {
     }
 
     private record Site(double x, double z, int type, double height, double width, double style, Site[] links) {

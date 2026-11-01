@@ -59,11 +59,12 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
     @Override
     public double compute(FunctionContext context) {
         TerrainLogic terrain = logic != null ? logic : TerrainLogic.forWorld(0L, WorldgenSettings.fromJson(settingsJson));
-        double depth = terrain.surfaceHeight(context.blockX(), context.blockZ()) - context.blockY();
         if (initial) {
-            return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + (depth - PRELIMINARY_SURFACE_DEPTH) / FALLOFF,
+            double preliminary = terrain.preliminaryHeight(context.blockX(), context.blockZ()) - context.blockY();
+            return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + (preliminary - PRELIMINARY_SURFACE_DEPTH) / FALLOFF,
                     -INITIAL_LIMIT, INITIAL_LIMIT);
         }
+        double depth = terrain.surfaceHeight(context.blockX(), context.blockZ()) - context.blockY();
         return Mth.clamp(depth / FALLOFF, -1.0, 1.0);
     }
 

@@ -117,8 +117,8 @@ class TerrainLogicTest {
             if (h < sea) {
                 continue;
             }
-            // Cliffs are exempt from slope limits by design
-            if (logic.sampleCliffShare(x, z) > 0.0) {
+            // Cliffs and sea stacks are exempt from slope limits by design, and a grade spans a column and its neighbors
+            if (logic.sampleCliffShare(x, z) > 0.0 || logic.sampleCliffShare(x + 1, z) > 0.0 || logic.sampleCliffShare(x, z + 1) > 0.0) {
                 continue;
             }
             // River banks are channel structure, steeper than any slope limit by design
@@ -171,7 +171,8 @@ class TerrainLogicTest {
                 if (logic.sampleSnow(x, z)) {
                     assertTrue(height >= sea, "snow under the sea at height " + height);
                 }
-                if (logic.sampleRock(x, z)) {
+                // Sea stacks are rock down to the water
+                if (logic.sampleRock(x, z) && logic.sampleCliffShare(x, z) < 1.0) {
                     rockCount++;
                     assertTrue(height >= sea + surface.rockMinAboveSea, "rock at height " + height);
                 }

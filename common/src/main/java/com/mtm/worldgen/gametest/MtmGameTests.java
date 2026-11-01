@@ -168,8 +168,13 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void surfaceIsContinuousAcrossRegionBorders(GameTestHelper helper) {
         World world = world(helper);
+        TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
         int border = SETTINGS.general.regionSize;
         for (int z = -border; z <= border; z += 61) {
+            // Cliffs and sea stacks are steeper than any slope limit by design
+            if (logic.sampleCliffShare(border, z) > 0.0 || logic.sampleCliffShare(border - 1, z) > 0.0) {
+                continue;
+            }
             int west = world.height(border - 1, z);
             int east = world.height(border, z);
             if (Math.abs(east - west) > MAX_BORDER_STEP) {
