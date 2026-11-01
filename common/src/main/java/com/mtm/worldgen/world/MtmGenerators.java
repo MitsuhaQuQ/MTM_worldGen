@@ -1,33 +1,36 @@
 package com.mtm.worldgen.world;
 
+import com.mojang.serialization.Lifecycle;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import net.minecraft.core.Holder;
-import net.minecraft.core.Registry;
+import net.minecraft.core.HolderGetter;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.WritableRegistry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
-import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.DensityFunction;
 import net.minecraft.world.level.levelgen.DensityFunctions;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
-import net.minecraft.world.level.levelgen.NoiseRouterWithOnlyNoises;
+import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.SurfaceRules;
-import net.minecraft.world.level.levelgen.WorldGenSettings;
-
-import java.util.OptionalLong;
+import net.minecraft.world.level.levelgen.WorldDimensions;
 
 /** Builds the MTM overworld generator: vanilla noise generator with MTM terrain density. */
 public final class MtmGenerators {
-    public static final ResourceLocation WORLD_TYPE_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "realistic");
     /**
      * Density function type of {@link TerrainDensity}. Each loader registers {@link TerrainDensity#CODEC} under
      * this id itself, because Forge freezes vanilla registries before mod construction.
@@ -43,13 +46,19 @@ public final class MtmGenerators {
     private MtmGenerators() {
     }
 
-    /** The terrain logic driving a chunk generator, or null if it is not an MTM generator. */
-    public static TerrainLogic terrainLogic(ChunkGenerator generator) {
-        if (generator instanceof NoiseBasedChunkGenerator noise
-                && unwrap(noise.router().continents()) instanceof TerrainClimate climate) {
-            return climate.logic();
-        }
-        return null;
+    /** The terrain logic of a level, or null if it does not use an MTM generator. */
+    public static TerrainLogic terrainLogic(ServerLevel level) {
+        return terrainLogic(level.getChunkSource().randomState());
+    }
+
+    /** The terrain logic of a seeded generator state, or null if it does not belong to an MTM generator. */
+    public static TerrainLogic terrainLogic(RandomState random) {
+        return unwrap(random.router().continents()) instanceof TerrainClimate climate ? climate.logic() : null;
+    }
+
+    /** The terrain logic behind the climate sampler of an MTM generator. */
+    static TerrainLogic terrainLogic(Climate.Sampler sampler) {
+        return ((TerrainClimate) unwrap(sampler.continentalness())).logic();
     }
 
     /**
@@ -64,41 +73,60 @@ public final class MtmGenerators {
     }
 
     /**
-     * World settings for a new MTM world: the vanilla nether and end, and an overworld that uses the MTM generator
-     * and the taller MTM dimension type. Both loaders' world presets build worlds through this. Reads the config
-     * file once, so the generator and the dimension type always agree on the build height.
+     * The dimensions of a new world. Those of the MTM world preset get the generator and dimension type the config file
+     * asks for; both come from one reading of the file, so they always agree on the build height. Others stay as they are.
      */
-    public static WorldGenSettings createSettings(RegistryAccess access, long seed, boolean generateFeatures,
-                                                  boolean bonusChest) {
+    public static WorldDimensions applyConfig(WorldDimensions dimensions) {
+        if (!(dimensions.overworld() instanceof NoiseBasedChunkGenerator generator)
+                || !(generator.getBiomeSource() instanceof MtmBiomeSource source) || !source.isPlaceholder()) {
+            return dimensions;
+        }
         WorldgenSettings settings = MtmConfig.load();
-        Registry<LevelStem> dimensions = DimensionType.defaultDimensions(access, seed);
-        return new WorldGenSettings(seed, generateFeatures, bonusChest,
-                WorldGenSettings.withOverworld(dimensions, dimensionType(settings), create(access, seed, settings)));
+        return new WorldDimensions(WorldDimensions.withOverworld(dimensions.dimensions(),
+                source.dimensionTypes().getOrThrow(dimensionType(settings.buildHeight())),
+                create(source.biomes(), source.dimensionTypes(), generator.generatorSettings(), settings)));
     }
 
     /**
-     * Vanilla overworld dimension type with the build range derived from the settings. Stored inline in level.dat,
-     * so it needs no registration and leaves vanilla worlds untouched.
+     * Key of the dimension type with a build height. Levels must name a registered dimension type, and registries are
+     * the same for every world, so each possible height has its own type and a world keeps its height in its level.dat.
      */
-    public static Holder<DimensionType> dimensionType(WorldgenSettings settings) {
-        return Holder.direct(DimensionType.create(OptionalLong.empty(), true, false, false, true, 1.0, false, false,
-                true, false, true, settings.minBuildY(), settings.buildHeight(), settings.buildHeight(),
-                BlockTags.INFINIBURN_OVERWORLD, DimensionType.OVERWORLD_EFFECTS, 0.0F));
+    private static ResourceKey<DimensionType> dimensionType(int buildHeight) {
+        return ResourceKey.create(Registries.DIMENSION_TYPE, new ResourceLocation(MtmWorldgen.MOD_ID, "overworld_" + buildHeight));
     }
 
-    public static ChunkGenerator create(RegistryAccess access, long seed) {
-        return create(access, seed, MtmConfig.load());
+    /** Adds the vanilla overworld type with every possible MTM build height to a registry being loaded. */
+    public static void registerDimensionTypes(WritableRegistry<DimensionType> registry) {
+        DimensionType overworld = registry.getOrThrow(BuiltinDimensionTypes.OVERWORLD);
+        for (int height : WorldgenSettings.possibleBuildHeights()) {
+            registry.register(dimensionType(height), new DimensionType(overworld.fixedTime(), overworld.hasSkyLight(),
+                    overworld.hasCeiling(), overworld.ultraWarm(), overworld.natural(), overworld.coordinateScale(),
+                    overworld.bedWorks(), overworld.respawnAnchorWorks(), overworld.minY(), height, height,
+                    overworld.infiniburn(), overworld.effectsLocation(), overworld.ambientLight(),
+                    overworld.monsterSettings()), Lifecycle.stable());
+        }
     }
 
-    public static ChunkGenerator create(RegistryAccess access, long seed, WorldgenSettings worldSettings) {
-        NoiseGeneratorSettings vanilla = access.registryOrThrow(Registry.NOISE_GENERATOR_SETTINGS_REGISTRY)
-                .getOrThrow(NoiseGeneratorSettings.OVERWORLD);
+    /** The seeded state of a generator, as a level would build it. */
+    public static RandomState randomState(RegistryAccess access, ChunkGenerator generator, long seed) {
+        return RandomState.create(((NoiseBasedChunkGenerator) generator).generatorSettings().value(),
+                access.lookupOrThrow(Registries.NOISE), seed);
+    }
+
+    public static ChunkGenerator create(RegistryAccess access, Holder<NoiseGeneratorSettings> vanillaSettings,
+                                        WorldgenSettings worldSettings) {
+        return create(access.lookupOrThrow(Registries.BIOME), access.lookupOrThrow(Registries.DIMENSION_TYPE),
+                vanillaSettings, worldSettings);
+    }
+
+    private static ChunkGenerator create(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes,
+                                         Holder<NoiseGeneratorSettings> vanillaSettings, WorldgenSettings worldSettings) {
+        NoiseGeneratorSettings vanilla = vanillaSettings.value();
         NoiseSettings vanillaNoise = vanilla.noiseSettings();
-        NoiseSettings noise = NoiseSettings.create(worldSettings.minBuildY(), worldSettings.buildHeight(), vanillaNoise.noiseSamplingSettings(),
-                vanillaNoise.topSlideSettings(), vanillaNoise.bottomSlideSettings(),
-                vanillaNoise.noiseSizeHorizontal(), vanillaNoise.noiseSizeVertical(), vanillaNoise.terrainShaper());
-        NoiseRouterWithOnlyNoises r = vanilla.noiseRouter();
-        NoiseRouterWithOnlyNoises router = new NoiseRouterWithOnlyNoises(
+        NoiseSettings noise = NoiseSettings.create(worldSettings.minBuildY(), worldSettings.buildHeight(),
+                vanillaNoise.noiseSizeHorizontal(), vanillaNoise.noiseSizeVertical());
+        NoiseRouter r = vanilla.noiseRouter();
+        NoiseRouter router = new NoiseRouter(
                 r.barrierNoise(), r.fluidLevelFloodednessNoise(), r.fluidLevelSpreadNoise(), r.lavaNoise(),
                 r.temperature(), r.vegetation(), TerrainClimate.unbound(TerrainClimate.Kind.CONTINENTS, worldSettings), r.erosion(),
                 TerrainClimate.unbound(TerrainClimate.Kind.DEPTH, worldSettings), r.ridges(),
@@ -109,14 +137,10 @@ public final class MtmGenerators {
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,
-                SurfaceRules.sequence(terrainSurfaceRule(), vanilla.surfaceRule()), worldSettings.general.seaLevel, vanilla.disableMobGeneration(),
-                vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
+                SurfaceRules.sequence(terrainSurfaceRule(), vanilla.surfaceRule()), vanilla.spawnTarget(),
+                worldSettings.general.seaLevel, vanilla.disableMobGeneration(), vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
 
-        BiomeSource biomes = new MtmBiomeSource(access.registryOrThrow(Registry.BIOME_REGISTRY), seed, worldSettings);
-        return new NoiseBasedChunkGenerator(
-                access.registryOrThrow(Registry.STRUCTURE_SET_REGISTRY),
-                access.registryOrThrow(Registry.NOISE_REGISTRY),
-                biomes, seed, Holder.direct(settings));
+        return new NoiseBasedChunkGenerator(new MtmBiomeSource(biomes, dimensionTypes, worldSettings), Holder.direct(settings));
     }
 
     /**

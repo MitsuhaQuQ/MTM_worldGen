@@ -2,6 +2,7 @@ package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
 import com.mtm.worldgen.logic.TerrainLogic;
+import net.minecraft.util.KeyDispatchDataCodec;
 import net.minecraft.world.level.levelgen.SurfaceRules;
 
 import java.util.Locale;
@@ -34,6 +35,7 @@ public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSourc
     public static final Codec<TerrainCondition> CODEC = Codec.STRING.fieldOf("kind").xmap(
             name -> new TerrainCondition(Kind.valueOf(name.toUpperCase(Locale.ROOT))),
             condition -> condition.kind.name().toLowerCase(Locale.ROOT)).codec();
+    private static final KeyDispatchDataCodec<TerrainCondition> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final ThreadLocal<TerrainLogic> CURRENT = new ThreadLocal<>();
 
@@ -55,7 +57,7 @@ public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSourc
     }
 
     @Override
-    public Codec<? extends SurfaceRules.ConditionSource> codec() {
-        return CODEC;
+    public KeyDispatchDataCodec<? extends SurfaceRules.ConditionSource> codec() {
+        return DISPATCH_CODEC;
     }
 }

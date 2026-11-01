@@ -7,10 +7,13 @@
     "ChunkGeneratorMixin",
     "MinecraftServerMixin",
     "NoiseBasedChunkGeneratorMixin",
-    "NoiseRouterDataMixin",
+    "RandomStateMixin",
+    "RegistryDataLoaderMixin",
     "ServerLevelMixin",
     "SnowAndFreezeFeatureMixin",
-    "WorldCarverMixin"
+    "WorldCarverMixin",
+    "WorldDimensionsMixin",
+    "WorldPresetMixin"
   ],
   "client": [],
   "injectors": {

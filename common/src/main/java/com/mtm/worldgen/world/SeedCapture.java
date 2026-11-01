@@ -2,7 +2,7 @@ package com.mtm.worldgen.world;
 
 /**
  * Carries the world seed into custom density functions while vanilla builds the noise router.
- * In 1.18.2 the seed only exists inside NoiseRouterData#createNoiseRouter, so a mixin
+ * The seed only exists inside RandomState#create, so a mixin
  * brackets that call with {@link #begin} and {@link #end}.
  */
 public final class SeedCapture {

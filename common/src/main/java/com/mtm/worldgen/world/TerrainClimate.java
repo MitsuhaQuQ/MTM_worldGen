@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
+import net.minecraft.util.KeyDispatchDataCodec;
 import net.minecraft.world.level.levelgen.DensityFunction;
 
 import java.util.Locale;
@@ -30,6 +31,7 @@ public final class TerrainClimate implements DensityFunction.SimpleFunction {
             Codec.STRING.fieldOf("kind").forGetter(climate -> climate.kind.serializedName()),
             Codec.STRING.fieldOf("settings").forGetter(climate -> climate.settingsJson)
     ).apply(instance, (kind, settings) -> new TerrainClimate(null, Kind.byName(kind), settings)));
+    private static final KeyDispatchDataCodec<TerrainClimate> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final double DEPTH_LIMIT = 4.0;
 
@@ -115,7 +117,7 @@ public final class TerrainClimate implements DensityFunction.SimpleFunction {
     }
 
     @Override
-    public Codec<? extends DensityFunction> codec() {
-        return CODEC;
+    public KeyDispatchDataCodec<? extends DensityFunction> codec() {
+        return DISPATCH_CODEC;
     }
 }

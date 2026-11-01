@@ -10,17 +10,17 @@ The mod adds a new world type. Existing vanilla worlds, the Nether and the End a
 
 | | |
 |---|---|
-| Minecraft | 1.18.2 |
+| Minecraft | 1.20.1 |
 | Java | 17 |
-| Fabric | Loader 0.14.25, Fabric API 0.77.0 |
-| Forge | 40.2.10 |
+| Fabric | Loader 0.16.10, Fabric API 0.92.2 |
+| Forge | 47.3.0 |
 
 Later Minecraft versions and NeoForge are planned. No other mods are required.
 
 ## Using the mod
 
 1. Install the jar for your loader.
-2. In the Create World screen, choose the MTM world type under **More World Options**.
+2. In the Create World screen, open the **World** tab and choose **MTM Realistic** as the world type.
 
 Build height runs from -64 to 800 by default, following the configured maximum surface height.
 

@@ -40,7 +40,7 @@ public abstract class MinecraftServerMixin {
             target = "Lnet/minecraft/world/level/biome/Climate$Sampler;findSpawnPosition()Lnet/minecraft/core/BlockPos;"))
     private static BlockPos mtm_worldgen$findSpawn(Climate.Sampler sampler) {
         ServerLevel level = mtm_worldgen$spawnLevel.get();
-        TerrainLogic logic = level != null ? MtmGenerators.terrainLogic(level.getChunkSource().getGenerator()) : null;
+        TerrainLogic logic = level != null ? MtmGenerators.terrainLogic(level) : null;
         if (logic == null) {
             return sampler.findSpawnPosition();
         }

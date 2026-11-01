@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
+import net.minecraft.util.KeyDispatchDataCodec;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.levelgen.DensityFunction;
 
@@ -16,13 +17,13 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
             Codec.BOOL.optionalFieldOf("initial", false).forGetter(density -> density.initial),
             Codec.STRING.fieldOf("settings").forGetter(density -> density.settingsJson)
     ).apply(instance, (initial, settings) -> new TerrainDensity(null, initial, settings)));
+    private static final KeyDispatchDataCodec<TerrainDensity> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final double FALLOFF = 8.0;
     /**
-     * NoiseRouterData#computePreliminarySurfaceLevelScanning treats a cell as solid when
-     * density - 0.703125 > 0.390625, so the initial density crosses 1.09375 at the preliminary surface.
+     * NoiseChunk#computePreliminarySurfaceLevel treats a cell as solid when its density is above this value.
      */
-    private static final double PRELIMINARY_SURFACE_THRESHOLD = 1.09375;
+    private static final double PRELIMINARY_SURFACE_THRESHOLD = 0.390625;
     /**
      * How far below the real surface the preliminary surface sits, as in vanilla. The aquifer adds 8 blocks to
      * the preliminary surface and floods with sea water only when that point is below sea level; with the
@@ -83,7 +84,7 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
     }
 
     @Override
-    public Codec<? extends DensityFunction> codec() {
-        return CODEC;
+    public KeyDispatchDataCodec<? extends DensityFunction> codec() {
+        return DISPATCH_CODEC;
     }
 }

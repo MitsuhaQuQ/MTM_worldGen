@@ -12,15 +12,19 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
-import net.minecraft.world.level.StructureFeatureManager;
+import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Blocks;
@@ -29,7 +33,14 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.dimension.DimensionType;
+import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
+import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
 import java.util.ArrayList;
@@ -75,6 +86,17 @@ public final class MtmGameTests {
     private static final int MAX_BORDER_STEP = 2;
 
     /** MTM build range. The game test level is a vanilla-height flat world, so columns are sampled with this. */
+    /** A generator with the seed bound to it, which vanilla keeps apart. */
+    private record World(ChunkGenerator generator, RandomState random) {
+        NoiseColumn column(int x, int z) {
+            return generator.getBaseColumn(x, z, MTM_HEIGHT, random);
+        }
+
+        int height(int x, int z) {
+            return generator.getBaseHeight(x, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT, random);
+        }
+    }
+
     private static final LevelHeightAccessor MTM_HEIGHT = new LevelHeightAccessor() {
         @Override
         public int getHeight() {
@@ -90,7 +112,7 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void columnsMatchExpectedHash(GameTestHelper helper) {
         TerrainLogic.forget(SEED, SETTINGS);
-        long actual = hashColumns(generator(helper), samplePoints());
+        long actual = hashColumns(world(helper), samplePoints());
         if (actual != EXPECTED_COLUMN_HASH) {
             helper.fail("Column hash 0x" + Long.toHexString(actual) + " != expected 0x"
                     + Long.toHexString(EXPECTED_COLUMN_HASH) + " (terrain changed, or loaders disagree)");
@@ -103,12 +125,12 @@ public final class MtmGameTests {
         List<int[]> points = samplePoints();
 
         TerrainLogic.forget(SEED, SETTINGS);
-        List<Long> forward = columnHashes(generator(helper), points);
+        List<Long> forward = columnHashes(world(helper), points);
 
         TerrainLogic.forget(SEED, SETTINGS);
         List<int[]> reversed = new ArrayList<>(points);
         Collections.reverse(reversed);
-        List<Long> backward = columnHashes(generator(helper), reversed);
+        List<Long> backward = columnHashes(world(helper), reversed);
         Collections.reverse(backward);
 
         if (!forward.equals(backward)) {
@@ -122,15 +144,15 @@ public final class MtmGameTests {
         List<int[]> points = samplePoints();
 
         TerrainLogic.forget(SEED, SETTINGS);
-        List<Long> sequential = columnHashes(generator(helper), points);
+        List<Long> sequential = columnHashes(world(helper), points);
 
         TerrainLogic.forget(SEED, SETTINGS);
-        ChunkGenerator shared = generator(helper);
+        World shared = world(helper);
         ExecutorService pool = Executors.newFixedThreadPool(4);
         try {
             List<Future<Long>> futures = new ArrayList<>();
             for (int[] p : points) {
-                futures.add(pool.submit(() -> hashColumn(shared.getBaseColumn(p[0], p[1], MTM_HEIGHT))));
+                futures.add(pool.submit(() -> hashColumn(shared.column(p[0], p[1]))));
             }
             for (int i = 0; i < points.size(); i++) {
                 if (!futures.get(i).get().equals(sequential.get(i))) {
@@ -145,11 +167,11 @@ public final class MtmGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void surfaceIsContinuousAcrossRegionBorders(GameTestHelper helper) {
-        ChunkGenerator generator = generator(helper);
+        World world = world(helper);
         int border = SETTINGS.general.regionSize;
         for (int z = -border; z <= border; z += 61) {
-            int west = generator.getBaseHeight(border - 1, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
-            int east = generator.getBaseHeight(border, z, Heightmap.Types.OCEAN_FLOOR_WG, MTM_HEIGHT);
+            int west = world.height(border - 1, z);
+            int east = world.height(border, z);
             if (Math.abs(east - west) > MAX_BORDER_STEP) {
                 helper.fail("Surface jumps from " + west + " to " + east + " across the region border at z=" + z);
             }
@@ -160,9 +182,9 @@ public final class MtmGameTests {
     /** Regression check for dry land below sea level next to walls of sea water. */
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void landBelowSeaLevelIsFlooded(GameTestHelper helper) {
-        ChunkGenerator generator = generator(helper);
+        World world = world(helper);
         for (int[] p : samplePoints()) {
-            NoiseColumn column = generator.getBaseColumn(p[0], p[1], MTM_HEIGHT);
+            NoiseColumn column = world.column(p[0], p[1]);
             for (int y = SEA_SURFACE_Y; y >= MTM_HEIGHT.getMinBuildHeight(); y--) {
                 BlockState state = column.getBlock(y);
                 if (!state.isAir()) {
@@ -176,15 +198,15 @@ public final class MtmGameTests {
 
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void biomesFollowTerrain(GameTestHelper helper) {
-        ChunkGenerator generator = generator(helper);
+        World world = world(helper);
         TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
         int checkedOcean = 0;
         int checkedInland = 0;
         for (int[] p : samplePoints()) {
             double coast = logic.coastDistance(p[0], p[1]);
             int surfaceY = (int) Math.floor(logic.surfaceHeight(p[0], p[1]));
-            Holder<Biome> biome = generator.getNoiseBiome(QuartPos.fromBlock(p[0]),
-                    QuartPos.fromBlock(Math.max(surfaceY, SEA_SURFACE_Y)), QuartPos.fromBlock(p[1]));
+            Holder<Biome> biome = world.generator().getBiomeSource().getNoiseBiome(QuartPos.fromBlock(p[0]),
+                    QuartPos.fromBlock(Math.max(surfaceY, SEA_SURFACE_Y)), QuartPos.fromBlock(p[1]), world.random().sampler());
             if (coast < DEEP_OCEAN_COAST_DISTANCE) {
                 checkedOcean++;
                 if (!biome.is(BiomeTags.IS_OCEAN)) {
@@ -210,12 +232,31 @@ public final class MtmGameTests {
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void generatorIsRecognizedAfterSaveAndLoad(GameTestHelper helper) {
         RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, helper.getLevel().registryAccess());
-        JsonElement saved = ChunkGenerator.CODEC.encodeStart(ops, generator(helper))
+        JsonElement saved = ChunkGenerator.CODEC.encodeStart(ops, world(helper).generator())
                 .getOrThrow(false, message -> helper.fail("Encoding failed: " + message));
         ChunkGenerator loaded = ChunkGenerator.CODEC.parse(ops, saved)
                 .getOrThrow(false, message -> helper.fail("Decoding failed: " + message));
-        if (MtmGenerators.terrainLogic(loaded) == null) {
+        if (MtmGenerators.terrainLogic(MtmGenerators.randomState(helper.getLevel().registryAccess(), loaded, SEED)) == null) {
             helper.fail("Decoded generator is not recognized as an MTM generator");
+        }
+        helper.succeed();
+    }
+
+    /** The world preset is a placeholder until the config applies; both world creation paths go through this. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void worldPresetBuildsMtmWorld(GameTestHelper helper) {
+        RegistryAccess access = helper.getLevel().registryAccess();
+        WorldDimensions dimensions = access.registryOrThrow(Registries.WORLD_PRESET)
+                .getOrThrow(ResourceKey.create(Registries.WORLD_PRESET, new ResourceLocation(MtmWorldgen.MOD_ID, "realistic")))
+                .createWorldDimensions();
+        ChunkGenerator generator = dimensions.overworld();
+        if (MtmGenerators.terrainLogic(MtmGenerators.randomState(access, generator, SEED)) == null) {
+            helper.fail("The world preset did not build an MTM generator");
+        }
+        DimensionType type = dimensions.get(LevelStem.OVERWORLD).orElseThrow().type().value();
+        NoiseSettings noise = ((NoiseBasedChunkGenerator) generator).generatorSettings().value().noiseSettings();
+        if (type.minY() != noise.minY() || type.height() != noise.height()) {
+            helper.fail("Dimension type height " + type.height() + " does not match generator height " + noise.height());
         }
         helper.succeed();
     }
@@ -226,10 +267,10 @@ public final class MtmGameTests {
      */
     @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
     public void filledChunksMatchColumns(GameTestHelper helper) {
-        ChunkGenerator generator = generator(helper);
+        World world = world(helper);
         TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
-        Registry<Biome> biomes = helper.getLevel().registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
-        StructureFeatureManager structures = GenerationBenchmark.noStructures(helper.getLevel());
+        Registry<Biome> biomes = helper.getLevel().registryAccess().registryOrThrow(Registries.BIOME);
+        StructureManager structures = GenerationBenchmark.noStructures(helper.getLevel());
 
         BlockColumn mountain = logic.findNearestAbove(SETTINGS.general.maxSurfaceHeight / 2.0, 0, 0, 64, 16384);
         if (mountain == null) {
@@ -237,11 +278,11 @@ public final class MtmGameTests {
         }
         for (ChunkPos pos : List.of(new ChunkPos(0, 0), new ChunkPos(new BlockPos(mountain.x(), 0, mountain.z())))) {
             ChunkAccess chunk = new ProtoChunk(pos, UpgradeData.EMPTY, MTM_HEIGHT, biomes, null);
-            generator.fillFromNoise(Runnable::run, Blender.empty(), structures, chunk).join();
+            world.generator().fillFromNoise(Runnable::run, Blender.empty(), world.random(), structures, chunk).join();
             for (int[] offset : new int[][]{{0, 0}, {7, 7}, {15, 15}, {3, 12}}) {
                 int x = pos.getMinBlockX() + offset[0];
                 int z = pos.getMinBlockZ() + offset[1];
-                NoiseColumn column = generator.getBaseColumn(x, z, MTM_HEIGHT);
+                NoiseColumn column = world.column(x, z);
                 for (int y = MTM_HEIGHT.getMinBuildHeight(); y < MTM_HEIGHT.getMaxBuildHeight(); y++) {
                     BlockState filled = chunk.getBlockState(new BlockPos(x, y, z));
                     if (filled.getBlock() != column.getBlock(y).getBlock()) {
@@ -261,8 +302,11 @@ public final class MtmGameTests {
         helper.succeed();
     }
 
-    private static ChunkGenerator generator(GameTestHelper helper) {
-        return MtmGenerators.create(helper.getLevel().registryAccess(), SEED, SETTINGS);
+    private static World world(GameTestHelper helper) {
+        RegistryAccess access = helper.getLevel().registryAccess();
+        ChunkGenerator generator = MtmGenerators.create(access,
+                access.registryOrThrow(Registries.NOISE_SETTINGS).getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD), SETTINGS);
+        return new World(generator, MtmGenerators.randomState(access, generator, SEED));
     }
 
     private static List<int[]> samplePoints() {
@@ -275,18 +319,18 @@ public final class MtmGameTests {
         return points;
     }
 
-    private static long hashColumns(ChunkGenerator generator, List<int[]> points) {
+    private static long hashColumns(World world, List<int[]> points) {
         long hash = 0x9E3779B97F4A7C15L;
-        for (long column : columnHashes(generator, points)) {
+        for (long column : columnHashes(world, points)) {
             hash = hash * 31 + column;
         }
         return hash;
     }
 
-    private static List<Long> columnHashes(ChunkGenerator generator, List<int[]> points) {
+    private static List<Long> columnHashes(World world, List<int[]> points) {
         List<Long> hashes = new ArrayList<>(points.size());
         for (int[] p : points) {
-            hashes.add(hashColumn(generator.getBaseColumn(p[0], p[1], MTM_HEIGHT)));
+            hashes.add(hashColumn(world.column(p[0], p[1])));
         }
         return hashes;
     }
@@ -296,7 +340,7 @@ public final class MtmGameTests {
         long hash = 17L;
         for (int y = MTM_HEIGHT.getMinBuildHeight(); y < MTM_HEIGHT.getMaxBuildHeight(); y++) {
             BlockState state = column.getBlock(y);
-            String block = state.is(Blocks.AIR) ? "air" : Registry.BLOCK.getKey(state.getBlock()).toString();
+            String block = state.is(Blocks.AIR) ? "air" : BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             hash = hash * 1_000_003L + block.hashCode();
         }
         return hash;

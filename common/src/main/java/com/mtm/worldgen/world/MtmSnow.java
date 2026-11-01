@@ -18,7 +18,7 @@ public final class MtmSnow {
 
     /** Whether MTM rules out snow and ice at a position; the vanilla checks still apply where it does not. */
     public static boolean tooWarm(ServerLevel level, Biome biome, BlockPos pos) {
-        TerrainLogic logic = MtmGenerators.terrainLogic(level.getChunkSource().getGenerator());
+        TerrainLogic logic = MtmGenerators.terrainLogic(level);
         return logic != null && biome.getBaseTemperature() >= SNOW_TEMPERATURE
                 && pos.getY() < logic.sampleSnowLine(pos.getX(), pos.getZ());
     }

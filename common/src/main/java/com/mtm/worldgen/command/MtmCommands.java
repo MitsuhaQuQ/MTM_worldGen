@@ -17,8 +17,6 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.network.chat.HoverEvent;
-import net.minecraft.network.chat.TextComponent;
-import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
@@ -73,16 +71,16 @@ public final class MtmCommands {
     /** Runs the generation benchmark off the server thread and reports the result in chat and the log. */
     private static int runBenchmark(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
-        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.benchmark.started"), false);
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.benchmark.started"), false);
         CompletableFuture.supplyAsync(() -> GenerationBenchmark.run(source.getLevel()), Util.backgroundExecutor())
                 .whenComplete((result, error) -> server.execute(() -> {
                     if (error != null) {
                         MtmWorldgen.LOGGER.error("Benchmark failed", error);
-                        source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.benchmark.failed", error.getMessage()));
+                        source.sendFailure(Component.translatable("commands.mtm_worldgen.benchmark.failed", error.getMessage()));
                         return;
                     }
                     MtmWorldgen.LOGGER.info("Benchmark: {}", result.summary());
-                    source.sendSuccess(new TextComponent(result.summary()), false);
+                    source.sendSuccess(() -> Component.literal(result.summary()), false);
                 }));
         return 1;
     }
@@ -92,9 +90,9 @@ public final class MtmCommands {
      * thread, and reports it with clickable coordinates like vanilla /locate.
      */
     private static int locateMountain(CommandSourceStack source) {
-        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel().getChunkSource().getGenerator());
+        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel());
         if (logic == null) {
-            source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.not_mtm_world"));
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.not_mtm_world"));
             return 0;
         }
         MinecraftServer server = source.getServer();
@@ -104,19 +102,19 @@ public final class MtmCommands {
                         (int) Math.floor(position.z), LOCATE_STEP, LOCATE_RADIUS), Util.backgroundExecutor())
                 .whenComplete((found, error) -> server.execute(() -> {
                     if (error != null || found == null) {
-                        source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.locate.mountain.none", LOCATE_RADIUS));
+                        source.sendFailure(Component.translatable("commands.mtm_worldgen.locate.mountain.none", LOCATE_RADIUS));
                         return;
                     }
                     int y = (int) Math.ceil(logic.sampleSurfaceHeight(found.x(), found.z())) + 2;
                     int distance = (int) Math.round(Math.hypot(found.x() - position.x, found.z() - position.z));
                     Component coordinates = ComponentUtils.wrapInSquareBrackets(
-                                    new TranslatableComponent("chat.coordinates", found.x(), y, found.z()))
+                                    Component.translatable("chat.coordinates", found.x(), y, found.z()))
                             .withStyle(style -> style.withColor(ChatFormatting.GREEN)
                                     .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,
                                             "/tp @s " + found.x() + " " + y + " " + found.z()))
                                     .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                            new TranslatableComponent("chat.coordinates.tooltip"))));
-                    source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.locate.mountain.found",
+                                            Component.translatable("chat.coordinates.tooltip"))));
+                    source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.locate.mountain.found",
                             coordinates, distance), false);
                 }));
         return 1;
@@ -125,9 +123,9 @@ public final class MtmCommands {
     /** Renders the terrain logic around the source position to a PNG in the world folder, off the server thread. */
     private static int exportDebugMap(CommandSourceStack source, int blocksPerPixel) {
         MinecraftServer server = source.getServer();
-        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel().getChunkSource().getGenerator());
+        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel());
         if (logic == null) {
-            source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.not_mtm_world"));
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.not_mtm_world"));
             return 0;
         }
         Vec3 position = source.getPosition();
@@ -136,7 +134,7 @@ public final class MtmCommands {
         Path file = server.getWorldPath(LevelResource.ROOT).resolve(MtmWorldgen.MOD_ID).resolve("debug")
                 .resolve(String.format(Locale.ROOT, "height_%d_%d_%dbpp.png", centerX, centerZ, blocksPerPixel));
 
-        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.debugmap.started",
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.debugmap.started",
                 DEBUG_MAP_SIZE_PX * blocksPerPixel), false);
         CompletableFuture.runAsync(() -> {
             BufferedImage image = HeightMapRenderer.render(logic, centerX, centerZ,
@@ -150,9 +148,9 @@ public final class MtmCommands {
         }, Util.backgroundExecutor()).whenComplete((ignored, error) -> server.execute(() -> {
             if (error != null) {
                 MtmWorldgen.LOGGER.error("Failed to export debug map", error);
-                source.sendFailure(new TranslatableComponent("commands.mtm_worldgen.debugmap.failed", error.getMessage()));
+                source.sendFailure(Component.translatable("commands.mtm_worldgen.debugmap.failed", error.getMessage()));
             } else {
-                source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.debugmap.done",
+                source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.debugmap.done",
                         file.toAbsolutePath().normalize().toString()), false);
             }
         }));
@@ -162,7 +160,7 @@ public final class MtmCommands {
     private static int queryFlySpeed(CommandSourceStack source) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         float multiplier = player.getAbilities().getFlyingSpeed() / DEFAULT_FLYING_SPEED;
-        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.flyspeed.query", formatMultiplier(multiplier)), false);
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.flyspeed.query", formatMultiplier(multiplier)), false);
         return 1;
     }
 
@@ -170,7 +168,7 @@ public final class MtmCommands {
         ServerPlayer player = source.getPlayerOrException();
         player.getAbilities().setFlyingSpeed(DEFAULT_FLYING_SPEED * multiplier);
         player.onUpdateAbilities();
-        source.sendSuccess(new TranslatableComponent("commands.mtm_worldgen.flyspeed.set", formatMultiplier(multiplier)), true);
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.flyspeed.set", formatMultiplier(multiplier)), true);
         return 1;
     }
 

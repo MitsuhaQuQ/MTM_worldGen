@@ -372,13 +372,13 @@ public final class WorldgenSettings {
         public BiomeZone tropical = new BiomeZone().with(
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
                 ids("desert", "badlands", "savanna"), ids("savanna", "sparse_jungle"), ids("jungle", "bamboo_jungle"),
-                ids("swamp"), ids("savanna_plateau", "windswept_savanna"),
+                ids("swamp", "mangrove_swamp"), ids("savanna_plateau", "windswept_savanna"),
                 ids("meadow"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
         public BiomeZone temperate = new BiomeZone().with(
                 ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach"),
                 ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
                 ids("dark_forest", "old_growth_birch_forest"), ids("swamp"),
-                ids("windswept_forest", "windswept_hills", "forest"),
+                ids("windswept_forest", "windswept_hills", "forest", "cherry_grove"),
                 ids("meadow"), ids("frozen_peaks", "jagged_peaks"));
         public BiomeZone cold = new BiomeZone().with(
                 ids("cold_ocean"), ids("deep_cold_ocean"), ids("beach"),
@@ -539,6 +539,15 @@ public final class WorldgenSettings {
     public int buildHeight() {
         int top = (general.maxSurfaceHeight + BUILD_HEADROOM + 15) / 16 * 16;
         return top - MIN_Y;
+    }
+
+    /** Every build height a valid configuration can produce, from the lowest world to the build limit. */
+    public static List<Integer> possibleBuildHeights() {
+        List<Integer> heights = new ArrayList<>();
+        for (int top = 16; top <= MAX_BUILD_TOP; top += 16) {
+            heights.add(top - MIN_Y);
+        }
+        return heights;
     }
 
     /** Multiplier for heights designed for a 300 block maximum surface. */
