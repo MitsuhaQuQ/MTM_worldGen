@@ -275,7 +275,7 @@ public final class WorldgenSettings {
         /** Snow does not stay on faces steeper than this, in percent. */
         public double snowMaxSlope = 130.0;
         /** Ground steeper than this is bare rock, in percent. */
-        public double rockSlope = 70.0;
+        public double rockSlope = 95.0;
         /** The rock slope threshold varies by this many percentage points. */
         public double rockSlopeVariation = 20.0;
         public double rockNoiseWavelength = 96.0;
@@ -480,7 +480,12 @@ public final class WorldgenSettings {
         /** Valley walls: land may rise this grade above the floor at first, then steeper by the curve per block. */
         public double valleyWallGrade = 0.15;
         public double valleyWallCurve = 0.003;
-        public double valleyWallMaxGrade = 0.9;
+        public double valleyWallMaxGrade = 0.6;
+        /** Valley walls wander up and down by this many blocks at this wavelength, so they do not read as one smooth bowl. */
+        public double valleyWallRelief = 18.0;
+        public double valleyWallWavelength = 220.0;
+        /** Land keeps up to this many blocks of its height above a valley wall, rounding the edge where they meet. */
+        public double valleyWallSoftness = 12.0;
         /** Beyond the valley floor, land leaves the river's own bank height over this many blocks. */
         public double valleyBankBlend = 96.0;
         /** Floodplains flatten low land beside rivers: this many blocks wide, plus this many per block of river width. */

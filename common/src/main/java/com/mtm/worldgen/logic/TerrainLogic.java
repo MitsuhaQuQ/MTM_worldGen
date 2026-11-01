@@ -17,6 +17,7 @@ public final class TerrainLogic {
     private static final long SNOW_SALT = 0x534E4F57L;
     private static final long ROCK_SALT = 0x524F434BL;
     private static final long ROCK_PATCH_SALT = 0x5041544348L;
+    private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     private static final double GRADE_STEP = 2.0;
 
@@ -42,6 +43,7 @@ public final class TerrainLogic {
     private final Fbm beachWidth;
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
+    private final Fbm valleyWallNoise;
     private final Fbm rockPatchNoise;
     private final Fbm strataNoise;
     private final long strataSeed;
@@ -63,6 +65,7 @@ public final class TerrainLogic {
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
+        this.valleyWallNoise = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT), 3, settings.rivers.valleyWallWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
         this.strataNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT + 1), 2, settings.surface.strataWavelength);
         this.strataSeed = Hashing.derive(seed, ROCK_PATCH_SALT + 2);
@@ -225,7 +228,7 @@ public final class TerrainLogic {
         RiverRegion.Hit river = sampleRiver(x, z);
         double cliff = cliffHeight(x, z);
         double ground = cliff + (river == null ? textured : smooth + (textured - smooth) * river.texture());
-        double land = river == null ? ground : carveValley(river, ground);
+        double land = river == null ? ground : carveValley(x, z, river, ground);
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -275,7 +278,7 @@ public final class TerrainLogic {
         return type == CoastLayer.Type.ROCK || type == CoastLayer.Type.CLIFF;
     }
 
-    private double carveValley(RiverRegion.Hit river, double ground) {
+    private double carveValley(double x, double z, RiverRegion.Hit river, double ground) {
         double half = river.halfWidth(settings.rivers.minChannelWidth);
         if (river.distance() < half) {
             double offset = river.distance() / half;
@@ -291,13 +294,27 @@ public final class TerrainLogic {
         if (river.low() > river.high()) {
             walled = 0.5 * (river.low() + river.high());
         } else {
-            walled = Math.min(Math.max(ground, river.low()), river.high());
+            walled = ground > river.high() ? valleyWall(x, z, river, ground) : Math.max(ground, river.low());
         }
         // Walls of a much higher or lower river nearby may disagree, but a river's banks always meet its own water
         double bank = river.level() + settings.rivers.bankHeight;
         walled = flatten(river, walled, bank);
         double land = bank + (walled - bank) * smooth(river.run() / settings.rivers.valleyBankBlend);
         return seaFloor + (land - seaFloor) * smooth((ground - sea) / settings.rivers.coastBlend);
+    }
+
+    /**
+     * Land cut back to a valley's upper wall. A plain limit would shave every slope into the same smooth bowl with a
+     * crease along its edge, so the wall wanders away from the river and land overtops it a little before it levels off.
+     */
+    private double valleyWall(double x, double z, RiverRegion.Hit river, double ground) {
+        WorldgenSettings.Rivers rivers = settings.rivers;
+        double wall = river.high() + rivers.valleyWallRelief * smooth(river.run() / rivers.valleyBankBlend) * valleyWallNoise.sample(x, z);
+        if (ground <= wall) {
+            return Math.max(ground, river.low());
+        }
+        double soft = rivers.valleyWallSoftness;
+        return Math.max(wall + soft * (1.0 - Math.exp((wall - ground) / soft)), river.low());
     }
 
     /**
