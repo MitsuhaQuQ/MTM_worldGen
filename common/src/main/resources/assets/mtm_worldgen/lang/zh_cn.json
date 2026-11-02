@@ -15,7 +15,7 @@
   "commands.mtm_worldgen.precompute.done": "已预先计算 %s 个逻辑区域，用时 %s 秒",
   "commands.mtm_worldgen.precompute.cancelling": "当前区域算完后停止预先计算",
   "commands.mtm_worldgen.precompute.cancelled": "预先计算已停止，完成 %s / %s 个逻辑区域",
-  "commands.mtm_worldgen.precompute.running": "已有预先计算在运行，可用 /mtm precompute cancel 停止",
+  "commands.mtm_worldgen.precompute.running": "已有预先计算在运行，可用 /mwg precompute cancel 停止",
   "commands.mtm_worldgen.precompute.none": "没有正在运行的预先计算",
   "commands.mtm_worldgen.precompute.failed": "预先计算失败：%s"
 }

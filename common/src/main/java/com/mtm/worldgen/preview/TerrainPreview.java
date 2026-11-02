@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Previews the terrain logic of a seed outside the game: {@code java -jar} on the mod jar opens a window that pans and
- * zooms over the map the {@code /mtm debugmap} command renders. With a seed on the command line and no display, it
+ * zooms over the map the {@code /mwg debugmap} command renders. With a seed on the command line and no display, it
  * writes one picture instead. Only the default settings are used, since the JSON library comes with the game.
  */
 public final class TerrainPreview {

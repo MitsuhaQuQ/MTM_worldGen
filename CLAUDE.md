@@ -293,14 +293,14 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - 同一台机器上，区块生成耗时不超过原版（≤ 1.0 倍）
   - 后台计算单个逻辑区域 ≤ 100 ms
   - 内存最多缓存 64 个区域（LRU 淘汰），占用不超过几十 MB；侵蚀另有磁盘缓存，见"地形骨架"的侵蚀一节
-  - 首次进入新逻辑区域时要先算区域（侵蚀约 0.5 s），这片新区块会晚出现，但不卡主线程；`/mtm precompute` 可提前算好
+  - 首次进入新逻辑区域时要先算区域（侵蚀约 0.5 s），这片新区块会晚出现，但不卡主线程；`/mwg precompute` 可提前算好
 - 手段：
   - 噪声填充截止到区块最高地表 + 32 格（`TerrainLogic.highestBlockInChunk`，留给结构地基），上方空气不走插值、含水层、矿脉流程；这是最主要的收益
   - 地形密度标记为插值，在噪声单元角点上计算；地形以高度图为主，不做原版那样的逐方块三维噪声
   - 三维成分只在少量高海拔陡坡区域计算；加入三维地形或悬崖时，必须让 `highestBlockInChunk` 仍是真实上界
   - 地形逻辑本身开销很小（约 0.25 ms/区块，区域计算约 22 ms；水系约 15 ms/区域，河道约 30 ms/区域，世界首个区域约 150–300 ms，放水约 3 µs/列；侵蚀约 0.5 s/区域，是区域计算中最贵的一项，每轮约 3 ms，汇水和下切必须按顺序执行），优化前先用基准和线程栈确认热点
   - 水系的主要开销曾是板块重复计算、流不进当前区域的格子、站点缓存；分别用板块缓存、`feeders` 过滤、直接映射缓存解决。后两者不改变结果，地形哈希应保持不变
-- 基准：`/mtm benchmark` 或 GameTest `reportGenerationBenchmark`（日志里搜 `Benchmark:`），每次改地形后对比
+- 基准：`/mwg benchmark` 或 GameTest `reportGenerationBenchmark`（日志里搜 `Benchmark:`），每次改地形后对比
   - 只覆盖群系和噪声填充两个阶段，同样的区块位置、单线程；不含地表、雕刻器、地物
   - 当前结果（地表最大高度 750）：原版约 12 ms/区块，MTM 约 5.6 ms/区块（约 47%），已包含噪声洞穴；首次进入新区域的冷启动约 150 ms/区块（含侵蚀）
 - C2ME：不专门适配，但保证线程安全、不与其冲突，后续再做兼容测试
@@ -319,11 +319,11 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `gradlew :fabric:runClient` / `gradlew :forge:runClient`：开发环境客户端（未验证）
   - `gradlew :fabric:runServer` / `gradlew :forge:runServer`：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：
-  - `/mtm flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mtm flyspeed reset` 恢复默认；`/mtm flyspeed` 查询当前倍数
-  - `/mtm locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
-  - `/mtm benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
-  - `/mtm precompute <半径>`：在后台线程上由近及远预先计算玩家周围的逻辑区域（半径按区域数，0–5，最多 121 个），侵蚀结果写入磁盘缓存；聊天栏报告进度，`/mtm precompute cancel` 在当前区域算完后停止，同时只能运行一个（`RegionPrecompute`）。半径 5 超过内存缓存的 64 个区域，早算的区域会被挤出内存，靠磁盘缓存保留侵蚀
-  - `/mtm debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
+  - `/mwg flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mwg flyspeed reset` 恢复默认；`/mwg flyspeed` 查询当前倍数
+  - `/mwg locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
+  - `/mwg benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
+  - `/mwg precompute <半径>`：在后台线程上由近及远预先计算玩家周围的逻辑区域（半径按区域数，0–5，最多 121 个），侵蚀结果写入磁盘缓存；聊天栏报告进度，`/mwg precompute cancel` 在当前区域算完后停止，同时只能运行一个（`RegionPrecompute`）。半径 5 超过内存缓存的 64 个区域，早算的区域会被挤出内存，靠磁盘缓存保留侵蚀
+  - `/mwg debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
 - 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、随机种子、跳转出生点和坐标，底栏显示高度、水位和群系，右下角显示视图内海洋、平原、丘陵、高原、山地的比例（按地形骨架分类，`sampleLandformKind`）；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
 - 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态；每个测试各自计算侵蚀区域，测试堆设为 3 GB（默认 512 MB 会 OOM），全部约 3 分钟

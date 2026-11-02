@@ -47,7 +47,7 @@ public final class MtmCommands {
     }
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("mtm")
+        dispatcher.register(Commands.literal("mwg")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("flyspeed")
                         .executes(context -> queryFlySpeed(context.getSource()))

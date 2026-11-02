@@ -15,7 +15,7 @@
   "commands.mtm_worldgen.precompute.done": "Precomputed %s logic regions in %s s",
   "commands.mtm_worldgen.precompute.cancelling": "Stopping the precompute after the current region",
   "commands.mtm_worldgen.precompute.cancelled": "Precompute stopped after %s of %s logic regions",
-  "commands.mtm_worldgen.precompute.running": "A precompute is already running; stop it with /mtm precompute cancel",
+  "commands.mtm_worldgen.precompute.running": "A precompute is already running; stop it with /mwg precompute cancel",
   "commands.mtm_worldgen.precompute.none": "No precompute is running",
   "commands.mtm_worldgen.precompute.failed": "Precompute failed: %s"
 }

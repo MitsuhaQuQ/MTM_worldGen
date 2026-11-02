@@ -109,11 +109,11 @@ All commands need cheats enabled.
 
 | Command | Effect |
 |---|---|
-| `/mtm flyspeed <factor>` | Sets flying speed, 0.1 to 50 times the default. `reset` restores it, and no argument shows it |
-| `/mtm locate mountain` | Finds the nearest high mountain, with a coordinate you can click to teleport |
-| `/mtm debugmap [blocksPerPixel]` | Saves a map of the terrain and rivers around you to `<world>/mtm_worldgen/debug/` |
-| `/mtm precompute <radius>` | Computes the logic regions within this many regions of you (0 to 5) in the background, so exploring there later does not wait for them. `cancel` stops it |
-| `/mtm benchmark` | Compares chunk generation time with vanilla (biome and noise stages only) |
+| `/mwg flyspeed <factor>` | Sets flying speed, 0.1 to 50 times the default. `reset` restores it, and no argument shows it |
+| `/mwg locate mountain` | Finds the nearest high mountain, with a coordinate you can click to teleport |
+| `/mwg debugmap [blocksPerPixel]` | Saves a map of the terrain and rivers around you to `<world>/mtm_worldgen/debug/` |
+| `/mwg precompute <radius>` | Computes the logic regions within this many regions of you (0 to 5) in the background, so exploring there later does not wait for them. `cancel` stops it |
+| `/mwg benchmark` | Compares chunk generation time with vanilla (biome and noise stages only) |
 
 ## Development
 
