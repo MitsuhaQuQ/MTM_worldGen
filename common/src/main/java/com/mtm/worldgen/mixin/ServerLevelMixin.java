@@ -1,6 +1,7 @@
 package com.mtm.worldgen.mixin;
 
 import com.mtm.worldgen.world.ForeignChunks;
+import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.MtmSnow;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -17,6 +18,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class ServerLevelMixin {
     @Inject(method = "<init>", at = @At("TAIL"))
     private void mtm$fitForeignChunks(CallbackInfo ci) {
+        MtmGenerators.useCacheDirectory((ServerLevel) (Object) this);
         ForeignChunks.prepare((ServerLevel) (Object) this);
     }
 

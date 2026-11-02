@@ -9,5 +9,13 @@
   "commands.mtm_worldgen.benchmark.started": "正在运行生成基准……",
   "commands.mtm_worldgen.benchmark.failed": "基准运行失败：%s",
   "commands.mtm_worldgen.locate.mountain.found": "最近的高山位于 %s（距离 %s 格）",
-  "commands.mtm_worldgen.locate.mountain.none": "%s 格范围内没有高山"
+  "commands.mtm_worldgen.locate.mountain.none": "%s 格范围内没有高山",
+  "commands.mtm_worldgen.precompute.started": "正在后台预先计算周围 %s 个逻辑区域（半径 %s）",
+  "commands.mtm_worldgen.precompute.progress": "已预先计算 %s / %s 个逻辑区域",
+  "commands.mtm_worldgen.precompute.done": "已预先计算 %s 个逻辑区域，用时 %s 秒",
+  "commands.mtm_worldgen.precompute.cancelling": "当前区域算完后停止预先计算",
+  "commands.mtm_worldgen.precompute.cancelled": "预先计算已停止，完成 %s / %s 个逻辑区域",
+  "commands.mtm_worldgen.precompute.running": "已有预先计算在运行，可用 /mtm precompute cancel 停止",
+  "commands.mtm_worldgen.precompute.none": "没有正在运行的预先计算",
+  "commands.mtm_worldgen.precompute.failed": "预先计算失败：%s"
 }

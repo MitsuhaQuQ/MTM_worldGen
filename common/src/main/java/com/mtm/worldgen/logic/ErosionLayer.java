@@ -34,6 +34,8 @@ final class ErosionLayer {
     private static final int[] DX = {-1, 0, 1, -1, 1, -1, 0, 1};
     private static final int[] DZ = {-1, -1, -1, 0, 0, 1, 1, 1};
     private static final double[] DISTANCE = {Math.sqrt(2), 1, Math.sqrt(2), 1, 1, Math.sqrt(2), 1, Math.sqrt(2)};
+    /** Points per side where a stored region's starting land is checked against the land now. */
+    private static final int CHECKS = 4;
 
     private final WorldgenSettings settings;
     private final WorldgenSettings.Erosion config;
@@ -42,6 +44,7 @@ final class ErosionLayer {
     private final Fbm warpX;
     private final Fbm warpZ;
     private final RegionCache<float[]> regions;
+    private volatile ErosionStore store;
     private final ThreadLocal<CachedRegion> last = new ThreadLocal<>();
     private final int cells;
     private final int margin;
@@ -57,7 +60,17 @@ final class ErosionLayer {
         this.cells = settings.general.regionSize / config.cellSize;
         this.margin = config.margin / config.cellSize;
         this.size = cells + 2 * margin;
-        this.regions = new RegionCache<>(this::compute, settings.general.regionCacheSize);
+        this.regions = new RegionCache<>(this::load, settings.general.regionCacheSize);
+    }
+
+    /** Keeps eroded regions in a store from now on, or in memory only if it is null. */
+    void setStore(ErosionStore store) {
+        this.store = store;
+    }
+
+    /** Makes sure a region is eroded, and stored if there is a store. */
+    void precompute(int regionX, int regionZ) {
+        regions.get(regionX, regionZ);
     }
 
     private record CachedRegion(int regionX, int regionZ, float[] change) {
@@ -120,6 +133,34 @@ final class ErosionLayer {
     /** Catmull-Rom spline through four evenly spaced values, between the middle two. */
     private static double cubic(double a, double b, double c, double d, double t) {
         return b + 0.5 * t * (c - a + t * (2.0 * a - 5.0 * b + 4.0 * c - d + t * (3.0 * (b - c) + d - a)));
+    }
+
+    /** A region's erosion from the store when it holds one for the land here, or computed and then stored. */
+    private float[] load(int regionX, int regionZ) {
+        ErosionStore current = store;
+        if (current == null) {
+            return compute(regionX, regionZ);
+        }
+        double[] checks = checks(regionX, regionZ);
+        float[] stored = current.read(regionX, regionZ, checks, size * size);
+        if (stored != null) {
+            return stored;
+        }
+        float[] change = compute(regionX, regionZ);
+        current.write(regionX, regionZ, checks, change);
+        return change;
+    }
+
+    /** The land erosion starts from, at a few points spread over a region. */
+    private double[] checks(int regionX, int regionZ) {
+        int regionSize = settings.general.regionSize;
+        double[] checks = new double[CHECKS * CHECKS];
+        for (int i = 0; i < CHECKS; i++) {
+            for (int j = 0; j < CHECKS; j++) {
+                checks[i * CHECKS + j] = sampler.height((regionX + (i + 0.5) / CHECKS) * regionSize, (regionZ + (j + 0.5) / CHECKS) * regionSize);
+            }
+        }
+        return checks;
     }
 
     private float[] compute(int regionX, int regionZ) {

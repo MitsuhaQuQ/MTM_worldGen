@@ -65,7 +65,40 @@ public final class MtmCommands {
                         .executes(context -> runBenchmark(context.getSource())))
                 .then(Commands.literal("locate")
                         .then(Commands.literal("mountain")
-                                .executes(context -> locateMountain(context.getSource())))));
+                                .executes(context -> locateMountain(context.getSource()))))
+                .then(Commands.literal("precompute")
+                        .then(Commands.literal("cancel")
+                                .executes(context -> cancelPrecompute(context.getSource())))
+                        .then(Commands.argument("radius", IntegerArgumentType.integer(0, RegionPrecompute.MAX_RADIUS))
+                                .executes(context -> precompute(context.getSource(),
+                                        IntegerArgumentType.getInteger(context, "radius"))))));
+    }
+
+    /**
+     * Computes the logic regions within a radius, counted in regions, around the source in the background, so that
+     * exploring there later does not wait for them.
+     */
+    private static int precompute(CommandSourceStack source, int radius) {
+        TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel());
+        if (logic == null) {
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.not_mtm_world"));
+            return 0;
+        }
+        Vec3 position = source.getPosition();
+        if (!RegionPrecompute.start(source, logic, position.x, position.z, radius)) {
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.precompute.running"));
+            return 0;
+        }
+        return 1;
+    }
+
+    private static int cancelPrecompute(CommandSourceStack source) {
+        if (!RegionPrecompute.cancel()) {
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.precompute.none"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.precompute.cancelling"), false);
+        return 1;
     }
 
     /** Runs the generation benchmark off the server thread and reports the result in chat and the log. */

@@ -3,6 +3,7 @@ package com.mtm.worldgen.logic;
 import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
 
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -41,6 +42,7 @@ public final class TerrainLogic {
     private static final Map<WorldKey, TerrainLogic> WORLDS = new ConcurrentHashMap<>();
 
     private final WorldgenSettings settings;
+    private final long seed;
     private final ContinentLayer continents;
     private final SkeletonLayer skeleton;
     private final SeaStackLayer stacks;
@@ -73,6 +75,7 @@ public final class TerrainLogic {
 
     public TerrainLogic(long seed, WorldgenSettings settings) {
         this.settings = settings;
+        this.seed = seed;
         this.continents = new ContinentLayer(seed, settings);
         this.skeleton = new SkeletonLayer(seed, settings, continents);
         this.climate = new ClimateLayer(seed, settings);
@@ -184,6 +187,25 @@ public final class TerrainLogic {
             }
         }
         return (int) Math.ceil(highest) + settings.general.structureTerrainMargin;
+    }
+
+    /**
+     * Keeps eroded regions in files under a directory from now on, normally in the world's folder. Worlds with the
+     * same seed and settings share this logic, and their files would be the same, so the last world to set it wins.
+     */
+    public void useCacheDirectory(Path directory) {
+        erosion.setStore(directory == null ? null : new ErosionStore(directory, seed, settings.toJson(), ALGORITHM_VERSION));
+    }
+
+    /**
+     * Computes everything a logic region needs ahead of time: its terrain, drainage, rivers and erosion. Only the
+     * erosion outlasts the memory cache, through the cache directory; the rest is quick to compute again.
+     */
+    public void precomputeRegion(int regionX, int regionZ) {
+        if (settings.erosion.enabled) {
+            erosion.precompute(regionX, regionZ);
+        }
+        riverRegion(regionX, regionZ);
     }
 
     /** Takes on the foreign chunks of a world. Called before it generates anything. */

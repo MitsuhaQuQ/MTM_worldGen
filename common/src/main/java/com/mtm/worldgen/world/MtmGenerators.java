@@ -12,6 +12,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.Climate;
@@ -30,6 +31,7 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.SurfaceRules;
 import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.synth.NormalNoise;
+import net.minecraft.world.level.storage.LevelResource;
 
 /** Builds the MTM overworld generator: vanilla noise generator with MTM terrain density. */
 public final class MtmGenerators {
@@ -58,6 +60,17 @@ public final class MtmGenerators {
     /** The terrain logic of a level, or null if it does not use an MTM generator. */
     public static TerrainLogic terrainLogic(ServerLevel level) {
         return terrainLogic(level.getChunkSource().randomState());
+    }
+
+    /**
+     * Points the terrain logic of an MTM overworld at its world folder, where eroded regions are kept between
+     * sessions. Called when the level is created, before it generates anything.
+     */
+    public static void useCacheDirectory(ServerLevel level) {
+        TerrainLogic logic = terrainLogic(level);
+        if (logic != null && level.dimension() == Level.OVERWORLD) {
+            logic.useCacheDirectory(level.getServer().getWorldPath(LevelResource.ROOT).resolve(MtmWorldgen.MOD_ID).resolve("erosion"));
+        }
     }
 
     /** The terrain logic of a seeded generator state, or null if it does not belong to an MTM generator. */
