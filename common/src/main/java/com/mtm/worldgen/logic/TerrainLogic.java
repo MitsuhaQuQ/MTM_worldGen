@@ -666,8 +666,9 @@ public final class TerrainLogic {
         if (river == null || river.distance() >= river.halfWidth(settings.rivers.minChannelWidth)) {
             return false;
         }
+        // Like the water itself, the lake only takes over where its water stands above the ground
         double[] lake = sampleLake(x, z);
-        return lake == null || lake[0] <= LAKE_EDGE;
+        return lake == null || lake[0] <= LAKE_EDGE || sampleSurfaceHeight(x, z) >= lake[1];
     }
 
     /** Water surface of a column, or NaN where it holds no river or lake. */
@@ -804,7 +805,17 @@ public final class TerrainLogic {
         String foreignBiome = influence == null ? null : biomes.foreignBiome(x, z, influence, climate.zone(temperature), height);
         return foreignBiome != null ? foreignBiome : biomes.surfaceBiome(x, z, climate.zone(temperature), height, sampleCoastDistance(x, z),
                 sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), isRockyCoast(x, z), continents.islandKind(x, z),
-                climate.nearZoneBorder(temperature));
+                climate.nearZoneBorder(temperature), !settings.biomes.unrealisticOnMountains && isMountainous(x, z));
+    }
+
+    /**
+     * Whether a position lies on a mountain range, its slopes included, rather than in hills or plains. Plateaus do
+     * not count even inside the mountain tier: badlands mesas are what plateaus look like in a dry climate.
+     */
+    private boolean isMountainous(double x, double z) {
+        double baseAboveSea = interpolate(FIELD_HEIGHT, x, z) - seaSurface();
+        return skeleton.mountainShare(x, z, baseAboveSea) > settings.biomes.mountainShare
+                && skeleton.landform(x, z, baseAboveSea) != Landform.PLATEAU;
     }
 
     /** Whether the ground around a position is flat enough for a village. */

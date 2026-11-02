@@ -453,6 +453,28 @@ class TerrainLogicTest {
     }
 
     @Test
+    void badlandsCanStayOffMountains() {
+        WorldgenSettings settings = new WorldgenSettings();
+        settings.biomes.unrealisticOnMountains = false;
+        // Erosion only shapes the surface, and the biome rule does not depend on it
+        settings.erosion.enabled = false;
+        TerrainLogic logic = new TerrainLogic(12345L, settings);
+        int mountains = 0;
+        int badlands = 0;
+        for (int x = -40000; x < 40000; x += 500) {
+            for (int z = -40000; z < 40000; z += 500) {
+                String biome = logic.sampleBiome(x, z);
+                badlands += biome.contains("badlands") ? 1 : 0;
+                if (logic.sampleLandformKind(x, z) == TerrainLogic.Landform.MOUNTAINS) {
+                    mountains++;
+                    assertTrue(!biome.contains("badlands"), biome + " on a mountain at " + x + "," + z);
+                }
+            }
+        }
+        assertTrue(mountains > 1000 && badlands > 0, mountains + " mountain samples, " + badlands + " badlands elsewhere");
+    }
+
+    @Test
     void drainageDoesNotDependOnRegionOrder() {
         TerrainLogic forward = new TerrainLogic(SEED, SETTINGS);
         TerrainLogic backward = new TerrainLogic(SEED, SETTINGS);

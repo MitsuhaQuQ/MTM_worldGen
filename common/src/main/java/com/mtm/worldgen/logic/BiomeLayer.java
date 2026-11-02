@@ -3,6 +3,12 @@ package com.mtm.worldgen.logic;
 import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Pipeline step 8: biome assignment from terrain and climate. Water and coast come first, then altitude bands
  * relative to the local snow line, then lowlands by climate zone and humidity. Biomes are large and follow the
@@ -17,6 +23,8 @@ final class BiomeLayer {
     private final Fbm variantNoise;
     private final Fbm caveNoise;
     private final Fbm bandNoise;
+    /** Keyed by list identity: the lists are the configuration's own arrays, which never change. */
+    private final Map<String[], String[]> realisticLists = Collections.synchronizedMap(new IdentityHashMap<>());
 
     BiomeLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
@@ -36,10 +44,12 @@ final class BiomeLayer {
      * @param island        kind of the island here, or null
      * @param zoneBorder    whether the position is close to a neighboring climate zone, where dry biomes such as
      *                      desert and badlands give way so their strong colors do not meet the next zone head on
+     * @param realistic     whether biomes that look wrong at mountain scale give way here, such as badlands, whose
+     *                      terracotta bands run around a whole mountain
      */
     String surfaceBiome(double x, double z, ClimateLayer.Zone zone, double height, double coastDistance,
                         double snowLine, double humidity, boolean river, boolean rockyCoast,
-                        ContinentLayer.IslandKind island, boolean zoneBorder) {
+                        ContinentLayer.IslandKind island, boolean zoneBorder, boolean realistic) {
         double sea = settings.general.seaLevel - 1;
         boolean dry = humidity < config.dryHumidity && !zoneBorder;
         WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
@@ -66,14 +76,16 @@ final class BiomeLayer {
                 return pick(biomes.alpine, x, z);
             }
             if (banded >= sea + config.highlandLine * (snowLine - sea)) {
-                return pick(dry && biomes.dryHighland.length > 0 ? biomes.dryHighland : biomes.highland, x, z);
+                String[] dryHighland = realistic ? realistic(biomes.dryHighland) : biomes.dryHighland;
+                return pick(dry && dryHighland.length > 0 ? dryHighland : biomes.highland, x, z);
             }
         }
         if (humidity >= config.wetHumidity && height < sea + config.swampMaxAboveSea && biomes.swamp.length > 0) {
             return pick(biomes.swamp, x, z);
         }
         if (dry) {
-            return pick(biomes.dry, x, z);
+            String[] dryLand = realistic ? realistic(biomes.dry) : biomes.dry;
+            return pick(dryLand.length > 0 ? dryLand : biomes.medium, x, z);
         }
         return pick(humidity >= config.wetHumidity ? biomes.wet : biomes.medium, x, z);
     }
@@ -103,6 +115,14 @@ final class BiomeLayer {
     String caveBiome(double humidity) {
         int index = Math.min(config.caves.length - 1, (int) (humidity * config.caves.length));
         return config.caves[index];
+    }
+
+    /** A biome list without the biomes that look wrong on mountains, filtered once per list. */
+    private String[] realistic(String[] biomes) {
+        return realisticLists.computeIfAbsent(biomes, list -> {
+            List<String> unrealistic = List.of(config.unrealisticBiomes);
+            return Arrays.stream(list).filter(id -> !unrealistic.contains(id)).toArray(String[]::new);
+        });
     }
 
     private WorldgenSettings.BiomeZone zoneBiomes(ClimateLayer.Zone zone) {

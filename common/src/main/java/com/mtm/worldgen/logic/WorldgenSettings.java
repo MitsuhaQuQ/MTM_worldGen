@@ -574,6 +574,15 @@ public final class WorldgenSettings {
         public String[] caves = {"minecraft:dripstone_caves", "minecraft:lush_caves"};
         /** Biome of mushroom islands. */
         public String mushroomIsland = "minecraft:mushroom_fields";
+        /**
+         * Whether the biomes below may grow on mountains. Badlands lay terracotta bands at fixed heights, which on a
+         * mountain hundreds of blocks tall run around it as rings of color. When off, mountain ranges and their slopes
+         * take the other biomes of the same list, or the medium biomes when none is left. Mountains are where the
+         * mountain tier share exceeds mountainShare; plateaus and hills keep these biomes either way.
+         */
+        public boolean unrealisticOnMountains = false;
+        public String[] unrealisticBiomes = ids("badlands", "wooded_badlands", "eroded_badlands");
+        public double mountainShare = 0.1;
 
         public BiomeZone tropical = new BiomeZone().with(
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
@@ -829,6 +838,8 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(biomes.unrealisticBiomes != null && biomes.mountainShare >= 0.0 && biomes.mountainShare < 1.0,
+                "biomes.unrealisticBiomes must be a list, and biomes.mountainShare must be at least 0 and below 1");
         require(erosion.cellSize > 0 && general.regionSize % erosion.cellSize == 0 && erosion.margin % erosion.cellSize == 0
                         && erosion.blend >= 0.0 && erosion.warp >= 0.0 && erosion.blend + erosion.warp + erosion.cellSize <= erosion.margin
                         && erosion.rounds >= 0 && erosion.warpWavelength > 0.0 && erosion.diffusion >= 0.0 && erosion.diffusion < 0.25,
