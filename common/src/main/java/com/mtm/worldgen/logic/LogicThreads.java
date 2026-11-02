@@ -9,7 +9,7 @@ import java.util.stream.IntStream;
  * the number of threads and their timing cannot change any result. A fork-join pool is used because tasks may wait
  * for each other through the region caches, and nested tasks are helped along rather than starving the pool.
  */
-final class LogicThreads {
+public final class LogicThreads {
     private static final ForkJoinPool POOL = new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
             pool -> {
                 var thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
@@ -22,7 +22,7 @@ final class LogicThreads {
     }
 
     /** Runs a task for every index below count and returns when all are done. */
-    static void forEach(int count, IntConsumer task) {
+    public static void forEach(int count, IntConsumer task) {
         POOL.submit(() -> IntStream.range(0, count).parallel().forEach(task)).join();
     }
 }

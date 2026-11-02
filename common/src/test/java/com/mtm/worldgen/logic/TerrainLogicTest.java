@@ -2,6 +2,7 @@ package com.mtm.worldgen.logic;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
@@ -16,6 +17,7 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerrainLogicTest {
@@ -215,6 +217,21 @@ class TerrainLogicTest {
             }
         }
         assertTrue(sinks > 0, "no inland sinks");
+    }
+
+    /** A big merged map has keys that collide badly as plain Longs, and its snapshot has to load in no time anyway. */
+    @Test
+    void foreignMapHandlesLargeMaps() {
+        Map<Long, ForeignMap.Chunk> chunks = new HashMap<>();
+        for (int x = -500; x < 500; x++) {
+            for (int z = -500; z < 500; z++) {
+                chunks.put(ForeignMap.key(x, z), ForeignMap.INNER);
+            }
+        }
+        ForeignMap map = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> new ForeignMap(chunks, SETTINGS.foreign));
+        assertTrue(map.contains(-500, 499));
+        assertTrue(!map.contains(500, 0));
+        assertEquals(chunks.size(), map.chunks().size());
     }
 
     /** New terrain meets foreign chunks at their height, and leaves terrain far away as it was. */

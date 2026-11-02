@@ -2,9 +2,9 @@ package com.mtm.worldgen.world;
 
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.logic.ForeignMap;
+import com.mtm.worldgen.logic.LogicThreads;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
-import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -16,21 +16,38 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.ChunkStorage;
+import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.storage.LevelResource;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +55,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -61,6 +82,16 @@ public final class ForeignChunks {
     /** A map counts as superflat when this share of its ground lies at one height, well below the sea. */
     private static final double FLAT_SHARE = 0.5;
     private static final int FLAT_BELOW_SEA = 8;
+    private static final int REPORTS = 20;
+    private static final int SECTOR = 4096;
+    private static final int REGION_CHUNKS = 1024;
+    /** Threads that use the disk at a time: on a spinning disk, more of them only make each other seek. */
+    private static final Semaphore DISK = new Semaphore(2);
+    /** Region files that share a stretch of terrain logic, along each axis. */
+    private static final int REGIONS_PER_BLOCK = 8;
+    private static final int HEADER_SECTORS = 2;
+    private static final int MAX_SECTORS = 255;
+    private static final int PACKED_SIZE = 16 * 1024;
     /** Open water at one height over this share of a map counts as its sea. */
     private static final double MIN_SEA_SHARE = 0.05;
     /** How far a sea is moved to meet the world's own: half a section, which is as far as lifting can leave it. */
@@ -76,8 +107,23 @@ public final class ForeignChunks {
     private final Path root;
     private final Path snapshotFile;
     private final Path regions;
+    private final ChunkGenerator generator;
+    private final RandomState randomState;
+    /**
+     * Fills chunks without structures. The real manager reads chunks through the server thread, which is waiting for
+     * this work to finish, so asking it would hang the world; and what lies under a map has no use for their foundations.
+     */
+    private final StructureManager noStructures;
 
-    private ForeignChunks(ServerLevel level, TerrainLogic logic, Path root) {
+    private ForeignChunks(ServerLevel level, TerrainLogic logic, Path root, ChunkGenerator generator, RandomState randomState) {
+        this.generator = generator;
+        this.randomState = randomState;
+        this.noStructures = new StructureManager(level, level.getServer().getWorldData().worldGenOptions(), null) {
+            @Override
+            public List<StructureStart> startsForStructure(ChunkPos pos, Predicate<Structure> predicate) {
+                return List.of();
+            }
+        };
         this.level = level;
         this.logic = logic;
         this.settings = logic.settings();
@@ -93,7 +139,8 @@ public final class ForeignChunks {
             return;
         }
         try {
-            new ForeignChunks(level, logic, level.getServer().getWorldPath(LevelResource.ROOT)).run();
+            new ForeignChunks(level, logic, level.getServer().getWorldPath(LevelResource.ROOT),
+                    level.getChunkSource().getGenerator(), level.getChunkSource().randomState()).run();
         } catch (IOException | RuntimeException e) {
             // A world must still start, and a stale snapshot only costs a seam
             MtmWorldgen.LOGGER.error("Could not process foreign chunks", e);
@@ -101,8 +148,8 @@ public final class ForeignChunks {
     }
 
     /** Runs on the world folder at a path, with the given terrain. For tests. */
-    public static void run(ServerLevel level, TerrainLogic logic, Path root) throws IOException {
-        new ForeignChunks(level, logic, root).run();
+    public static void run(ServerLevel level, TerrainLogic logic, Path root, ChunkGenerator generator, RandomState randomState) throws IOException {
+        new ForeignChunks(level, logic, root, generator, randomState).run();
     }
 
     private void run() throws IOException {
@@ -111,13 +158,11 @@ public final class ForeignChunks {
         readSnapshot(chunks, files);
         List<Path> changed = changedFiles(files);
         if (!changed.isEmpty()) {
-            try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
-                fit(storage, changed, chunks);
-                storage.flushWorker();
-            }
+            fit(changed, chunks);
             for (Path file : changed) {
                 files.put(file.getFileName().toString(), stamp(file));
             }
+            dropInnerDetail(chunks);
             writeSnapshot(chunks, files);
         }
         logic.setForeign(new ForeignMap(chunks, settings.foreign));
@@ -146,8 +191,11 @@ public final class ForeignChunks {
     /** A chunk on its way through: its tag and what was read from it. */
     private static final class Found {
         final ChunkPos pos;
-        final CompoundTag tag;
+        /** Only there while a chunk is being worked on. */
+        CompoundTag tag;
         final Path file;
+        int lift;
+        int sea;
         final int[] ground = new int[ForeignMap.SAMPLES];
         final short[] water = new short[ForeignMap.SAMPLES];
         String biome;
@@ -160,50 +208,234 @@ public final class ForeignChunks {
         }
     }
 
-    private void fit(ChunkStorage storage, List<Path> files, Map<Long, ForeignMap.Chunk> chunks) throws IOException {
-        Map<Long, Found> foreign = new HashMap<>();
-        for (Path file : files) {
-            String[] name = file.getFileName().toString().split("\\.");
-            int regionX = Integer.parseInt(name[1]);
-            int regionZ = Integer.parseInt(name[2]);
-            for (int x = 0; x < 32; x++) {
-                for (int z = 0; z < 32; z++) {
-                    ChunkPos pos = new ChunkPos(regionX * 32 + x, regionZ * 32 + z);
-                    Optional<CompoundTag> stored = storage.read(pos).join();
-                    long key = ForeignMap.key(pos.x, pos.z);
-                    Origin origin = stored.isEmpty() ? Origin.OWN : origin(stored.get());
-                    // The snapshot only says what stood here: a new map at the same place is told by its tags
-                    if (origin == Origin.OWN || origin != Origin.FOREIGN && chunks.containsKey(key)) {
-                        continue;
-                    }
-                    CompoundTag tag = storage.upgradeChunkTag(Level.OVERWORLD, level::getDataStorage, stored.get(), Optional.empty());
-                    if (!tag.getString("Status").endsWith("full")) {
-                        continue;
-                    }
-                    Found found = new Found(pos, tag, file);
-                    read(found);
-                    if (origin == Origin.FOREIGN) {
-                        foreign.put(key, found);
-                    } else {
-                        chunks.put(key, snapshot(found, origin == Origin.UPGRADED));
-                    }
-                }
-            }
-        }
-        Set<Path> backedUp = new HashSet<>();
+    /**
+     * Works in two passes over the region files, which run in parallel file by file. A big map does not fit in memory
+     * as chunk tags, so the first pass only keeps what is read from each chunk, and the second reads each one again
+     * and writes it back right away.
+     */
+    private void fit(List<Path> files, Map<Long, ForeignMap.Chunk> chunks) {
+        Map<Long, Found> foreign = new ConcurrentHashMap<>();
+        Map<Long, ForeignMap.Chunk> plain = new ConcurrentHashMap<>();
+        AtomicInteger scanned = new AtomicInteger();
+        LogicThreads.forEach(files.size(), i -> {
+            scanFile(files.get(i), chunks, foreign, plain);
+            report("Scanned", scanned.incrementAndGet(), files.size());
+        });
+        chunks.putAll(plain);
+
         for (List<Found> island : islands(foreign)) {
             int lift = lift(island);
             int sea = seaOf(island, lift);
             for (Found found : island) {
-                if (backedUp.add(found.file)) {
-                    backUp(found.file);
-                }
-                rebuild(found, lift);
-                alignSea(found, sea);
-                storage.write(found.pos, found.tag);
-                chunks.put(ForeignMap.key(found.pos.x, found.pos.z), snapshot(found, false));
+                found.lift = lift;
+                found.sea = sea;
             }
-            MtmWorldgen.LOGGER.info("Fitted {} foreign chunks, raised by {}", island.size(), lift);
+            if (lift != 0) {
+                MtmWorldgen.LOGGER.info("Raising {} foreign chunks by {}", island.size(), lift);
+            }
+        }
+        MtmWorldgen.LOGGER.info("Fitting {} foreign chunks", foreign.size());
+        // Neighboring files follow each other, or threads scattered over the map would keep evicting the terrain logic
+        Map<Path, List<Found>> byFile = new TreeMap<>(Comparator
+                .<Path>comparingInt(file -> Math.floorDiv(regionOf(file)[0], REGIONS_PER_BLOCK))
+                .thenComparingInt(file -> Math.floorDiv(regionOf(file)[1], REGIONS_PER_BLOCK))
+                .thenComparing(Comparator.naturalOrder()));
+        foreign.values().forEach(found -> byFile.computeIfAbsent(found.file, file -> new ArrayList<>()).add(found));
+        List<Map.Entry<Path, List<Found>>> work = new ArrayList<>(byFile.entrySet());
+        AtomicInteger fitted = new AtomicInteger();
+        LogicThreads.forEach(work.size(), i -> {
+            fitFile(work.get(i).getKey(), work.get(i).getValue());
+            report("Fitted", fitted.incrementAndGet(), work.size());
+        });
+        foreign.forEach((key, found) -> chunks.put(key, snapshot(found, false)));
+    }
+
+    /** Logs every so often: this can take minutes on a big map, while the game sits at the start of loading. */
+    private static void report(String what, int done, int total) {
+        if (done == total || done % Math.max(1, total / REPORTS) == 0) {
+            MtmWorldgen.LOGGER.info("{} {} of {} region files", what, done, total);
+        }
+    }
+
+    private static int[] regionOf(Path file) {
+        String[] name = file.getFileName().toString().split("\\.");
+        return new int[]{Integer.parseInt(name[1]), Integer.parseInt(name[2])};
+    }
+
+    private ChunkStorage openStorage() {
+        return new ChunkStorage(regions, level.getServer().getFixerUpper(), false);
+    }
+
+    private void scanFile(Path file, Map<Long, ForeignMap.Chunk> chunks, Map<Long, Found> foreign, Map<Long, ForeignMap.Chunk> plain) {
+        try (ChunkStorage storage = openStorage()) {
+            eachChunk(file, pos -> true, (pos, stored) -> {
+                long key = ForeignMap.key(pos.x, pos.z);
+                Origin origin = origin(stored);
+                // The snapshot only says what stood here: a new map at the same place is told by its tags
+                if (origin == Origin.OWN || origin != Origin.FOREIGN && chunks.containsKey(key)) {
+                    return;
+                }
+                CompoundTag tag = storage.upgradeChunkTag(Level.OVERWORLD, level::getDataStorage, stored, Optional.empty());
+                if (!tag.getString("Status").endsWith("full")) {
+                    return;
+                }
+                Found found = new Found(pos, tag, file);
+                read(found);
+                found.tag = null;
+                if (origin == Origin.FOREIGN) {
+                    foreign.put(key, found);
+                } else {
+                    plain.put(key, snapshot(found, origin == Origin.UPGRADED));
+                }
+            });
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Fits the chunks of a file and writes the file anew in one go. Going through the storage would write chunk by
+     * chunk, all over the file, from many threads at once; a finished file only takes the disk once, front to back.
+     * The original file becomes the backup, which costs nothing.
+     */
+    private void fitFile(Path file, List<Found> chunks) {
+        Map<Long, Found> wanted = new HashMap<>();
+        chunks.forEach(found -> wanted.put(found.pos.toLong(), found));
+        try (ChunkStorage storage = openStorage()) {
+            byte[] bytes = readFile(file);
+            ByteBuffer old = ByteBuffer.wrap(bytes);
+            int[] region = regionOf(file);
+            ByteArrayOutputStream body = new ByteArrayOutputStream(bytes.length);
+            ByteBuffer locations = ByteBuffer.allocate(SECTOR);
+            List<Found> oversized = new ArrayList<>();
+            for (int i = 0; i < REGION_CHUNKS && 4 * i + 4 <= bytes.length; i++) {
+                int entry = old.getInt(4 * i);
+                int offset = (entry >>> 8) * SECTOR;
+                if (entry == 0 || offset + 5 > bytes.length) {
+                    continue;
+                }
+                ChunkPos pos = new ChunkPos(region[0] * 32 + (i & 31), region[1] * 32 + (i >> 5));
+                Found found = wanted.get(pos.toLong());
+                byte[] chunk;
+                if (found == null) {
+                    chunk = Arrays.copyOfRange(bytes, offset, Math.min(bytes.length, offset + 4 + old.getInt(offset)));
+                } else {
+                    CompoundTag stored = bytes[offset + 4] < 0 ? storage.read(pos).join().orElseThrow() : read(bytes, offset, pos);
+                    found.tag = storage.upgradeChunkTag(Level.OVERWORLD, level::getDataStorage, stored, Optional.empty());
+                    rebuild(found, found.lift);
+                    alignSea(found, found.sea);
+                    chunk = pack(found.tag);
+                    if (chunk.length > MAX_SECTORS * SECTOR) {
+                        oversized.add(found);
+                        continue;
+                    }
+                    found.tag = null;
+                }
+                int sectors = (chunk.length + SECTOR - 1) / SECTOR;
+                locations.putInt(4 * i, (HEADER_SECTORS + body.size() / SECTOR) << 8 | sectors);
+                body.write(chunk);
+                body.write(new byte[sectors * SECTOR - chunk.length]);
+            }
+            replaceFile(file, locations.array(), Arrays.copyOfRange(bytes, SECTOR, 2 * SECTOR), body);
+            // Chunks too big for a region file go to files of their own, which the storage takes care of
+            for (Found found : oversized) {
+                storage.write(found.pos, found.tag);
+                found.tag = null;
+            }
+            storage.flushWorker();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static CompoundTag read(byte[] bytes, int offset, ChunkPos pos) throws IOException {
+        int length = ByteBuffer.wrap(bytes).getInt(offset);
+        int kind = bytes[offset + 4];
+        if (kind < 0 || !RegionFileVersion.isValidVersion(kind)) {
+            throw new IOException("Cannot read chunk " + pos + " of kind " + kind);
+        }
+        try (DataInputStream input = new DataInputStream(new BufferedInputStream(RegionFileVersion.fromId(kind)
+                .wrap(new ByteArrayInputStream(bytes, offset + 5, length - 1))))) {
+            return NbtIo.read(input);
+        }
+    }
+
+    /** A chunk as it lies in a region file: its length, how it is packed, and the packed tag. */
+    private static byte[] pack(CompoundTag tag) throws IOException {
+        ByteArrayOutputStream packed = new ByteArrayOutputStream(PACKED_SIZE);
+        packed.write(new byte[5]);
+        try (DataOutputStream output = new DataOutputStream(new BufferedOutputStream(RegionFileVersion.VERSION_DEFLATE.wrap(packed)))) {
+            NbtIo.write(tag, output);
+        }
+        byte[] bytes = packed.toByteArray();
+        ByteBuffer.wrap(bytes).putInt(0, bytes.length - 4).put(4, (byte) RegionFileVersion.VERSION_DEFLATE.getId());
+        return bytes;
+    }
+
+    private void replaceFile(Path file, byte[] locations, byte[] times, ByteArrayOutputStream body) throws IOException {
+        Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+        Path backup = backupOf(file);
+        DISK.acquireUninterruptibly();
+        try (OutputStream output = new BufferedOutputStream(Files.newOutputStream(temporary), SECTOR * 16)) {
+            output.write(locations);
+            output.write(times);
+            body.writeTo(output);
+        } finally {
+            DISK.release();
+        }
+        if (Files.exists(backup)) {
+            Files.delete(file);
+        } else {
+            Files.move(file, backup);
+        }
+        Files.move(temporary, file);
+    }
+
+    private Path backupOf(Path file) throws IOException {
+        Path folder = root.resolve(MtmWorldgen.MOD_ID).resolve("backup");
+        Files.createDirectories(folder);
+        return folder.resolve(file.getFileName() + "." + Files.getLastModifiedTime(file).toMillis());
+    }
+
+    private interface ChunkVisitor {
+        void visit(ChunkPos pos, CompoundTag tag) throws IOException;
+    }
+
+    /**
+     * Reads a region file whole and goes through its chunks. Threads reading chunk by chunk spend nearly all their time
+     * waiting for each other at the disk, so the file is read in one go, and only unpacking runs on many threads.
+     */
+    private void eachChunk(Path file, Predicate<ChunkPos> wanted, ChunkVisitor visitor) throws IOException {
+        byte[] bytes = readFile(file);
+        int[] region = regionOf(file);
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        for (int i = 0; i < REGION_CHUNKS && 4 * i + 4 <= bytes.length; i++) {
+            int entry = buffer.getInt(4 * i);
+            int offset = (entry >>> 8) * SECTOR;
+            ChunkPos pos = new ChunkPos(region[0] * 32 + (i & 31), region[1] * 32 + (i >> 5));
+            if (entry == 0 || offset + 5 > bytes.length || !wanted.test(pos)) {
+                continue;
+            }
+            if (bytes[offset + 4] < 0) {
+                // Oversized chunks live in files of their own, which the storage knows how to find
+                try (ChunkStorage storage = openStorage()) {
+                    Optional<CompoundTag> stored = storage.read(pos).join();
+                    if (stored.isPresent()) {
+                        visitor.visit(pos, stored.get());
+                    }
+                }
+                continue;
+            }
+            visitor.visit(pos, read(bytes, offset, pos));
+        }
+    }
+
+    private static byte[] readFile(Path file) throws IOException {
+        DISK.acquireUninterruptibly();
+        try {
+            return Files.readAllBytes(file);
+        } finally {
+            DISK.release();
         }
     }
 
@@ -231,16 +463,6 @@ public final class ForeignChunks {
             return Origin.FOREIGN;
         }
         return tag.contains(WORLD_TAG) && tag.getInt(VERSION_TAG) == TerrainLogic.ALGORITHM_VERSION ? Origin.OWN : Origin.UPGRADED;
-    }
-
-    /** Keeps each state a region file was fitted in, since a map can be merged in at the same place again. */
-    private void backUp(Path file) throws IOException {
-        Path backup = root.resolve(MtmWorldgen.MOD_ID).resolve("backup")
-                .resolve(file.getFileName() + "." + Files.getLastModifiedTime(file).toMillis());
-        Files.createDirectories(backup.getParent());
-        if (!Files.exists(backup)) {
-            Files.copy(file, backup, StandardCopyOption.COPY_ATTRIBUTES);
-        }
     }
 
     /** Foreign chunks in groups connected by their sides. A map moves as a whole, or it would come apart in steps. */
@@ -276,9 +498,12 @@ public final class ForeignChunks {
         Map<Integer, Integer> counts = new HashMap<>();
         int total = 0;
         for (Found found : island) {
-            for (int ground : found.ground) {
-                counts.merge(ground, 1, Integer::sum);
+            for (int i = 0; i < found.ground.length; i++) {
                 total++;
+                // Dry ground only: a flat sea floor lies low as well, but it is no superflat map
+                if (found.water[i] == ForeignMap.NO_WATER) {
+                    counts.merge(found.ground[i], 1, Integer::sum);
+                }
             }
         }
         int mode = 0;
@@ -499,7 +724,9 @@ public final class ForeignChunks {
                 taken.add(y);
             }
         }
-        int floor = found.lowestSection == Integer.MAX_VALUE ? 0 : found.lowestSection + liftSections;
+        // Worlds that reached deeper lose what lies below this one, so only what stays counts as the floor of the map
+        int floor = found.lowestSection + liftSections;
+        floor = found.lowestSection == Integer.MAX_VALUE ? 0 : Math.max(floor, lowestKept(sections));
         if (floor > LOWEST_SECTION) {
             fillBelow(found, sections, taken, floor);
         }
@@ -525,15 +752,27 @@ public final class ForeignChunks {
         }
     }
 
+    private static int lowestKept(ListTag sections) {
+        int lowest = 0;
+        for (int i = 0; i < sections.size(); i++) {
+            CompoundTag section = sections.getCompound(i);
+            if (!isEmpty(section)) {
+                lowest = Math.min(lowest, section.getByte("Y"));
+            }
+        }
+        return lowest;
+    }
+
     /**
      * Sections below a map, from a chunk of the world's own terrain. MTM land may lie lower than the map's floor there,
      * so the sections above that land are made solid: only rock should meet the bottom of the map.
      */
     private void fillBelow(Found found, ListTag sections, Set<Integer> taken, int floor) {
-        ProtoChunk proto = new ProtoChunk(found.pos, UpgradeData.EMPTY, level,
+        // A short chunk ends the noise at the map, which saves most of the work of a full column
+        LevelHeightAccessor below = LevelHeightAccessor.create(LOWEST_SECTION * SECTION_BLOCKS, (floor - LOWEST_SECTION) * SECTION_BLOCKS);
+        ProtoChunk proto = new ProtoChunk(found.pos, UpgradeData.EMPTY, below,
                 level.registryAccess().registryOrThrow(Registries.BIOME), null);
-        level.getChunkSource().getGenerator().fillFromNoise(Util.backgroundExecutor(), Blender.empty(),
-                level.getChunkSource().randomState(), level.structureManager(), proto).join();
+        generator.fillFromNoise(Runnable::run, Blender.empty(), randomState, noStructures, proto).join();
         int center = found.pos.getMinBlockX() + 8;
         int centerZ = found.pos.getMinBlockZ() + 8;
         int land = Mth.floor(logic.sampleSmoothLand(center, centerZ) / SECTION_BLOCKS) - STONE_SECTIONS_ABOVE_LAND;
@@ -584,15 +823,37 @@ public final class ForeignChunks {
             chunks.put(chunk.getLong("key"), new ForeignMap.Chunk(shorts(chunk.getIntArray("ground")), shorts(chunk.getIntArray("water")),
                     chunk.contains("biome") ? chunk.getString("biome") : null, chunk.getBoolean("upgraded")));
         }
+        for (long key : tag.getLongArray("inner")) {
+            chunks.put(key, ForeignMap.INNER);
+        }
         CompoundTag known = tag.getCompound("files");
         for (String name : known.getAllKeys()) {
             files.put(name, known.getLongArray(name));
         }
     }
 
+    /** Chunks with foreign chunks on all sides only have to be known: nothing blends toward them. */
+    private static void dropInnerDetail(Map<Long, ForeignMap.Chunk> chunks) {
+        List<Long> inner = new ArrayList<>();
+        for (long key : chunks.keySet()) {
+            int x = (int) (key >> 32);
+            int z = (int) key;
+            if (chunks.containsKey(ForeignMap.key(x - 1, z)) && chunks.containsKey(ForeignMap.key(x + 1, z))
+                    && chunks.containsKey(ForeignMap.key(x, z - 1)) && chunks.containsKey(ForeignMap.key(x, z + 1))) {
+                inner.add(key);
+            }
+        }
+        inner.forEach(key -> chunks.put(key, ForeignMap.INNER));
+    }
+
     private void writeSnapshot(Map<Long, ForeignMap.Chunk> chunks, Map<String, long[]> files) throws IOException {
         ListTag list = new ListTag();
+        List<Long> inner = new ArrayList<>();
         for (Map.Entry<Long, ForeignMap.Chunk> entry : new TreeMap<>(chunks).entrySet()) {
+            if (entry.getValue() == ForeignMap.INNER) {
+                inner.add(entry.getKey());
+                continue;
+            }
             CompoundTag chunk = new CompoundTag();
             chunk.putLong("key", entry.getKey());
             chunk.putIntArray("ground", ints(entry.getValue().ground()));
@@ -608,6 +869,7 @@ public final class ForeignChunks {
         CompoundTag tag = new CompoundTag();
         tag.putInt("format", 1);
         tag.put("chunks", list);
+        tag.putLongArray("inner", inner.stream().mapToLong(Long::longValue).toArray());
         tag.put("files", known);
         Files.createDirectories(snapshotFile.getParent());
         Path temporary = snapshotFile.resolveSibling("legacy.dat.tmp");

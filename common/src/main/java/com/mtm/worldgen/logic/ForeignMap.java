@@ -1,5 +1,7 @@
 package com.mtm.worldgen.logic;
 
+import com.mtm.worldgen.noise.Hashing;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,8 @@ public final class ForeignMap {
     /** A height meaning that a sample has no water. */
     public static final short NO_WATER = Short.MIN_VALUE;
     public static final ForeignMap EMPTY = new ForeignMap(Map.of(), new WorldgenSettings.Foreign());
+    /** A chunk with foreign chunks on all sides. Nothing blends toward it, so it needs no detail. */
+    public static final Chunk INNER = new Chunk(null, null, null, false);
 
     private static final int CHUNK = 16;
     /** Influence is computed on a lattice of this spacing and interpolated. */
@@ -43,17 +47,49 @@ public final class ForeignMap {
     private record Point(double distance, double ground, double water, double peak, String biome, boolean upgraded) {
     }
 
-    private final Map<Long, Chunk> chunks;
+    /**
+     * Open addressing over mixed keys. The hash of a Long is its two halves xored, so chunk keys collide all the way:
+     * side by side they fall on the same few thousand values, which makes the standard immutable map quadratic and
+     * leaves a world stuck at loading with a large map merged in.
+     */
+    private final long[] tableKeys;
+    private final Chunk[] tableChunks;
+    private final int size;
     private final WorldgenSettings.Foreign config;
     private final Map<Long, List<Edge>> buckets = new HashMap<>();
     private final Map<Long, Point> lattice = new ConcurrentHashMap<>();
     private final int bucketReach;
 
     public ForeignMap(Map<Long, Chunk> chunks, WorldgenSettings.Foreign config) {
-        this.chunks = Map.copyOf(chunks);
+        this.size = chunks.size();
+        int capacity = Integer.highestOneBit(Math.max(4, chunks.size()) * 2) * 2;
+        this.tableKeys = new long[capacity];
+        this.tableChunks = new Chunk[capacity];
+        chunks.forEach(this::insert);
         this.config = config;
         this.bucketReach = (int) Math.ceil(Math.max(config.maxWidth, config.upgradeMaxWidth) / BUCKET) + 1;
-        this.chunks.forEach(this::addEdges);
+        chunks.forEach(this::addEdges);
+    }
+
+    private void insert(long key, Chunk chunk) {
+        int slot = slot(key);
+        tableKeys[slot] = key;
+        tableChunks[slot] = chunk;
+    }
+
+    /** The slot of a key, or the empty one where it would go. */
+    private int slot(long key) {
+        int mask = tableKeys.length - 1;
+        int slot = (int) Hashing.mix(key) & mask;
+        while (tableChunks[slot] != null && tableKeys[slot] != key) {
+            slot = (slot + 1) & mask;
+        }
+        return slot;
+    }
+
+    /** A key for hash maps, whose Long hash would otherwise collide; the mix is one to one, so keys stay distinct. */
+    private static Long mixedKey(int x, int z) {
+        return Hashing.mix(key(x, z));
     }
 
     public static long key(int chunkX, int chunkZ) {
@@ -61,15 +97,27 @@ public final class ForeignMap {
     }
 
     public boolean isEmpty() {
-        return chunks.isEmpty();
+        return size == 0;
     }
 
+    /** The foreign chunk at a position, or null. */
+    public Chunk chunk(int chunkX, int chunkZ) {
+        return tableChunks[slot(key(chunkX, chunkZ))];
+    }
+
+    /** Every foreign chunk. */
     public Map<Long, Chunk> chunks() {
-        return chunks;
+        Map<Long, Chunk> all = new HashMap<>(size * 2);
+        for (int i = 0; i < tableChunks.length; i++) {
+            if (tableChunks[i] != null) {
+                all.put(tableKeys[i], tableChunks[i]);
+            }
+        }
+        return all;
     }
 
     public boolean contains(int chunkX, int chunkZ) {
-        return chunks.containsKey(key(chunkX, chunkZ));
+        return chunk(chunkX, chunkZ) != null;
     }
 
     /** Whether a position lies in a foreign chunk. */
@@ -78,6 +126,9 @@ public final class ForeignMap {
     }
 
     private void addEdges(long key, Chunk chunk) {
+        if (chunk == INNER) {
+            return;
+        }
         int chunkX = (int) (key >> 32);
         int chunkZ = (int) key;
         int last = SAMPLE_OFFSETS.length - 1;
@@ -91,7 +142,7 @@ public final class ForeignMap {
                     double x = chunkX * CHUNK + (i == last ? CHUNK : SAMPLE_OFFSETS[i]);
                     double z = chunkZ * CHUNK + (j == last ? CHUNK : SAMPLE_OFFSETS[j]);
                     double water = chunk.water[index] == NO_WATER ? Double.NaN : chunk.water[index];
-                    buckets.computeIfAbsent(key(Math.floorDiv((int) x, BUCKET), Math.floorDiv((int) z, BUCKET)), k -> new ArrayList<>())
+                    buckets.computeIfAbsent(mixedKey(Math.floorDiv((int) x, BUCKET), Math.floorDiv((int) z, BUCKET)), k -> new ArrayList<>())
                             .add(new Edge(x, z, chunk.ground[index], water, chunk.biome, chunk.upgraded));
                 }
             }
@@ -134,7 +185,7 @@ public final class ForeignMap {
     }
 
     private Point point(int cellX, int cellZ) {
-        return lattice.computeIfAbsent(key(cellX, cellZ), key -> computePoint(cellX * LATTICE, cellZ * LATTICE));
+        return lattice.computeIfAbsent(mixedKey(cellX, cellZ), key -> computePoint(cellX * LATTICE, cellZ * LATTICE));
     }
 
     /**
@@ -151,7 +202,7 @@ public final class ForeignMap {
         List<Edge> near = new ArrayList<>();
         for (int dx = -bucketReach; dx <= bucketReach; dx++) {
             for (int dz = -bucketReach; dz <= bucketReach; dz++) {
-                List<Edge> edges = buckets.get(key(bucketX + dx, bucketZ + dz));
+                List<Edge> edges = buckets.get(mixedKey(bucketX + dx, bucketZ + dz));
                 if (edges == null) {
                     continue;
                 }

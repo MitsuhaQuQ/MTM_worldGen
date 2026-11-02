@@ -395,14 +395,14 @@ public final class MtmGameTests {
                 storage.write(pos, chunk);
                 storage.flushWorker();
             }
-            ForeignChunks.run(level, logic, root);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
             assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk not in the snapshot");
-            ForeignMap.Chunk found = logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z));
+            ForeignMap.Chunk found = logic.foreign().chunk(pos.x, pos.z);
             // Only Fabric runs its tests in a superflat world; a normal map is not raised
             boolean flat = level.getChunkSource().getGenerator() instanceof FlatLevelSource;
             assertTrue(!flat || Math.abs(found.ground()[0] - SETTINGS.foreign.flatGround) <= 8, "ground at " + found.ground()[0]);
             long before = Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis();
-            ForeignChunks.run(level, logic, root);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
             assertTrue(before == Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis(), "fitted twice");
             try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
                 CompoundTag chunk = storage.read(pos).join().orElseThrow();
@@ -444,25 +444,65 @@ public final class MtmGameTests {
             other.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
             other.putLong(ForeignChunks.WORLD_TAG, logic.worldId() + 1);
             writeChunk(level, regions, pos, other);
-            ForeignChunks.run(level, logic, root);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
             assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk of another MTM world taken for our own");
             CompoundTag fitted = readChunk(level, regions, pos);
             assertTrue(fitted.getLong(ForeignChunks.FITTED_TAG) == logic.worldId(), "fitted chunk not marked");
             assertTrue(!fitted.contains(ForeignChunks.WORLD_TAG), "tags of the other world left");
 
-            short before = logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z)).ground()[0];
+            short before = logic.foreign().chunk(pos.x, pos.z).ground()[0];
             CompoundTag again = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
             again.remove(ForeignChunks.VERSION_TAG);
             again.remove(ForeignChunks.WORLD_TAG);
             writeChunk(level, regions, pos, again);
-            ForeignChunks.run(level, logic, root);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
             CompoundTag merged = readChunk(level, regions, pos);
             assertTrue(merged.getLong(ForeignChunks.FITTED_TAG) == logic.worldId(), "new map at a fitted place not fitted");
-            assertTrue(logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z)).ground()[0] == before, "new map not in the snapshot");
+            assertTrue(logic.foreign().chunk(pos.x, pos.z).ground()[0] == before, "new map not in the snapshot");
         } catch (IOException e) {
             throw new IllegalStateException(e);
         } finally {
             TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
+    /**
+     * Fills below a map with real MTM terrain, while the server thread waits for it as it does when a world loads.
+     * Anything in the fill that reads through the server thread hangs here instead of in a world.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void foreignChunkIsFilledWithoutTheServerThread(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        World world = world(helper);
+        TerrainLogic logic = TerrainLogic.forWorld(SEED, SETTINGS);
+        ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
+        try {
+            Path root = Files.createTempDirectory("mtm_foreign");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            CompoundTag chunk = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+            chunk.remove(ForeignChunks.VERSION_TAG);
+            chunk.remove(ForeignChunks.WORLD_TAG);
+            ListTag sections = chunk.getList("sections", Tag.TAG_COMPOUND);
+            for (int i = sections.size() - 1; i >= 0; i--) {
+                if (sections.getCompound(i).getByte("Y") < 0) {
+                    sections.remove(i);
+                }
+            }
+            writeChunk(level, regions, pos, chunk);
+            ForeignChunks.run(level, logic, root, world.generator(), world.random());
+            CompoundTag fitted = readChunk(level, regions, pos);
+            ListTag filled = fitted.getList("sections", Tag.TAG_COMPOUND);
+            boolean bottom = false;
+            for (int i = 0; i < filled.size(); i++) {
+                bottom |= filled.getCompound(i).getByte("Y") == -4;
+            }
+            assertTrue(bottom, "nothing generated below the map");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            logic.setForeign(ForeignMap.EMPTY);
         }
         helper.succeed();
     }
