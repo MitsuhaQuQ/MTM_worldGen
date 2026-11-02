@@ -106,7 +106,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 其他未开始或未完成的部分：
 - 逻辑数据存储（存档文件、算法版本融合）未做，逻辑结果目前只在内存缓存
 - 与既有存档衔接（500 格过渡带）未做
-- 地形细节已做岩层、断崖、孤峰、海蚀柱；悬垂、岩拱未做
+- 地形细节已做岩层、断崖、孤峰、海蚀柱、悬垂；岩拱未做
 - 陆地岩柱地貌**暂缓，以后再考虑实现**。试过三版，进游戏都显得突兀，已全部移除：零散单根很假；成片圆柱像人造物且脚下是平地；台地被细胞状沟壑切开后（沟壑沿扭曲的细胞边界，边缘只剩细柱，顶面齐平）形状接近目标，但整体仍突兀。重做时注意：不能立在河漫滩上；含水层会灌进紧贴岩柱的空隙，岩柱不能计入预估地表；预估地表必须走列缓存，否则基准会涨到原版的 150%
 - 测试章节列出的旧区块衔接、算法版本融合、不同 worldgen 线程数的区块级确定性测试未做
 - 放水（`MtmWater`）和雕刻保护（`MtmCarving`）没有自动测试，GameTest 不生成区块，只能进游戏检查
@@ -118,7 +118,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 寒冷地区湖面曾出现区块大小的方格，未查明，也未确认是否已消失
 - `stony_peaks` 不再生成，与"原版群系全部保留"冲突，待决定放在哪里
 
-下一步：悬垂与岩拱。
+下一步：岩拱（可选）。
 
 ## 地形描述
 
@@ -151,6 +151,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - 海蚀柱（`seaStacks` 组，`SeaStackLayer`）零散立在岩岸和海崖外的近海，在塑形完成的地面上才叠加，全身裸岩，不计入原版的预估地表（`preliminaryHeight`）
   - 山脉内部有两种形态，由低频风格场决定并平滑过渡（`styleWavelength`）：火成岩型陡峭、山脊尖、纹理强、窄而高；风蚀型平缓、圆润、宽而矮
   - 火成岩山体有零散的断崖（`cliffStep`、`cliffWavelength`、`cliffLow`），把坡面收拢成平台和陡壁，每级约 65 格，成短片分布，片与片的高度层错开；不要做成连续的带，断崖按高度分级，天然沿等高线绕山成环；不受斜率限制，靠近河流时随纹理淡出
+  - 悬垂（`overhangs` 组，`OverhangLayer`）成片出现在高海拔陡壁上：方块按所在高度沿坡向上或向下取地表高度（`solidHeight`），岩壁因此外凸或内凹，最多 `reach` 格；只有地形密度使用它，`surfaceHeight` 仍是高度图，水系、群系、洞穴都不受影响；靠近河流随纹理淡出，湖区不生成；每列缓存沿坡的地表剖面，不要在密度里逐方块求地表；`highestSolid` 让 `highestBlockInChunk` 保持真实上界；噪声单元高 8 格，`verticalWavelength` 不要低于约 24
   - 岩层只露在陡壁上（`strataSlope`，默认 160%），约 6 格一层，火成岩山体用石头、安山岩、凝灰岩，风蚀山体用石头、闪长岩、安山岩；不要让岩层上缓坡，薄层在缓坡上会摊成很宽的同心色环
     - 目标：陆地中高于 300 的约 5–10%，出生点数千格内能找到高山
   - 山地格约 1536 格
@@ -245,7 +246,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 ## 配置
 
 - 配置文件 `config/mtm_worldgen.json`，格式为 JSON；不存在时自动生成默认值，缺失的字段使用默认值，非法值在创建世界时直接报错
-- 所有地形参数都在配置里（`WorldgenSettings`，按 general、slopes、continents、mountains、plains、plateaus、hills、isolated、seaStacks、surface、beaches、islands、spawn、climate、rivers、biomes 分组）；新增地形参数时一律加入配置，不写死在代码里
+- 所有地形参数都在配置里（`WorldgenSettings`，按 general、slopes、continents、mountains、plains、plateaus、hills、isolated、seaStacks、overhangs、surface、beaches、islands、spawn、climate、rivers、biomes 分组）；新增地形参数时一律加入配置，不写死在代码里
   - 只有算法内部常量留在代码：哈希盐值、搜索窗口、统计采样、与原版公式绑定的阈值
 - 配置在世界创建时随密度函数写入 level.dat 并锁定，之后修改配置文件不影响已有世界（避免接缝）
 - 1.19 起种子只存在于 `RandomState`，生成器和群系源都不再持有：`RandomStateMixin` 在创建时把种子传给密度函数，其余地方从 `RandomState` 或气候采样器取 `TerrainLogic`

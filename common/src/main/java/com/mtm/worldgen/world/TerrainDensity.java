@@ -64,7 +64,7 @@ public final class TerrainDensity implements DensityFunction.SimpleFunction {
             return Mth.clamp(PRELIMINARY_SURFACE_THRESHOLD + (preliminary - PRELIMINARY_SURFACE_DEPTH) / FALLOFF,
                     -INITIAL_LIMIT, INITIAL_LIMIT);
         }
-        double depth = terrain.surfaceHeight(context.blockX(), context.blockZ()) - context.blockY();
+        double depth = terrain.solidHeight(context.blockX(), context.blockY(), context.blockZ()) - context.blockY();
         return Mth.clamp(depth / FALLOFF, -1.0, 1.0);
     }
 

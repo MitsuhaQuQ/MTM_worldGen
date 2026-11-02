@@ -20,6 +20,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     private static final double GRADE_STEP = 2.0;
+    private static final double[] NO_OVERHANG = new double[0];
 
     private static final int CHUNK_SIZE = 16;
     /** Horizontal spacing of the corners the terrain density is evaluated at. */
@@ -41,6 +42,7 @@ public final class TerrainLogic {
     private final ClimateLayer climate;
     private final CoastLayer coasts;
     private final BiomeLayer biomes;
+    private final OverhangLayer overhangs;
     private final Fbm beachWidth;
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
@@ -63,6 +65,7 @@ public final class TerrainLogic {
         this.climate = new ClimateLayer(seed, settings);
         this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
+        this.overhangs = new OverhangLayer(seed, settings);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
         this.stacks = new SeaStackLayer(seed, settings, this);
@@ -133,7 +136,7 @@ public final class TerrainLogic {
         double highest = settings.general.seaLevel;
         for (int dx = 0; dx <= CHUNK_SIZE; dx += NOISE_CELL_WIDTH) {
             for (int dz = 0; dz <= CHUNK_SIZE; dz += NOISE_CELL_WIDTH) {
-                highest = Math.max(highest, sampleSurfaceHeight(chunkX * CHUNK_SIZE + dx, chunkZ * CHUNK_SIZE + dz));
+                highest = Math.max(highest, highestSolid(chunkX * CHUNK_SIZE + dx, chunkZ * CHUNK_SIZE + dz));
             }
         }
         return (int) Math.ceil(highest) + settings.general.structureTerrainMargin;
@@ -142,6 +145,52 @@ public final class TerrainLogic {
     /** Surface height at a block column, memoized per thread for repeated queries of the same column. */
     public double surfaceHeight(int x, int z) {
         return columns.get().column(this, x, z).height;
+    }
+
+    /**
+     * Height the density of a block compares against: the surface, moved along the slope on faces with overhangs.
+     * {@link #surfaceHeight} remains the height map, and this stays out of everything but the blocks themselves.
+     */
+    public double solidHeight(int x, int y, int z) {
+        return columns.get().column(this, x, z).solidHeight(y);
+    }
+
+    /** Highest value of {@link #solidHeight} in a block column. */
+    public double highestSolid(int x, int z) {
+        return columns.get().column(this, x, z).highestSolid();
+    }
+
+    /** Whether a block column has overhangs. */
+    public boolean hasOverhangs(int x, int z) {
+        return columns.get().column(this, x, z).overhangProfile() != NO_OVERHANG;
+    }
+
+    /**
+     * Surface heights along the slope through a column, downhill first, or {@link #NO_OVERHANG}. Keeping them spares
+     * density, which asks for many heights in a column, from computing the surface each time. Water rules them out:
+     * valley walls shape the land near it, and the ground must not leave those to stand over a river.
+     */
+    private double[] sampleOverhangProfile(int x, int z, double height) {
+        double patch = overhangs.patch(x, z, height);
+        if (patch <= 0.0) {
+            return NO_OVERHANG;
+        }
+        double dx = sampleSurfaceHeight(x + GRADE_STEP, z) - height;
+        double dz = sampleSurfaceHeight(x, z + GRADE_STEP) - height;
+        double rise = Math.hypot(dx, dz);
+        RiverRegion.Hit river = sampleRiver(x, z);
+        double reach = settings.overhangs.reach * patch * overhangs.slope(rise / GRADE_STEP)
+                * (river == null ? 1.0 : river.texture());
+        if (reach < 1.0 || !Double.isNaN(sampleLakeLevel(x, z))) {
+            return NO_OVERHANG;
+        }
+        double[] profile = new double[OverhangLayer.PROFILE_SIZE];
+        int middle = profile.length / 2;
+        for (int i = 0; i < profile.length; i++) {
+            double offset = reach * (i - middle) / middle;
+            profile[i] = i == middle ? height : sampleSurfaceHeight(x + dx / rise * offset, z + dz / rise * offset);
+        }
+        return profile;
     }
 
     /** Estimated distance to the coastline at a block column, memoized per thread like {@link #surfaceHeight}. */
@@ -769,6 +818,8 @@ public final class TerrainLogic {
         private CoastLayer.Type coastType;
         private double strataOffset = Double.NaN;
         private int igneous = -1;
+        private double[] overhangProfile;
+        private double highestSolid = Double.NaN;
 
         Column(TerrainLogic owner, int x, int z) {
             this.owner = owner;
@@ -776,6 +827,33 @@ public final class TerrainLogic {
             this.z = z;
             this.shaped = owner.sampleShapedLand(x, z);
             this.height = owner.stacks.raise(x, z, shaped);
+        }
+
+        double[] overhangProfile() {
+            if (overhangProfile == null) {
+                overhangProfile = owner.sampleOverhangProfile(x, z, height);
+            }
+            return overhangProfile;
+        }
+
+        double highestSolid() {
+            if (Double.isNaN(highestSolid)) {
+                highestSolid = height;
+                for (double sample : overhangProfile()) {
+                    highestSolid = Math.max(highestSolid, sample);
+                }
+            }
+            return highestSolid;
+        }
+
+        double solidHeight(int y) {
+            double[] profile = overhangProfile();
+            if (profile == NO_OVERHANG || y > highestSolid()) {
+                return height;
+            }
+            double position = (owner.overhangs.shift(x, y, z) + 1.0) * 0.5 * (profile.length - 1);
+            int index = Math.min((int) position, profile.length - 2);
+            return profile[index] + (profile[index + 1] - profile[index]) * (position - index);
         }
 
         double coastDistance() {

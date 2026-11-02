@@ -21,6 +21,14 @@ public final class ValueNoise {
         return a + (b - a) * fz;
     }
 
+    /** 3D value noise: two layers of the 2D noise, blended between integer heights. */
+    public static double sample(long seed, double x, double y, double z) {
+        int y0 = (int) Math.floor(y);
+        double below = sample(Hashing.derive(seed, y0), x, z);
+        double above = sample(Hashing.derive(seed, y0 + 1L), x, z);
+        return below + (above - below) * smooth(y - y0);
+    }
+
     private static double lattice(long seed, int x, int z) {
         return Hashing.unit(Hashing.hash(seed, x, z)) * 2.0 - 1.0;
     }

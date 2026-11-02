@@ -42,6 +42,7 @@ public final class WorldgenSettings {
     public final Plains plains = new Plains();
     public final Isolated isolated = new Isolated();
     public final SeaStacks seaStacks = new SeaStacks();
+    public final Overhangs overhangs = new Overhangs();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -238,6 +239,26 @@ public final class WorldgenSettings {
         /** Wander of the outline, as a share of the radius, and its wavelength. */
         public double warp = 0.3;
         public double warpWavelength = 48.0;
+    }
+
+    /** Overhangs on steep faces. The height is on the 300 block scale, other sizes in blocks. */
+    public static final class Overhangs {
+        /** How far rock juts out or recedes at most. */
+        public double reach = 14.0;
+        /** Height above the sea they start at. */
+        public double minHeight = 90.0;
+        /** Grades, in percent, between which they grow to full reach. */
+        public double slopeLow = 130.0;
+        public double slopeHigh = 200.0;
+        /** They come in patches of this size, where the patch noise lies between these. */
+        public double patchWavelength = 384.0;
+        public double patchLow = 0.05;
+        public double patchHigh = 0.25;
+        /** Size of the ledges along the wall and up it. Noise cells are 8 blocks tall, so go no lower than about 24. */
+        public double wavelength = 56.0;
+        public double verticalWavelength = 30.0;
+        /** Above 1, more of the rock sits at full reach, with sharper edges. */
+        public double sharpness = 2.5;
     }
 
     public static final class Hills {

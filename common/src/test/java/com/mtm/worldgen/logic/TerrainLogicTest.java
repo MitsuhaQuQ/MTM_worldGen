@@ -138,6 +138,33 @@ class TerrainLogicTest {
         assertTrue(max < 2.0 * limit, "max grade " + max + " suggests a discontinuity");
     }
 
+    /** Overhangs stay rare, leave the height map alone, and never pass the height that bounds chunk filling. */
+    @Test
+    void overhangsStayBoundedAndRare() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        Random random = new Random(11);
+        int columns = 0;
+        int overhangs = 0;
+        for (int i = 0; i < 60000; i++) {
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
+            double surface = logic.surfaceHeight(x, z);
+            columns += surface >= SETTINGS.general.seaLevel ? 1 : 0;
+            assertEquals(logic.sampleSurfaceHeight(x, z), surface);
+            if (!logic.hasOverhangs(x, z)) {
+                assertEquals(surface, logic.solidHeight(x, 200, z));
+                continue;
+            }
+            overhangs++;
+            double top = logic.highestSolid(x, z);
+            for (int y = (int) surface - 60; y <= top + 8; y += 4) {
+                assertTrue(logic.solidHeight(x, y, z) <= top, "overhang above its bound at " + x + "," + z);
+            }
+        }
+        assertTrue(overhangs > 0, "no overhangs");
+        assertTrue(overhangs < 0.03 * columns, overhangs + " of " + columns + " land columns have overhangs");
+    }
+
     @Test
     void sameSeedGivesSameSurface() {
         TerrainLogic a = new TerrainLogic(SEED, SETTINGS);
