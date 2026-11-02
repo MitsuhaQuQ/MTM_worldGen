@@ -224,6 +224,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 0 以上部分，原版矿物高度区间按系数 k = 地表最大高度 ÷ 256 放大（750 时约 2.93，由配置自动计算）；单位体积密度与原版一致，总量随 k 增加
 - 0 以下与原版相同
 - 矿物开关 `general.ores`（默认开，创建世界时锁定）：关闭后不放矿物特征（`HeightRangePlacementMixin` 返回空位置），大型矿脉也关闭（`oreVeinsEnabled`）
+- 地下掉落性方块开关 `general.undergroundFallingBlocks`（默认开）：关闭后不放目标为掉落性方块的矿物特征（原版只有 `ore_gravel`，按方块类型判断，不写死名字）。水底的 `disk_sand`、`disk_gravel` 只铺在表面，地表规则铺的沙子下面是砂岩、离洞穴至少 12 格，都不受影响
 - 实现：矿物的 `HeightRangePlacement` 先按原版高度范围（-64 ~ 320）取样，否则 `top` 锚点会先被世界高度拉伸一次；0 以上的高度再展开成 k 格并放 k 次（`OreHeights`），只影响矿物特征
 
 ### 结构

@@ -78,6 +78,11 @@ public final class WorldgenSettings {
         public boolean caves = true;
         /** Whether the world has ores: vanilla's ore features and its large ore veins. Off, rock holds none. */
         public boolean ores = true;
+        /**
+         * Whether ore features may place blocks that fall, such as gravel and sand, in the rock. Off, none are placed:
+         * caves, cliffs and overhangs would otherwise leave them hanging, and they come down when touched.
+         */
+        public boolean undergroundFallingBlocks = true;
         /** Caves and ravines stay at least this many blocks below the surface. */
         public int caveSurfaceMargin = 12;
         /** Noise caves fade in over this many blocks below that margin. */

@@ -8,6 +8,9 @@ import net.minecraft.world.level.levelgen.WorldGenerationContext;
 import net.minecraft.world.level.levelgen.feature.Feature;
 import net.minecraft.world.level.levelgen.feature.OreFeature;
 import net.minecraft.world.level.levelgen.feature.ScatteredOreFeature;
+import net.minecraft.world.level.levelgen.feature.configurations.OreConfiguration;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.levelgen.heightproviders.HeightProvider;
 import net.minecraft.world.level.levelgen.placement.PlacementContext;
 
@@ -28,6 +31,23 @@ public final class MtmOres {
             Feature<?> feature = placed.feature().value().feature();
             return feature instanceof OreFeature || feature instanceof ScatteredOreFeature;
         }).orElse(false);
+    }
+
+    /** Whether a placement belongs to an ore that places blocks that fall, such as gravel. */
+    public static boolean placesFallingBlocks(PlacementContext context) {
+        return context.topFeature().map(MtmOres::placesFallingBlocks).orElse(false);
+    }
+
+    public static boolean placesFallingBlocks(PlacedFeature placed) {
+        if (!(placed.feature().value().config() instanceof OreConfiguration ore)) {
+            return false;
+        }
+        for (OreConfiguration.TargetBlockState target : ore.targetStates) {
+            if (target.state.getBlock() instanceof FallingBlock) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static Stream<BlockPos> positions(HeightProvider height, PlacementContext context, RandomSource random,

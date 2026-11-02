@@ -1,6 +1,7 @@
 package com.mtm.worldgen.mixin;
 
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.MtmOres;
 import net.minecraft.core.BlockPos;
@@ -30,8 +31,9 @@ abstract class HeightRangePlacementMixin {
         if (MtmOres.isOre(context)) {
             TerrainLogic logic = MtmGenerators.terrainLogic(context.getLevel().getLevel());
             if (logic != null) {
-                cir.setReturnValue(logic.settings().general.ores
-                        ? MtmOres.positions(height, context, random, pos, logic.settings().oreHeightScale()) : Stream.empty());
+                WorldgenSettings.General general = logic.settings().general;
+                boolean placed = general.ores && (general.undergroundFallingBlocks || !MtmOres.placesFallingBlocks(context));
+                cir.setReturnValue(placed ? MtmOres.positions(height, context, random, pos, logic.settings().oreHeightScale()) : Stream.empty());
             }
         }
     }

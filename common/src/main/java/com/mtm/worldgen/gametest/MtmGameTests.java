@@ -10,6 +10,7 @@ import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.world.ForeignChunks;
 import com.mtm.worldgen.world.MtmGenerators;
+import com.mtm.worldgen.world.MtmOres;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
@@ -17,6 +18,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.data.worldgen.placement.OrePlacements;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -52,6 +54,7 @@ import net.minecraft.world.level.levelgen.NoiseSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -546,6 +549,16 @@ public final class MtmGameTests {
         World without = world(helper, WorldgenSettings.fromJson("{\"general\": {\"ores\": false}}"));
         assertTrue(((NoiseBasedChunkGenerator) with.generator()).generatorSettings().value().oreVeinsEnabled(), "ore veins off by default");
         assertTrue(!((NoiseBasedChunkGenerator) without.generator()).generatorSettings().value().oreVeinsEnabled(), "ore veins still on");
+        helper.succeed();
+    }
+
+    /** The switch for falling blocks underground finds vanilla's gravel blobs, and nothing that does not fall. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void fallingOresAreFound(GameTestHelper helper) {
+        Registry<PlacedFeature> placed = helper.getLevel().registryAccess().registryOrThrow(Registries.PLACED_FEATURE);
+        assertTrue(MtmOres.placesFallingBlocks(placed.getOrThrow(OrePlacements.ORE_GRAVEL)), "gravel blobs not found");
+        assertTrue(!MtmOres.placesFallingBlocks(placed.getOrThrow(OrePlacements.ORE_IRON_UPPER)), "iron taken for a falling block");
+        assertTrue(!MtmOres.placesFallingBlocks(placed.getOrThrow(OrePlacements.ORE_DIRT)), "dirt taken for a falling block");
         helper.succeed();
     }
 
