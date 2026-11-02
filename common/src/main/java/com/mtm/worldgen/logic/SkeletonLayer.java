@@ -29,6 +29,7 @@ import java.util.Map;
  */
 final class SkeletonLayer {
     private static final long ZONE_SALT = 0x4F524F47454EL;
+    private static final long GREAT_PLAINS_SALT = 0x475245415450L;
     private static final long SITE_SALT = 0x53495445L;
     private static final long ORIENTATION_SALT = 0x4F5249454E54L;
     private static final long RIDGE_SALT = 0x5249444745L;
@@ -38,6 +39,8 @@ final class SkeletonLayer {
     private static final long PLATEAU_HEIGHT_SALT = 0x504C4854L;
     /** Range of the edge noise over which a plateau edge turns from gentle to steep. */
     private static final double EDGE_BLEND = 0.08;
+    /** How much wider than usual the statistics grid is for fields as slow as the great plains. */
+    private static final int GREAT_STATS_SPREAD = 3;
     private static final long HILLS_SALT = 0x48494C4CL;
     private static final long ISOLATED_SALT = 0x49534F4CL;
     private static final long STYLE_SALT = 0x5354594C45L;
@@ -118,6 +121,9 @@ final class SkeletonLayer {
     private final double gentleHigh;
     private final double steepEdge;
     private final double plainsLow;
+    private final Fbm greatPlains;
+    private final double greatLow;
+    private final double greatHigh;
     private final double siteSpacing;
     private final double isolatedSpacing;
     private final double plainsHigh;
@@ -157,7 +163,14 @@ final class SkeletonLayer {
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
         this.halfHeightU = findHalfHeightU();
 
-        NoiseStats zoneStats = new NoiseStats(zone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
+        WorldgenSettings.Plains plains = settings.plains;
+        this.greatPlains = new Fbm(Hashing.derive(seed, GREAT_PLAINS_SALT), 2, plains.greatWavelength * size.terrainZones);
+        // The field is slow, so its statistics need a wider grid to see enough of it
+        NoiseStats greatStats = new NoiseStats(greatPlains::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING * GREAT_STATS_SPREAD);
+        this.greatLow = greatStats.quantile(1.0 - plains.greatCoverage - plains.greatFade / 2.0);
+        this.greatHigh = greatStats.quantile(1.0 - plains.greatCoverage + plains.greatFade / 2.0);
+        // Thresholds come from the zones as the great plains leave them, which keeps the share of each tier
+        NoiseStats zoneStats = new NoiseStats(this::zoneValue, STATS_SAMPLES_PER_AXIS, STATS_SPACING * GREAT_STATS_SPREAD);
         this.zoneLow = zoneStats.quantile(1.0 - m.zoneCoverage - m.zoneFade);
         this.zoneHigh = zoneStats.quantile(1.0 - m.zoneCoverage + m.zoneFade);
         this.plainsLow = zoneStats.quantile(settings.plains.coverage - settings.plains.fade / 2.0);
@@ -272,12 +285,18 @@ final class SkeletonLayer {
      * is held down to the middle of the hills, which turns mountains into hills and leaves plains as they are.
      */
     private double tier(double x, double z, double baseAboveSea) {
-        double value = zone.sample(x, z);
+        double value = zoneValue(x, z);
         if (value <= hillsMiddle) {
             return value;
         }
         double inland = smoothstep(0.0, m.coastBand, continents.inlandDistance(baseAboveSea));
         return hillsMiddle + inland * (value - hillsMiddle);
+    }
+
+    /** The terrain zone field, lowered toward plains where great plains lie. */
+    private double zoneValue(double x, double z) {
+        double great = smoothstep(greatLow, greatHigh, greatPlains.sample(x, z));
+        return zone.sample(x, z) - settings.plains.greatStrength * great;
     }
 
     /** Height of the isolated peaks and dome hills around a position. */

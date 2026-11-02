@@ -151,8 +151,8 @@ class TerrainLogicTest {
         int columns = 0;
         int overhangs = 0;
         for (int i = 0; i < 60000; i++) {
-            int x = random.nextInt(16000) - 8000;
-            int z = random.nextInt(16000) - 8000;
+            int x = random.nextInt(30000) - 15000;
+            int z = random.nextInt(30000) - 15000;
             double surface = logic.surfaceHeight(x, z);
             columns += surface >= SETTINGS.general.seaLevel ? 1 : 0;
             assertEquals(logic.sampleSurfaceHeight(x, z), surface);
@@ -245,9 +245,9 @@ class TerrainLogicTest {
         short[] water = new short[ForeignMap.SAMPLES];
         Arrays.fill(heights, ground);
         Arrays.fill(water, ForeignMap.NO_WATER);
-        for (int i = 0; i < 4000 && tried < 12; i++) {
-            int x = random.nextInt(8000) - 4000;
-            int z = random.nextInt(8000) - 4000;
+        for (int i = 0; i < 8000 && tried < 12; i++) {
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
             RiverRegion.Hit river = logic.sampleRiver(x, z);
             if (river == null || river.texture() > 0.5 || river.distance() < 2.0 * river.halfWidth(SETTINGS.rivers.minChannelWidth)
                     || logic.sampleSurfaceHeight(x, z) < SETTINGS.general.seaLevel) {
@@ -443,7 +443,8 @@ class TerrainLogicTest {
                 String biome = logic.sampleBiome(x, z);
                 double height = logic.sampleSurfaceHeight(x, z);
                 if (height < sea) {
-                    assertTrue(biome.contains("ocean"), biome + " under the sea at " + x + "," + z);
+                    // Deep river beds can lie below the sea, and they are rivers
+                    assertTrue(biome.contains("ocean") || biome.contains("river"), biome + " under the sea at " + x + "," + z);
                 } else {
                     assertTrue(!biome.contains("ocean"), biome + " on land at " + x + "," + z);
                 }

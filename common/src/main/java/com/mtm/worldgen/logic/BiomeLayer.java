@@ -43,14 +43,15 @@ final class BiomeLayer {
         double sea = settings.general.seaLevel - 1;
         boolean dry = humidity < config.dryHumidity && !zoneBorder;
         WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
+        // A river comes first: a deep river bed can lie below the sea far inland, and it is no ocean
+        if (river && (height >= sea || coastDistance > config.beachDepth)) {
+            return pick(biomes.river, x, z);
+        }
         if (height < sea) {
             return pick(sea - height > config.deepOceanDepth ? biomes.deepOcean : biomes.ocean, x, z);
         }
         if (island == ContinentLayer.IslandKind.MUSHROOM) {
             return config.mushroomIsland;
-        }
-        if (river) {
-            return pick(biomes.river, x, z);
         }
         if (coastDistance < config.beachDepth && height < sea + settings.beaches.maxHeight) {
             return pick(rockyCoast ? biomes.rockyShore : biomes.beach, x, z);

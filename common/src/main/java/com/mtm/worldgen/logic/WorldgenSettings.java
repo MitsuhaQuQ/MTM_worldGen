@@ -220,6 +220,15 @@ public final class WorldgenSettings {
         public double fade = 0.06;
         /** Share of hills and plateaus that remains on plains. */
         public double reliefShare = 0.2;
+        /**
+         * Great plains: a slow field that lowers the terrain zones where it lies, so plains there join into expanses many
+         * kilometers wide. The zone shares stay as they are, so they come out of small plains elsewhere. Coverage is the
+         * share of the world under the field, strength how far it lowers the zones, in zone noise units.
+         */
+        public double greatWavelength = 40000.0;
+        public double greatCoverage = 0.22;
+        public double greatFade = 0.1;
+        public double greatStrength = 1.0;
     }
 
     /**
