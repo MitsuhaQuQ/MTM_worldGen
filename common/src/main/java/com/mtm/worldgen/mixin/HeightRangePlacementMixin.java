@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.stream.Stream;
 
-/** Spreads ores over the taller rock of MTM worlds. */
+/** Spreads ores over the taller rock of MTM worlds, or leaves them out of worlds without ores. */
 @Mixin(HeightRangePlacement.class)
 abstract class HeightRangePlacementMixin {
     @Shadow
@@ -30,7 +30,8 @@ abstract class HeightRangePlacementMixin {
         if (MtmOres.isOre(context)) {
             TerrainLogic logic = MtmGenerators.terrainLogic(context.getLevel().getLevel());
             if (logic != null) {
-                cir.setReturnValue(MtmOres.positions(height, context, random, pos, logic.settings().oreHeightScale()));
+                cir.setReturnValue(logic.settings().general.ores
+                        ? MtmOres.positions(height, context, random, pos, logic.settings().oreHeightScale()) : Stream.empty());
             }
         }
     }

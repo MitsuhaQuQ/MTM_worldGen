@@ -44,13 +44,19 @@ public abstract class NoiseBasedChunkGeneratorMixin {
         TerrainCondition.end();
     }
 
-    @Inject(method = "applyCarvers", at = @At("HEAD"))
+    @Inject(method = "applyCarvers", at = @At("HEAD"), cancellable = true)
     private void mtm_worldgen$beginCarving(WorldGenRegion region, long seed, RandomState random, BiomeManager biomes,
                                            StructureManager structures, ChunkAccess chunk, GenerationStep.Carving step, CallbackInfo ci) {
         TerrainLogic logic = MtmGenerators.terrainLogic(random);
-        if (logic != null) {
-            MtmCarving.begin(logic);
+        if (logic == null) {
+            return;
         }
+        // A world without caves skips carving altogether, rather than turning every carved block down
+        if (!logic.settings().general.caves) {
+            ci.cancel();
+            return;
+        }
+        MtmCarving.begin(logic);
     }
 
     @Inject(method = "applyCarvers", at = @At("RETURN"))

@@ -327,9 +327,13 @@ public final class MtmGameTests {
     }
 
     private static World world(GameTestHelper helper) {
+        return world(helper, SETTINGS);
+    }
+
+    private static World world(GameTestHelper helper, WorldgenSettings settings) {
         RegistryAccess access = helper.getLevel().registryAccess();
         ChunkGenerator generator = MtmGenerators.create(access,
-                access.registryOrThrow(Registries.NOISE_SETTINGS).getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD), SETTINGS);
+                access.registryOrThrow(Registries.NOISE_SETTINGS).getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD), settings);
         return new World(generator, MtmGenerators.randomState(access, generator, SEED));
     }
 
@@ -532,6 +536,37 @@ public final class MtmGameTests {
         } finally {
             TerrainLogic.forget(seed, SETTINGS);
         }
+        helper.succeed();
+    }
+
+    /** With ores turned off, the generator places no ore veins; ore features are left out where they are placed. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void oresCanBeTurnedOff(GameTestHelper helper) {
+        World with = world(helper);
+        World without = world(helper, WorldgenSettings.fromJson("{\"general\": {\"ores\": false}}"));
+        assertTrue(((NoiseBasedChunkGenerator) with.generator()).generatorSettings().value().oreVeinsEnabled(), "ore veins off by default");
+        assertTrue(!((NoiseBasedChunkGenerator) without.generator()).generatorSettings().value().oreVeinsEnabled(), "ore veins still on");
+        helper.succeed();
+    }
+
+    /** With caves turned off, the ground is solid all the way down, and terrain above it stays as it was. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public void cavesCanBeTurnedOff(GameTestHelper helper) {
+        WorldgenSettings solid = WorldgenSettings.fromJson("{\"general\": {\"caves\": false}}");
+        World plain = world(helper);
+        World closed = world(helper, solid);
+        int open = 0;
+        for (int[] p : samplePoints()) {
+            int surface = (int) Math.floor(TerrainLogic.forWorld(SEED, SETTINGS).surfaceHeight(p[0], p[1]));
+            NoiseColumn caves = plain.column(p[0], p[1]);
+            NoiseColumn none = closed.column(p[0], p[1]);
+            for (int y = MTM_HEIGHT.getMinBuildHeight() + 8; y < surface - 16; y++) {
+                open += caves.getBlock(y).isAir() ? 1 : 0;
+                assertTrue(!none.getBlock(y).isAir(), "cave at " + p[0] + "," + y + "," + p[1] + " with caves off");
+            }
+            assertTrue(TerrainLogic.forWorld(SEED, solid).surfaceHeight(p[0], p[1]) == TerrainLogic.forWorld(SEED, SETTINGS).surfaceHeight(p[0], p[1]), "surface moved");
+        }
+        assertTrue(open > 0, "no caves with caves on, so this proves nothing");
         helper.succeed();
     }
 

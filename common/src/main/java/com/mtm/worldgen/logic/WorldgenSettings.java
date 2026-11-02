@@ -71,6 +71,13 @@ public final class WorldgenSettings {
         public double coastFadeHeight = 8.0;
         /** Blocks kept above the surface when filling chunks, for terrain raised under structures. */
         public int structureTerrainMargin = 32;
+        /**
+         * Whether the world has caves: vanilla's noise caves and its carved caves and ravines. Off, the ground is solid
+         * below the surface; the chambers under sinkholes belong to those and stay.
+         */
+        public boolean caves = true;
+        /** Whether the world has ores: vanilla's ore features and its large ore veins. Off, rock holds none. */
+        public boolean ores = true;
         /** Caves and ravines stay at least this many blocks below the surface. */
         public int caveSurfaceMargin = 12;
         /** Noise caves fade in over this many blocks below that margin. */

@@ -145,6 +145,18 @@ public final class MtmGenerators {
                 DensityFunctions.constant(-1000000.0), pillars));
     }
 
+    /** Terrain with caves cut into it, or terrain alone in a world without caves. */
+    private static DensityFunction finalDensity(Lookups lookups, WorldgenSettings worldSettings) {
+        if (!worldSettings.general.caves) {
+            return DensityFunctions.interpolated(TerrainDensity.unbound(false, worldSettings));
+        }
+        // Noodle caves stay outside like in vanilla: they bring interpolators of their own
+        return DensityFunctions.min(
+                DensityFunctions.interpolated(DensityFunctions.min(TerrainDensity.unbound(false, worldSettings),
+                        TerrainCaves.unbound(caves(lookups), worldSettings))),
+                TerrainCaves.unbound(vanillaCave(lookups, "noodle"), worldSettings));
+    }
+
     private static DensityFunction vanillaCave(Lookups lookups, String name) {
         return new DensityFunctions.HolderHolder(lookups.densityFunctions().getOrThrow(
                 ResourceKey.create(Registries.DENSITY_FUNCTION, new ResourceLocation("overworld/caves/" + name))));
@@ -163,16 +175,12 @@ public final class MtmGenerators {
                 // Interpolated like vanilla's final density: evaluated on the sparse noise cell grid instead of for
                 // every block. The density is linear around the surface, so interpolation keeps the surface in place
                 TerrainDensity.unbound(true, worldSettings),
-                // Noodle caves stay outside like in vanilla: they bring interpolators of their own
-                DensityFunctions.min(
-                        DensityFunctions.interpolated(DensityFunctions.min(TerrainDensity.unbound(false, worldSettings),
-                                TerrainCaves.unbound(caves(lookups), worldSettings))),
-                        TerrainCaves.unbound(vanillaCave(lookups, "noodle"), worldSettings)),
+                finalDensity(lookups, worldSettings),
                 r.veinToggle(), r.veinRidged(), r.veinGap());
         NoiseGeneratorSettings settings = new NoiseGeneratorSettings(
                 noise, vanilla.defaultBlock(), vanilla.defaultFluid(), router,
                 SurfaceRules.sequence(terrainSurfaceRule(), vanilla.surfaceRule()), vanilla.spawnTarget(),
-                worldSettings.general.seaLevel, vanilla.disableMobGeneration(), vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled(), vanilla.useLegacyRandomSource());
+                worldSettings.general.seaLevel, vanilla.disableMobGeneration(), vanilla.aquifersEnabled(), vanilla.oreVeinsEnabled() && worldSettings.general.ores, vanilla.useLegacyRandomSource());
 
         return new NoiseBasedChunkGenerator(new MtmBiomeSource(lookups, worldSettings), Holder.direct(settings));
     }
