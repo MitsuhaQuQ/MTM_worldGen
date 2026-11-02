@@ -44,6 +44,7 @@ public final class WorldgenSettings {
     public final SeaStacks seaStacks = new SeaStacks();
     public final Overhangs overhangs = new Overhangs();
     public final Sinkholes sinkholes = new Sinkholes();
+    public final Foreign foreign = new Foreign();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -240,6 +241,25 @@ public final class WorldgenSettings {
         /** Wander of the outline, as a share of the radius, and its wavelength. */
         public double warp = 0.3;
         public double warpWavelength = 48.0;
+    }
+
+    /** Chunks that MTM did not generate, such as region files merged in from another world. Sizes are in blocks. */
+    public static final class Foreign {
+        /** Width of the blend around them: the height step divided by this grade, within these limits. */
+        public double grade = 0.3;
+        public double minWidth = 64.0;
+        public double maxWidth = 1000.0;
+        /** Chunks of an older MTM can blend further, since both sides are the same kind of terrain. */
+        public double upgradeMaxWidth = 2000.0;
+        /** Height superflat maps are raised to, moved in whole sections of 16 blocks. */
+        public int flatGround = 67;
+        /** Water and rock of foreign rivers and lakes spread this far past the edge, closed in by banks. */
+        public double pondReach = 48.0;
+        /** Size of the lake a river ends in when it would run into foreign chunks, as a multiple of its width. */
+        public double endLakeFactor = 3.0;
+        public double endLakeMinWidth = 60.0;
+        /** Nodes followed down a river to see whether it runs into foreign chunks. */
+        public int riverLookAhead = 3;
     }
 
     /** Collapse sinkholes in hills and mountains, with a cave chamber below. Sizes are in blocks. */
@@ -694,6 +714,8 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(RiverLayer.margin(rivers) + foreign.riverLookAhead <= general.regionSize / rivers.flowCellSize,
+                "foreign.riverLookAhead must stay within the neighboring regions");
         require(rivers.deltaBranchesMin >= 2 && rivers.deltaBranchesMax <= 4 && rivers.deltaBranchesMin <= rivers.deltaBranchesMax,
                 "rivers.deltaBranchesMin and deltaBranchesMax must lie between 2 and 4");
         require(RiverLayer.margin(rivers) + Math.max(rivers.estuaryLength, rivers.majorTrunkSmoothing) <= general.regionSize / rivers.flowCellSize,

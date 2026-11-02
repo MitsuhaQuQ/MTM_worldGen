@@ -77,6 +77,23 @@ final class BiomeLayer {
         return pick(humidity >= config.wetHumidity ? biomes.wet : biomes.medium, x, z);
     }
 
+    /**
+     * Biome close to foreign chunks, or null where the usual one applies. The edge's biome reaches well out when it is
+     * of the same kind as the biome here; biomes of different kinds meet across the zone's plain middle ground.
+     */
+    String foreignBiome(double x, double z, ForeignMap.Influence influence, ClimateLayer.Zone zone, double height) {
+        String edge = influence.biome();
+        if (edge == null || height < settings.general.seaLevel - 1 || !config.allBiomes().contains(edge)) {
+            return null;
+        }
+        WorldgenSettings.BiomeZone biomes = zoneBiomes(zone);
+        double share = influence.share() + 0.15 * bandNoise.sample(x, z);
+        if (share > 0.66) {
+            return edge;
+        }
+        return share > 0.33 ? pick(biomes.medium, x, z) : null;
+    }
+
     /** Whether a position deep underground belongs to a cave biome rather than the surface biome above it. */
     boolean isCave(double x, double z) {
         return caveNoise.sample(x, z) > config.caveThreshold;

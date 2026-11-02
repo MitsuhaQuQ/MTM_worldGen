@@ -27,6 +27,13 @@ final class RegionCache<T> {
         };
     }
 
+    /** Forgets everything computed so far. */
+    void clear() {
+        synchronized (lock) {
+            entries.clear();
+        }
+    }
+
     T get(int regionX, int regionZ) {
         long key = ((long) regionX << 32) | (regionZ & 0xFFFFFFFFL);
         CompletableFuture<T> future;

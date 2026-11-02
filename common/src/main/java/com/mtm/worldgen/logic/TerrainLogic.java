@@ -19,6 +19,8 @@ public final class TerrainLogic {
     private static final long ROCK_PATCH_SALT = 0x5041544348L;
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
+    /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
+    public static final int ALGORITHM_VERSION = 1;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
 
@@ -44,6 +46,7 @@ public final class TerrainLogic {
     private final BiomeLayer biomes;
     private final OverhangLayer overhangs;
     private final SinkholeLayer sinkholes;
+    private volatile ForeignMap foreign = ForeignMap.EMPTY;
     private final Fbm sinkShore;
     private final Fbm mouthSandNoise;
     private final Fbm duneNoise;
@@ -87,7 +90,7 @@ public final class TerrainLogic {
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland, this::canSink);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
-        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast);
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.covers(x, z));
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
     }
 
@@ -152,6 +155,60 @@ public final class TerrainLogic {
         return (int) Math.ceil(highest) + settings.general.structureTerrainMargin;
     }
 
+    /** Takes on the foreign chunks of a world. Called before it generates anything. */
+    public void setForeign(ForeignMap map) {
+        foreign = map;
+        riverRegions.clear();
+    }
+
+    public ForeignMap foreign() {
+        return foreign;
+    }
+
+    /** Whether a blend reaches a position, which leaves it without three-dimensional rock. */
+    private boolean foreignNear(double x, double z) {
+        return !foreign.isEmpty() && foreign.influence(x, z, sampleSmoothLand(x, z)) != null;
+    }
+
+    /** Land as it closes in on foreign chunks: smooth land heads for their edge, and any detail on it fades out. */
+    private double blendForeign(double x, double z, double land) {
+        ForeignMap map = foreign;
+        if (map.isEmpty()) {
+            return land;
+        }
+        double smooth = sampleSmoothLand(x, z);
+        ForeignMap.Influence influence = map.influence(x, z, smooth);
+        if (influence == null) {
+            return land;
+        }
+        double share = foreignShare(x, z, influence);
+        double blended = closeIn(smooth, land, influence.ground(), share);
+        double pond = pondLevel(influence);
+        if (Double.isNaN(pond)) {
+            // A foreign sea below the world's own needs a bank, or the sea here would stand against it as a wall
+            return influence.water() < seaSurface() - 1.0 ? Math.max(blended, seaSurface() + 1.0) : blended;
+        }
+        // Banks rise past the reach of the water, so that it stays a pool however low the land around it lies
+        double reach = settings.foreign.pondReach;
+        return influence.distance() < reach ? Math.min(blended, pond - 1.0) : Math.max(blended, pond + 1.0);
+    }
+
+    /** Share of a blend at a position. Rivers passing through keep their ground, so the land gives way to them. */
+    private double foreignShare(double x, double z, ForeignMap.Influence influence) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        return river == null ? influence.share() : influence.share() * river.texture();
+    }
+
+    private static double closeIn(double smooth, double value, double target, double share) {
+        double head = smooth + (target - smooth) * share;
+        return head + (value - smooth) * (1.0 - share);
+    }
+
+    /** Water level of the foreign river or lake that reaches a position, or NaN. Sea reaches everywhere by itself. */
+    private double pondLevel(ForeignMap.Influence influence) {
+        return influence.water() > seaSurface() + 1.0 ? influence.water() : Double.NaN;
+    }
+
     /** Surface height at a block column, memoized per thread for repeated queries of the same column. */
     public double surfaceHeight(int x, int z) {
         return columns.get().column(this, x, z).height;
@@ -186,7 +243,7 @@ public final class TerrainLogic {
      * valley walls shape the land near it, and the ground must not leave those to stand over a river.
      */
     private double[] sampleOverhangProfile(int x, int z, double height) {
-        double patch = overhangs.patch(x, z, height);
+        double patch = foreignNear(x, z) ? 0.0 : overhangs.patch(x, z, height);
         if (patch <= 0.0) {
             return NO_OVERHANG;
         }
@@ -236,14 +293,14 @@ public final class TerrainLogic {
      * plus the terrain skeleton evaluated at the exact position, softly capped below the maximum height.
      */
     public double sampleSurfaceHeight(double x, double z) {
-        return sinkholes.lower(x, z, stacks.raise(x, z, sampleShapedLand(x, z)));
+        return blendForeign(x, z, sinkholes.lower(x, z, stacks.raise(x, z, sampleShapedLand(x, z))));
     }
 
     /**
      * Surface height for vanilla's preliminary surface, without sea stacks, which stand too thin for its coarse grid.
      */
     public double preliminaryHeight(int x, int z) {
-        return columns.get().column(this, x, z).shaped;
+        return blendForeign(x, z, columns.get().column(this, x, z).shaped);
     }
 
     /** Whether desert lowland far from the sea can hold an inland lake that rivers end in. */
@@ -507,6 +564,28 @@ public final class TerrainLogic {
 
     /** Water surface of a column, or NaN where it holds no river or lake. */
     public double sampleWaterLevel(double x, double z) {
+        ForeignMap map = foreign;
+        if (!map.isEmpty()) {
+            double smooth = sampleSmoothLand(x, z);
+            ForeignMap.Influence influence = map.influence(x, z, smooth);
+            if (influence != null) {
+                return foreignWaterLevel(x, z, smooth, influence);
+            }
+        }
+        return plainWaterLevel(x, z);
+    }
+
+    /** Water where a blend reaches: foreign water spreads past the edge, and any other water moves with the land. */
+    private double foreignWaterLevel(double x, double z, double smooth, ForeignMap.Influence influence) {
+        double pond = pondLevel(influence);
+        if (!Double.isNaN(pond) && influence.distance() < settings.foreign.pondReach) {
+            return pond;
+        }
+        double level = plainWaterLevel(x, z);
+        return Double.isNaN(level) ? level : closeIn(smooth, level, influence.ground(), foreignShare(x, z, influence));
+    }
+
+    private double plainWaterLevel(double x, double z) {
         double[] lake = sampleLake(x, z);
         if (lake != null && lake[0] > LAKE_EDGE && sampleSurfaceHeight(x, z) < lake[1]) {
             return lake[1];
@@ -600,7 +679,11 @@ public final class TerrainLogic {
     /** Surface biome id of a position. */
     public String sampleBiome(double x, double z) {
         double temperature = climate.temperature(x, z);
-        return biomes.surfaceBiome(x, z, climate.zone(temperature), sampleSurfaceHeight(x, z), sampleCoastDistance(x, z),
+        ForeignMap map = foreign;
+        ForeignMap.Influence influence = map.isEmpty() ? null : map.influence(x, z, sampleSmoothLand(x, z));
+        double height = sampleSurfaceHeight(x, z);
+        String foreignBiome = influence == null ? null : biomes.foreignBiome(x, z, influence, climate.zone(temperature), height);
+        return foreignBiome != null ? foreignBiome : biomes.surfaceBiome(x, z, climate.zone(temperature), height, sampleCoastDistance(x, z),
                 sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), isRockyCoast(x, z), continents.islandKind(x, z),
                 climate.nearZoneBorder(temperature));
     }
@@ -880,7 +963,7 @@ public final class TerrainLogic {
         Column column(TerrainLogic logic, int x, int z) {
             int index = (x & 15) | ((z & 15) << 4);
             Column column = slots[index];
-            if (column == null || column.owner != logic || column.x != x || column.z != z) {
+            if (column == null || column.owner != logic || column.x != x || column.z != z || column.foreign != logic.foreign) {
                 column = new Column(logic, x, z);
                 slots[index] = column;
             }
@@ -891,6 +974,7 @@ public final class TerrainLogic {
     /** Per-column values; everything but the height is computed only when first asked for. */
     private static final class Column {
         final TerrainLogic owner;
+        final ForeignMap foreign;
         final int x;
         final int z;
         final double height;
@@ -911,10 +995,11 @@ public final class TerrainLogic {
 
         Column(TerrainLogic owner, int x, int z) {
             this.owner = owner;
+            this.foreign = owner.foreign;
             this.x = x;
             this.z = z;
             this.shaped = owner.sampleShapedLand(x, z);
-            this.height = owner.sinkholes.lower(x, z, owner.stacks.raise(x, z, shaped));
+            this.height = owner.blendForeign(x, z, owner.sinkholes.lower(x, z, owner.stacks.raise(x, z, shaped)));
         }
 
         double[] overhangProfile() {
@@ -939,7 +1024,7 @@ public final class TerrainLogic {
                 sinkhole = owner.sinkholes.near(x, z);
                 sinkholeKnown = true;
             }
-            if (sinkhole != null) {
+            if (sinkhole != null && !owner.foreignNear(x, z)) {
                 double inside = owner.sinkholes.chamberDepth(sinkhole, x, y, z);
                 if (inside > 0.0) {
                     return Math.min(height, y - inside);

@@ -3,6 +3,9 @@ package com.mtm.worldgen.logic;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -212,6 +215,41 @@ class TerrainLogicTest {
             }
         }
         assertTrue(sinks > 0, "no inland sinks");
+    }
+
+    /** New terrain meets foreign chunks at their height, and leaves terrain far away as it was. */
+    @Test
+    void landClosesInOnForeignChunks() {
+        TerrainLogic plain = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        BlockColumn spot = logic.findSpawn();
+        int chunkX = spot.x() >> 4;
+        int chunkZ = spot.z() >> 4;
+        short ground = 180;
+        short[] heights = new short[ForeignMap.SAMPLES];
+        short[] water = new short[ForeignMap.SAMPLES];
+        Arrays.fill(heights, ground);
+        Arrays.fill(water, ForeignMap.NO_WATER);
+        Map<Long, ForeignMap.Chunk> chunks = new HashMap<>();
+        for (int dx = 0; dx < 8; dx++) {
+            for (int dz = 0; dz < 8; dz++) {
+                chunks.put(ForeignMap.key(chunkX + dx, chunkZ + dz), new ForeignMap.Chunk(heights, water, "minecraft:plains", false));
+            }
+        }
+        logic.setForeign(new ForeignMap(chunks, SETTINGS.foreign));
+        int edge = (chunkX + 8) * 16;
+        int z = (chunkZ + 4) * 16;
+        assertEquals(ground, logic.sampleSurfaceHeight(edge + 1, z), 6.0);
+        double previous = logic.sampleSurfaceHeight(edge + 1, z);
+        double steepest = 0.0;
+        for (int x = edge + 9; x < edge + 400; x += 8) {
+            double height = logic.sampleSurfaceHeight(x, z);
+            steepest = Math.max(steepest, Math.abs(height - previous) / 8.0);
+            previous = height;
+        }
+        assertTrue(steepest < 1.5, "blend grade " + steepest);
+        int far = edge + (int) SETTINGS.foreign.maxWidth + 64;
+        assertEquals(plain.sampleSurfaceHeight(far, z), logic.sampleSurfaceHeight(far, z));
     }
 
     @Test

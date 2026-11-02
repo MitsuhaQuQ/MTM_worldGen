@@ -5,8 +5,10 @@ import com.mojang.serialization.JsonOps;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.benchmark.GenerationBenchmark;
 import com.mtm.worldgen.logic.BlockColumn;
+import com.mtm.worldgen.logic.ForeignMap;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
+import com.mtm.worldgen.world.ForeignChunks;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -16,10 +18,15 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -33,6 +40,8 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import net.minecraft.world.level.chunk.storage.ChunkStorage;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -43,6 +52,9 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -358,5 +370,67 @@ public final class MtmGameTests {
 
     private static String name(Holder<Biome> biome) {
         return biome.unwrapKey().map(ResourceKey::location).map(Object::toString).orElse("?");
+    }
+
+    /**
+     * Runs a real superflat chunk of the test world through the fitting of foreign chunks: it has to come back raised
+     * to the target ground, with no vanilla bedrock left in it and rock generated below, and only once.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public static void foreignFlatChunkIsFitted(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        long seed = SEED + 1;
+        TerrainLogic logic = TerrainLogic.forWorld(seed, SETTINGS);
+        ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
+        Path root;
+        try {
+            root = Files.createTempDirectory("mtm_foreign");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
+                CompoundTag chunk = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+                chunk.remove(ForeignChunks.VERSION_TAG);
+                storage.write(pos, chunk);
+                storage.flushWorker();
+            }
+            ForeignChunks.run(level, logic, root);
+            assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk not in the snapshot");
+            ForeignMap.Chunk found = logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z));
+            assertTrue(Math.abs(found.ground()[0] - SETTINGS.foreign.flatGround) <= 8, "ground at " + found.ground()[0]);
+            long before = Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis();
+            ForeignChunks.run(level, logic, root);
+            assertTrue(before == Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis(), "fitted twice");
+            try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
+                CompoundTag chunk = storage.read(pos).join().orElseThrow();
+                ListTag sections = chunk.getList("sections", Tag.TAG_COMPOUND);
+                int lowest = Integer.MAX_VALUE;
+                for (int i = 0; i < sections.size(); i++) {
+                    CompoundTag section = sections.getCompound(i);
+                    lowest = Math.min(lowest, section.getByte("Y"));
+                    if (section.getByte("Y") > 0) {
+                        assertTrue(!section.getCompound("block_states").toString().contains("minecraft:bedrock"), "bedrock left in the map");
+                    }
+                }
+                assertTrue(lowest == -4, "sections start at " + lowest);
+                assertTrue(!chunk.contains("Heightmaps") && !chunk.contains("blending_data"), "stale data left");
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
+    private record RegionFileName(ChunkPos pos) {
+        String name() {
+            return "r." + pos.getRegionX() + "." + pos.getRegionZ() + ".mca";
+        }
+    }
+
+    private static void assertTrue(boolean condition, String message) {
+        if (!condition) {
+            throw new GameTestAssertException(message);
+        }
     }
 }

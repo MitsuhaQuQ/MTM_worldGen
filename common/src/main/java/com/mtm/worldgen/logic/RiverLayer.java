@@ -28,11 +28,17 @@ final class RiverLayer {
         boolean isRocky(double x, double z);
     }
 
+    interface ForeignTest {
+        /** Whether a position lies in foreign chunks. */
+        boolean covers(double x, double z);
+    }
+
     private final WorldgenSettings settings;
     private final WorldgenSettings.Rivers config;
     private final FlowSource flows;
     private final FlowLayer.HeightSampler landform;
     private final ShoreTest shore;
+    private final ForeignTest foreign;
     private final long deltaSeed;
     private final long nodeSeed;
     private final long meanderSeed;
@@ -41,12 +47,13 @@ final class RiverLayer {
     private final int cellSize;
     private final int cells;
 
-    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore) {
+    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore, ForeignTest foreign) {
         this.settings = settings;
         this.config = settings.rivers;
         this.flows = flows;
         this.landform = landform;
         this.shore = shore;
+        this.foreign = foreign;
         this.deltaSeed = Hashing.derive(seed, DELTA_SALT);
         this.nodeSeed = nodeSeed(seed);
         this.meanderSeed = Hashing.derive(seed, MEANDER_SALT);
@@ -102,6 +109,10 @@ final class RiverLayer {
         if (flow.isLake(lx, lz) && nextFlow.isLake(nextLx, nextLz)) {
             return;
         }
+        // A river running into foreign chunks ends in a lake just before it, with nothing of it left below that point
+        if (entersForeign(around, regionX, regionZ, cellX, cellZ)) {
+            return;
+        }
         addDelta(around, regionX, regionZ, cellX, cellZ, curves);
         double[] a = smoothNode(around, regionX, regionZ, cellX, cellZ);
         double[] b = smoothNode(around, regionX, regionZ, nextX, nextZ);
@@ -141,6 +152,7 @@ final class RiverLayer {
         double c2x = b[0] - endTangent[0] * length / 3.0;
         double c2z = b[1] - endTangent[1] * length / 3.0;
 
+        boolean endsHere = entersForeign(around, regionX, regionZ, nextX, nextZ);
         double previousX = a[0];
         double previousZ = a[1];
         double previousLevel = startLevel;
@@ -173,6 +185,45 @@ final class RiverLayer {
             previousZ = z;
             previousLevel = level;
         }
+        if (endsHere) {
+            addEndLake(b, previousLevel, startSize, startTangent, riverClass, curves);
+        }
+    }
+
+    /**
+     * Whether a river has run into foreign chunks by a cell: it lies in them itself, or they are close ahead. Rivers
+     * merely passing by stay as they are.
+     */
+    private boolean entersForeign(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        WorldgenSettings.Foreign config = settings.foreign;
+        int x = cellX;
+        int z = cellZ;
+        for (int i = 0; i <= config.riverLookAhead; i++) {
+            double[] position = node(x, z);
+            if (foreign.covers(position[0], position[1])) {
+                return true;
+            }
+            int[] down = step(around, regionX, regionZ, x, z, 1);
+            if (down == null || flowAt(around, regionX, regionZ, down[0], down[1]) == null) {
+                return false;
+            }
+            x = down[0];
+            z = down[1];
+        }
+        return false;
+    }
+
+    /** Lake a cut river ends in: short wide stretches of level water, which rounds off into a blob by itself. */
+    private void addEndLake(double[] end, double level, double[] size, double[] direction, byte riverClass, Curves curves) {
+        WorldgenSettings.Foreign config = settings.foreign;
+        double width = Math.max(config.endLakeMinWidth, config.endLakeFactor * size[0]);
+        double depth = Math.max(size[1], 4.0);
+        double reach = 0.5 * width;
+        double normalX = -direction[1];
+        double normalZ = direction[0];
+        curves.add(end[0], end[1], end[0] + direction[0] * reach, end[1] + direction[1] * reach, width, 0.7 * width, depth, depth, level, level, riverClass);
+        curves.add(end[0], end[1], end[0] + normalX * reach, end[1] + normalZ * reach, width, 0.5 * width, depth, depth, level, level, riverClass);
+        curves.add(end[0], end[1], end[0] - normalX * 0.7 * reach, end[1] - normalZ * 0.7 * reach, width, 0.6 * width, depth, depth, level, level, riverClass);
     }
 
     /**
