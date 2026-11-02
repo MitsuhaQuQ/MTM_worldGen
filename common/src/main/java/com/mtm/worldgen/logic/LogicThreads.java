@@ -1,5 +1,6 @@
 package com.mtm.worldgen.logic;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
@@ -21,8 +22,12 @@ public final class LogicThreads {
     private LogicThreads() {
     }
 
-    /** Runs a task for every index below count and returns when all are done. */
+    /**
+     * Runs a task for every index below count and returns when all are done. The caller blocks without helping: a
+     * fork-join worker of another pool (Minecraft's own worldgen threads, say) would otherwise run its pool's other
+     * tasks while it waits, and one of those may need the very region the caller is computing.
+     */
     public static void forEach(int count, IntConsumer task) {
-        POOL.submit(() -> IntStream.range(0, count).parallel().forEach(task)).join();
+        CompletableFuture.runAsync(() -> IntStream.range(0, count).parallel().forEach(task), POOL).join();
     }
 }

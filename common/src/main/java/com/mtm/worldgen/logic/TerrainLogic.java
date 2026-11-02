@@ -65,6 +65,7 @@ public final class TerrainLogic {
     private final RegionCache<LogicRegion> regions;
     private final RegionCache<FlowRegion> flowRegions;
     private final RegionCache<RiverRegion> riverRegions;
+    private final ErosionLayer erosion;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<FlowRegion> lastFlow = new ThreadLocal<>();
     private final ThreadLocal<RiverRegion> lastRivers = new ThreadLocal<>();
@@ -97,6 +98,23 @@ public final class TerrainLogic {
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.covers(x, z));
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
+        this.erosion = new ErosionLayer(seed, settings, new ErosionLayer.HeightSampler() {
+            @Override
+            public double height(double x, double z) {
+                return sampleSmoothLand(x, z);
+            }
+
+            @Override
+            public void prepare(double minX, double minZ, double maxX, double maxZ) {
+                // Interpolation reads cells a little past the area, so take the regions around it too
+                int size = settings.general.regionSize;
+                for (int regionX = Math.floorDiv((int) Math.floor(minX), size) - 1; regionX <= Math.floorDiv((int) Math.ceil(maxX), size) + 1; regionX++) {
+                    for (int regionZ = Math.floorDiv((int) Math.floor(minZ), size) - 1; regionZ <= Math.floorDiv((int) Math.ceil(maxZ), size) + 1; regionZ++) {
+                        region(regionX, regionZ);
+                    }
+                }
+            }
+        });
     }
 
     /** Shared instance for a world, identified by its seed and settings. */
@@ -434,9 +452,13 @@ public final class TerrainLogic {
             }
             return 0.0;
         }
-        double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture);
+        // With erosion, water cuts the texture into the mountains in place of the skeleton's ridged texture; cliffs stay.
+        // Dome hills keep their round tops, which water would cut into a star of spurs
+        boolean eroded = settings.erosion.enabled && texture != null;
+        double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture, !eroded);
         if (texture != null) {
-            texture[0] *= clearance;
+            double change = eroded ? erosion.change(x, z) * (1.0 - skeleton.domeShare(x, z)) : 0.0;
+            texture[0] = clearance * (texture[0] + change);
         }
         return height;
     }

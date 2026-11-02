@@ -189,8 +189,9 @@ final class SkeletonLayer {
      *
      * @param baseAboveSea continent base height above the sea surface in blocks
      * @param texture      receives the ridge texture in its first element, or null if it is not needed
+     * @param ridged       whether the texture holds the ridged spurs and gullies, or only the cliffs
      */
-    double height(double x, double z, double baseAboveSea, double[] texture) {
+    double height(double x, double z, double baseAboveSea, double[] texture, boolean ridged) {
         double land = smoothstep(0.0, settings.general.coastFadeHeight, baseAboveSea);
         if (land <= 0.0) {
             if (texture != null) {
@@ -206,12 +207,12 @@ final class SkeletonLayer {
         // Warp the lookup so ridges between sites curve instead of running dead straight
         double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
         double wz = z + m.ridgeWarp * ridgeWarpZ.sample(x, z);
-        double[] mountain = mountains(wx, wz, texture != null);
+        double[] mountain = mountains(wx, wz, texture != null && ridged);
         double peaks = mountain[0];
         double textured = peaks + m.massifTextureShare * massif;
         double summitCalm = 1.0 - m.summitTextureReduction * mountain[2];
         double rugged = 0.0;
-        if (texture != null && textured > 0.0) {
+        if (texture != null && ridged && textured > 0.0) {
             // Spurs near ridges fade into crease-free noise on the open massif, where they have no direction to follow
             double openWeight = scale * m.massifHeight;
             openWeight *= openWeight;
@@ -317,6 +318,25 @@ final class SkeletonLayer {
             }
         }
         return total;
+    }
+
+    /** How much of a dome hill stands at a position, from 1 at its top to 0 at its foot. Peaks do not count. */
+    double domeShare(double x, double z) {
+        int cellX = (int) Math.floor(x / isolatedSpacing);
+        int cellZ = (int) Math.floor(z / isolatedSpacing);
+        double share = 0.0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Isolated hill = isolated(cellX + dx, cellZ + dz);
+                if (hill.height > 0.0 && !hill.peak) {
+                    double u = Math.hypot(x - hill.x, z - hill.z) / hill.radius;
+                    if (u < 1.0) {
+                        share = Math.max(share, 0.5 + 0.5 * Math.cos(Math.PI * u));
+                    }
+                }
+            }
+        }
+        return share;
     }
 
     /**

@@ -58,6 +58,7 @@ public final class WorldgenSettings {
     public final Sinkholes sinkholes = new Sinkholes();
     public final Foreign foreign = new Foreign();
     public final Scale scale = new Scale();
+    public final Erosion erosion = new Erosion();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -290,6 +291,40 @@ public final class WorldgenSettings {
         /** Wander of the outline, as a share of the radius, and its wavelength. */
         public double warp = 0.3;
         public double warpWavelength = 48.0;
+    }
+
+    /**
+     * Water erosion of mountains and hills, simulated per logic region on a grid of cells this many blocks wide, with
+     * a margin around the region and a band along its borders that blends it with its neighbors. Strength and the
+     * area exponent set the stream power law, rounds how long water works on the land, roughness how much noise the
+     * land starts with, and max depth caps the cut as a share of the height above the sea.
+     */
+    public static final class Erosion {
+        public boolean enabled = true;
+        public int cellSize = 16;
+        public int margin = 1024;
+        public double blend = 512.0;
+        public int rounds = 150;
+        /**
+         * Uplift per round as a share of the skeleton's height above the sea. The land rises while water cuts it, until
+         * the two balance: the drainage net that holds then branches like a real one. The result is scaled back to the
+         * skeleton's heights over this many blocks, which keeps ranges and peaks where they were designed.
+         */
+        public double uplift = 0.02;
+        public double normalizeRadius = 320.0;
+        /** How far erosion may raise land above the skeleton, as a share of its height above the sea. */
+        public double maxRaise = 0.15;
+        /** How far the grid is warped when it is read, which bends valleys off the grid's eight directions. */
+        public double warp = 32.0;
+        public double warpWavelength = 192.0;
+        /** Hillslope creep per round, smoothing out gullies too small to hold their own, and how evenly water spreads over the slopes below. */
+        public double diffusion = 0.1;
+        public double spreadExponent = 4.0;
+        public double strength = 0.032;
+        public double areaExponent = 0.5;
+        public double roughness = 12.0;
+        public double roughnessWavelength = 96.0;
+        public double maxDepth = 0.6;
     }
 
     /**
@@ -794,6 +829,10 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(erosion.cellSize > 0 && general.regionSize % erosion.cellSize == 0 && erosion.margin % erosion.cellSize == 0
+                        && erosion.blend >= 0.0 && erosion.warp >= 0.0 && erosion.blend + erosion.warp + erosion.cellSize <= erosion.margin
+                        && erosion.rounds >= 0 && erosion.warpWavelength > 0.0 && erosion.diffusion >= 0.0 && erosion.diffusion < 0.25,
+                "erosion.cellSize must divide the region size and margin, the blend and warp must fit in the margin, and erosion.diffusion must stay below 0.25");
         for (double value : scale.all()) {
             require(value >= 0.25 && value <= 8.0, "every scale must lie between 0.25 and 8");
         }
