@@ -1,0 +1,37 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the mod and publishes a GitHub release with the Fabric and Forge jars.
+# The tag has to match mod_version in gradle.properties, so a release never ships jars named for another version.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Check the tag against the mod version
+        run: |
+          version=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match mod_version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: ./gradlew :common:test assemble
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk -v tag="$GITHUB_REF_NAME" '$0 == "## " tag {found = 1; next} found && /^## / {exit} found {print}' RELEASE_NOTES.md)
+          gh release create "$GITHUB_REF_NAME" \
+            "fabric/build/libs/mtm_worldgen-fabric-$VERSION.jar" \
+            "forge/build/libs/mtm_worldgen-forge-$VERSION.jar" \
+            --title "MTM-Worldgen $VERSION" \
+            --notes "$notes" \
+            --prerelease

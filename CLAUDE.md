@@ -308,6 +308,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
 - 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态
 - CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行
+- 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`，标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
 - 平台服务：common 中的 `com.mtm.worldgen.platform.Platform` 接口，各加载器通过 `META-INF/services` 注册实现
 - 已知问题（Claude Code 沙箱环境）：Gradle 启动报 `Unable to establish loopback connection` 时，需在沙箱外运行，并设置环境变量 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=F:\MC\MTM_worldgen\.gradle\uds`（该目录需事先存在）
 
