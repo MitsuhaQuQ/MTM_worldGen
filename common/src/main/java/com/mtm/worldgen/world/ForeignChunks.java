@@ -157,15 +157,71 @@ public final class ForeignChunks {
         Map<String, long[]> files = new TreeMap<>();
         readSnapshot(chunks, files);
         List<Path> changed = changedFiles(files);
-        if (!changed.isEmpty()) {
+        boolean filesGone = forgetMissingFiles(chunks, files);
+        if (!changed.isEmpty() || filesGone) {
             fit(changed, chunks);
             for (Path file : changed) {
                 files.put(file.getFileName().toString(), stamp(file));
             }
+            readExposedEdges(chunks);
             dropInnerDetail(chunks);
             writeSnapshot(chunks, files);
         }
-        logic.setForeign(new ForeignMap(chunks, settings.foreign));
+        logic.setForeign(new ForeignMap(chunks, settings));
+    }
+
+    /** Region files that have been removed take their chunks out of the snapshot, which follows what the save holds. */
+    private boolean forgetMissingFiles(Map<Long, ForeignMap.Chunk> chunks, Map<String, long[]> files) {
+        List<String> gone = new ArrayList<>();
+        for (String name : files.keySet()) {
+            if (!Files.exists(regions.resolve(name))) {
+                gone.add(name);
+            }
+        }
+        for (String name : gone) {
+            int[] region = regionOf(regions.resolve(name));
+            chunks.keySet().removeIf(key -> Math.floorDiv((int) (key >> 32), 32) == region[0] && Math.floorDiv((int) (long) key, 32) == region[1]);
+            files.remove(name);
+        }
+        return !gone.isEmpty();
+    }
+
+    /**
+     * Chunks that had foreign chunks on all sides keep no detail, so where those neighbors have gone their edge has to
+     * be read again. Without it the land coming in there would have nothing to close in on.
+     */
+    private void readExposedEdges(Map<Long, ForeignMap.Chunk> chunks) {
+        Map<Path, Set<Long>> exposed = new TreeMap<>();
+        for (Map.Entry<Long, ForeignMap.Chunk> entry : chunks.entrySet()) {
+            int x = (int) (entry.getKey() >> 32);
+            int z = (int) (long) entry.getKey();
+            if (entry.getValue() == ForeignMap.INNER && !isInner(chunks, x, z)) {
+                Path file = regions.resolve("r." + Math.floorDiv(x, 32) + "." + Math.floorDiv(z, 32) + ".mca");
+                exposed.computeIfAbsent(file, f -> new HashSet<>()).add(entry.getKey());
+            }
+        }
+        List<Map.Entry<Path, Set<Long>>> work = new ArrayList<>(exposed.entrySet());
+        Map<Long, ForeignMap.Chunk> read = new ConcurrentHashMap<>();
+        LogicThreads.forEach(work.size(), i -> {
+            Set<Long> wanted = work.get(i).getValue();
+            try {
+                eachChunk(work.get(i).getKey(), pos -> wanted.contains(ForeignMap.key(pos.x, pos.z)), (pos, tag) -> {
+                    Found found = new Found(pos, tag, work.get(i).getKey());
+                    read(found);
+                    read.put(ForeignMap.key(pos.x, pos.z), snapshot(found, false));
+                });
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+        chunks.putAll(read);
+        // Anything that could not be read is no use as an edge
+        exposed.values().forEach(keys -> keys.forEach(key -> chunks.remove(key, ForeignMap.INNER)));
+    }
+
+    private static boolean isInner(Map<Long, ForeignMap.Chunk> chunks, int x, int z) {
+        return chunks.containsKey(ForeignMap.key(x - 1, z)) && chunks.containsKey(ForeignMap.key(x + 1, z))
+                && chunks.containsKey(ForeignMap.key(x, z - 1)) && chunks.containsKey(ForeignMap.key(x, z + 1));
     }
 
     private List<Path> changedFiles(Map<String, long[]> known) throws IOException {
@@ -216,10 +272,20 @@ public final class ForeignChunks {
     private void fit(List<Path> files, Map<Long, ForeignMap.Chunk> chunks) {
         Map<Long, Found> foreign = new ConcurrentHashMap<>();
         Map<Long, ForeignMap.Chunk> plain = new ConcurrentHashMap<>();
+        Set<Long> present = ConcurrentHashMap.newKeySet();
         AtomicInteger scanned = new AtomicInteger();
         LogicThreads.forEach(files.size(), i -> {
-            scanFile(files.get(i), chunks, foreign, plain);
+            scanFile(files.get(i), chunks, foreign, plain, present);
             report("Scanned", scanned.incrementAndGet(), files.size());
+        });
+        // The snapshot follows the save: land around a chunk that was cleared blends toward what is left. Taken for
+        // still being there, a cleared chunk would count as the inside of a map and come back as a flat plain
+        Set<String> scannedRegions = new HashSet<>();
+        files.forEach(file -> scannedRegions.add(file.getFileName().toString()));
+        chunks.keySet().removeIf(key -> {
+            int x = (int) (key >> 32);
+            int z = (int) (long) key;
+            return !present.contains(key) && scannedRegions.contains("r." + Math.floorDiv(x, 32) + "." + Math.floorDiv(z, 32) + ".mca");
         });
         chunks.putAll(plain);
 
@@ -266,10 +332,11 @@ public final class ForeignChunks {
         return new ChunkStorage(regions, level.getServer().getFixerUpper(), false);
     }
 
-    private void scanFile(Path file, Map<Long, ForeignMap.Chunk> chunks, Map<Long, Found> foreign, Map<Long, ForeignMap.Chunk> plain) {
+    private void scanFile(Path file, Map<Long, ForeignMap.Chunk> chunks, Map<Long, Found> foreign, Map<Long, ForeignMap.Chunk> plain, Set<Long> present) {
         try (ChunkStorage storage = openStorage()) {
             eachChunk(file, pos -> true, (pos, stored) -> {
                 long key = ForeignMap.key(pos.x, pos.z);
+                present.add(key);
                 Origin origin = origin(stored);
                 // The snapshot only says what stood here: a new map at the same place is told by its tags
                 if (origin == Origin.OWN || origin != Origin.FOREIGN && chunks.containsKey(key)) {
@@ -838,8 +905,7 @@ public final class ForeignChunks {
         for (long key : chunks.keySet()) {
             int x = (int) (key >> 32);
             int z = (int) key;
-            if (chunks.containsKey(ForeignMap.key(x - 1, z)) && chunks.containsKey(ForeignMap.key(x + 1, z))
-                    && chunks.containsKey(ForeignMap.key(x, z - 1)) && chunks.containsKey(ForeignMap.key(x, z + 1))) {
+            if (isInner(chunks, x, z)) {
                 inner.add(key);
             }
         }

@@ -507,6 +507,34 @@ public final class MtmGameTests {
         helper.succeed();
     }
 
+    /** The snapshot follows the save: a foreign chunk that is cleared stops being foreign. */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public static void clearedForeignChunksLeaveTheSnapshot(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        long seed = SEED + 3;
+        TerrainLogic logic = TerrainLogic.forWorld(seed, SETTINGS);
+        ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
+        try {
+            Path root = Files.createTempDirectory("mtm_foreign");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            CompoundTag chunk = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+            chunk.remove(ForeignChunks.VERSION_TAG);
+            chunk.remove(ForeignChunks.WORLD_TAG);
+            writeChunk(level, regions, pos, chunk);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
+            assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk not in the snapshot");
+            Files.delete(regions.resolve(new RegionFileName(pos).name()));
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
+            assertTrue(!logic.foreign().contains(pos.x, pos.z), "cleared chunk still in the snapshot");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
     private static void writeChunk(ServerLevel level, Path regions, ChunkPos pos, CompoundTag chunk) throws IOException {
         try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
             storage.write(pos, chunk);

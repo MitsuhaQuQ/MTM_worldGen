@@ -228,10 +228,85 @@ class TerrainLogicTest {
                 chunks.put(ForeignMap.key(x, z), ForeignMap.INNER);
             }
         }
-        ForeignMap map = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> new ForeignMap(chunks, SETTINGS.foreign));
+        ForeignMap map = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> new ForeignMap(chunks, SETTINGS));
         assertTrue(map.contains(-500, 499));
         assertTrue(!map.contains(500, 0));
         assertEquals(chunks.size(), map.chunks().size());
+    }
+
+    /** Land has to meet a foreign edge next to a river too: rivers reach far, and land held back by one leaves a wall. */
+    @Test
+    void landMeetsForeignChunksNextToRivers() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        Random random = new Random(5);
+        int tried = 0;
+        short ground = 170;
+        short[] heights = new short[ForeignMap.SAMPLES];
+        short[] water = new short[ForeignMap.SAMPLES];
+        Arrays.fill(heights, ground);
+        Arrays.fill(water, ForeignMap.NO_WATER);
+        for (int i = 0; i < 4000 && tried < 12; i++) {
+            int x = random.nextInt(8000) - 4000;
+            int z = random.nextInt(8000) - 4000;
+            RiverRegion.Hit river = logic.sampleRiver(x, z);
+            if (river == null || river.texture() > 0.5 || river.distance() < 2.0 * river.halfWidth(SETTINGS.rivers.minChannelWidth)
+                    || logic.sampleSurfaceHeight(x, z) < SETTINGS.general.seaLevel) {
+                continue;
+            }
+            tried++;
+            double[] plain = new double[64];
+            for (int j = 0; j < plain.length; j++) {
+                plain[j] = logic.sampleWaterLevel(x + 8 * (j % 8), z + j - 32);
+            }
+            Map<Long, ForeignMap.Chunk> chunks = new HashMap<>();
+            chunks.put(ForeignMap.key((x >> 4) - 1, z >> 4), new ForeignMap.Chunk(heights, water, "minecraft:plains", false));
+            logic.setForeign(new ForeignMap(chunks, SETTINGS));
+            int seam = (x >> 4) << 4;
+            int mid = (z >> 4 << 4) + 8;
+            RiverRegion.Hit there = logic.sampleRiver(seam, mid);
+            double height = logic.sampleSurfaceHeight(seam, mid);
+            for (int j = 0; j < plain.length; j++) {
+                double level = logic.sampleWaterLevel(x + 8 * (j % 8), z + j - 32);
+                assertTrue(Double.isNaN(level) || !Double.isNaN(plain[j]) && level <= plain[j] + 1.0E-6, "water risen with the land near " + x + "," + z);
+            }
+            logic.setForeign(ForeignMap.EMPTY);
+            if (there != null && there.distance() > there.halfWidth(SETTINGS.rivers.minChannelWidth)) {
+                assertEquals(ground, height, 12.0, "land by the seam at " + seam + "," + mid);
+            }
+        }
+        assertTrue(tried > 0, "no river found");
+    }
+
+    /** A lake cut off by the edge of a map stays in: past the pool, the land stands above the water all the way around. */
+    @Test
+    void foreignLakesAreHeldIn() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        BlockColumn spot = logic.findSpawn();
+        int chunkX = spot.x() >> 4;
+        int chunkZ = spot.z() >> 4;
+        short lake = 150;
+        short[] heights = new short[ForeignMap.SAMPLES];
+        short[] dry = new short[ForeignMap.SAMPLES];
+        short[] wet = new short[ForeignMap.SAMPLES];
+        Arrays.fill(heights, (short) 160);
+        Arrays.fill(dry, ForeignMap.NO_WATER);
+        Arrays.fill(wet, lake);
+        Map<Long, ForeignMap.Chunk> chunks = new HashMap<>();
+        for (int dz = -3; dz <= 3; dz++) {
+            chunks.put(ForeignMap.key(chunkX, chunkZ + dz), new ForeignMap.Chunk(heights, dz == 0 ? wet : dry, "minecraft:plains", false));
+        }
+        logic.setForeign(new ForeignMap(chunks, SETTINGS));
+        double reach = SETTINGS.foreign.pondReach;
+        int edgeX = (chunkX + 1) * 16;
+        int centerZ = chunkZ * 16 + 8;
+        for (double angle = -1.5; angle <= 1.5; angle += 0.1) {
+            int x = edgeX + (int) (1.1 * reach * Math.cos(angle));
+            int z = centerZ + (int) (1.1 * reach * Math.sin(angle));
+            if (x > edgeX + 1) {
+                double water = logic.sampleWaterLevel(x, z);
+                assertTrue(logic.sampleSurfaceHeight(x, z) >= lake || water == lake, "lake leaks at " + x + "," + z);
+            }
+        }
     }
 
     /** New terrain meets foreign chunks at their height, and leaves terrain far away as it was. */
@@ -253,7 +328,7 @@ class TerrainLogicTest {
                 chunks.put(ForeignMap.key(chunkX + dx, chunkZ + dz), new ForeignMap.Chunk(heights, water, "minecraft:plains", false));
             }
         }
-        logic.setForeign(new ForeignMap(chunks, SETTINGS.foreign));
+        logic.setForeign(new ForeignMap(chunks, SETTINGS));
         int edge = (chunkX + 8) * 16;
         int z = (chunkZ + 4) * 16;
         assertEquals(ground, logic.sampleSurfaceHeight(edge + 1, z), 6.0);

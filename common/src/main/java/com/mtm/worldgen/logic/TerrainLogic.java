@@ -21,8 +21,11 @@ public final class TerrainLogic {
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
     public static final int ALGORITHM_VERSION = 1;
+    private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
+    /** How quickly banks around foreign water take hold as a blend gets stronger. */
+    private static final double BANK_HOLD = 4.0;
 
     private static final int CHUNK_SIZE = 16;
     /** Horizontal spacing of the corners the terrain density is evaluated at. */
@@ -74,7 +77,7 @@ public final class TerrainLogic {
         this.climate = new ClimateLayer(seed, settings);
         this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
-        this.worldId = Hashing.derive(seed, settings.toJson().hashCode());
+        this.worldId = Hashing.derive(seed, WORLD_SALT);
         this.overhangs = new OverhangLayer(seed, settings);
         this.sinkholes = new SinkholeLayer(seed, settings, this);
         this.sinkShore = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 1), 3, settings.rivers.sinkWavelength);
@@ -110,7 +113,10 @@ public final class TerrainLogic {
         return settings;
     }
 
-    /** Stands for this seed and these settings: two worlds that differ in either have different terrain. */
+    /**
+     * Stands for the world. It comes from the seed alone: the settings of a world are locked, but every update adds to
+     * them, and their text changing would make all its own chunks look foreign.
+     */
     public long worldId() {
         return worldId;
     }
@@ -190,30 +196,89 @@ public final class TerrainLogic {
         }
         double share = foreignShare(x, z, influence);
         double blended = closeIn(smooth, land, influence.ground(), share);
-        double pond = pondLevel(influence);
+        double[] held = heldWater(x, z, influence);
+        if (held != null) {
+            return dammed(land, blended, held, influence);
+        }
+        double pond = influence.wetLevel();
         if (Double.isNaN(pond)) {
             // A foreign sea below the world's own needs a bank, or the sea here would stand against it as a wall
-            return influence.water() < seaSurface() - 1.0 ? Math.max(blended, seaSurface() + 1.0) : blended;
+            return influence.water() < seaSurface() - 1.0 ? bankedUp(blended, seaSurface() + 1.0, smooth(BANK_HOLD * share)) : blended;
         }
-        // Banks rise past the reach of the water, so that it stays a pool however low the land around it lies
+        // A lake cut off at the edge of a map would pour out over lower land, as real flowing water. So banks go all
+        // the way around it, measured from any water on the edge, not just the nearest piece of edge, and what the
+        // edge has left open becomes a pool held in by them. Both fade out, or they would stand as steps
         double reach = settings.foreign.pondReach;
-        return influence.distance() < reach ? Math.min(blended, pond - 1.0) : Math.max(blended, pond + 1.0);
+        double wet = influence.wetDistance();
+        double banked = bankedUp(blended, pond + 1.0, 1.0 - smooth((wet - reach) / ((ForeignMap.WET_REACH - 1.0) * reach)));
+        double dug = smooth((reach - wet) / (0.5 * reach));
+        return banked + (Math.min(banked, pond - 1.0) - banked) * dug;
     }
 
-    /** Share of a blend at a position. Rivers passing through keep their ground, so the land gives way to them. */
+    /**
+     * Water of this world that a blend would leave standing above the land, as its level and how close it is, from 0
+     * to 1, or null. Rivers and lakes on high ground next to lower foreign land would lose their banks to the blend and
+     * pour out over the slope. Water that meets a foreign sea at its own level needs nothing.
+     */
+    private double[] heldWater(double x, double z, ForeignMap.Influence influence) {
+        double[] lake = sampleLake(x, z);
+        RiverRegion.Hit river = sampleRiver(x, z);
+        double level;
+        double near;
+        if (lake != null && lake[0] > LAKE_EDGE) {
+            level = lake[1];
+            near = 1.0;
+        } else if (river != null) {
+            level = river.level();
+            double half = river.halfWidth(settings.rivers.minChannelWidth);
+            near = 1.0 - smooth((river.distance() - half) / settings.foreign.damMargin);
+        } else {
+            return null;
+        }
+        double edgeTop = Double.isNaN(influence.water()) || influence.water() == ForeignMap.NO_WATER ? influence.ground()
+                : Math.max(influence.ground(), influence.water());
+        return near > 0.0 && level > edgeTop + 1.0 ? new double[]{level, near} : null;
+    }
+
+    /** Distance from the foreign edge at which a dam reaches the top of a water level: the water stays behind it. */
+    private double damFoot(double level, ForeignMap.Influence influence) {
+        return (level + 1.0 - influence.ground()) / settings.foreign.damGrade;
+    }
+
+    /**
+     * Land between a foreign edge and water that stands higher: a slope up from the edge to a crest above the water,
+     * and behind that the land as it was, so the water lies level. The closer land is to the water, the more it holds.
+     */
+    private double dammed(double land, double blended, double[] held, ForeignMap.Influence influence) {
+        double crest = held[0] + 1.0;
+        double foot = damFoot(held[0], influence);
+        double distance = influence.distance();
+        if (distance >= foot) {
+            return blended + (land - blended) * held[1];
+        }
+        double dam = influence.ground() + (crest - influence.ground()) * (distance / foot);
+        return blended + (Math.max(blended, dam) - blended) * held[1];
+    }
+
+    /** Land raised toward a bank, by the given share of the way. */
+    private static double bankedUp(double land, double bank, double hold) {
+        return land < bank ? land + (bank - land) * hold : land;
+    }
+
+    /**
+     * Share of a blend at a position. Rivers passing through keep their ground, so the land gives way to them, but
+     * only out in the blend: at the seam the land has to meet the foreign edge whatever runs nearby, or it stops
+     * short of it and leaves the edge standing as a wall. River fades reach hundreds of blocks, so this happens a lot.
+     */
     private double foreignShare(double x, double z, ForeignMap.Influence influence) {
         RiverRegion.Hit river = sampleRiver(x, z);
-        return river == null ? influence.share() : influence.share() * river.texture();
+        double share = influence.share();
+        return river == null ? share : share * (river.texture() + (1.0 - river.texture()) * share * share);
     }
 
     private static double closeIn(double smooth, double value, double target, double share) {
         double head = smooth + (target - smooth) * share;
         return head + (value - smooth) * (1.0 - share);
-    }
-
-    /** Water level of the foreign river or lake that reaches a position, or NaN. Sea reaches everywhere by itself. */
-    private double pondLevel(ForeignMap.Influence influence) {
-        return influence.water() > seaSurface() + 1.0 ? influence.water() : Double.NaN;
     }
 
     /** Surface height at a block column, memoized per thread for repeated queries of the same column. */
@@ -582,14 +647,25 @@ public final class TerrainLogic {
         return plainWaterLevel(x, z);
     }
 
-    /** Water where a blend reaches: foreign water spreads past the edge, and any other water moves with the land. */
+    /**
+     * Water where a blend reaches. Foreign water spreads past the edge. Any other water never rises with the land, which
+     * would tilt whole rivers and lakes up the slope: land that comes up past it simply ends it at a shore. Land that
+     * sinks takes the water down with it, or the water would stand above its banks.
+     */
     private double foreignWaterLevel(double x, double z, double smooth, ForeignMap.Influence influence) {
-        double pond = pondLevel(influence);
-        if (!Double.isNaN(pond) && influence.distance() < settings.foreign.pondReach) {
+        double pond = influence.wetLevel();
+        if (!Double.isNaN(pond) && influence.wetDistance() < settings.foreign.pondReach && sampleSurfaceHeight(x, z) < pond) {
             return pond;
         }
         double level = plainWaterLevel(x, z);
-        return Double.isNaN(level) ? level : closeIn(smooth, level, influence.ground(), foreignShare(x, z, influence));
+        if (Double.isNaN(level) || sampleSurfaceHeight(x, z) >= level) {
+            return Double.NaN;
+        }
+        double[] held = heldWater(x, z, influence);
+        if (held != null) {
+            return influence.distance() < damFoot(held[0], influence) ? Double.NaN : level;
+        }
+        return Math.min(level, closeIn(smooth, level, influence.ground(), foreignShare(x, z, influence)));
     }
 
     private double plainWaterLevel(double x, double z) {

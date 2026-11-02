@@ -255,6 +255,9 @@ public final class WorldgenSettings {
         public int flatGround = 67;
         /** Water and rock of foreign rivers and lakes spread this far past the edge, closed in by banks. */
         public double pondReach = 48.0;
+        /** Grade of the dam between high water of this world and lower foreign land, and how far around the water it holds. */
+        public double damGrade = 0.6;
+        public double damMargin = 96.0;
         /** Size of the lake a river ends in when it would run into foreign chunks, as a multiple of its width. */
         public double endLakeFactor = 3.0;
         public double endLakeMinWidth = 60.0;

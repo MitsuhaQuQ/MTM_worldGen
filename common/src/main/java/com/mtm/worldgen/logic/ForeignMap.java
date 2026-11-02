@@ -19,7 +19,7 @@ public final class ForeignMap {
     public static final int SAMPLES = SAMPLE_OFFSETS.length * SAMPLE_OFFSETS.length;
     /** A height meaning that a sample has no water. */
     public static final short NO_WATER = Short.MIN_VALUE;
-    public static final ForeignMap EMPTY = new ForeignMap(Map.of(), new WorldgenSettings.Foreign());
+    public static final ForeignMap EMPTY = new ForeignMap(Map.of(), new WorldgenSettings());
     /** A chunk with foreign chunks on all sides. Nothing blends toward it, so it needs no detail. */
     public static final Chunk INNER = new Chunk(null, null, null, false);
 
@@ -31,20 +31,29 @@ public final class ForeignMap {
     private static final double SOFTEN = 4.0;
     /** How far along an edge the highest point counts toward the width of a blend. */
     private static final double PEAK_REACH = 192.0;
-    private static final Point NOTHING = new Point(Double.MAX_VALUE, 0.0, Double.NaN, 0.0, null, false);
+    /** How far the banks around foreign water reach, as a multiple of foreign.pondReach. */
+    public static final double WET_REACH = 3.0;
+    /** Distance standing for no water in reach. */
+    private static final double DRY = 1.0E5;
+    private static final Point NOTHING = new Point(Double.MAX_VALUE, 0.0, Double.NaN, 0.0, null, false, DRY, Double.NaN);
 
     /** One foreign chunk. Upgraded chunks came from an older MTM, and blend further because more is known about them. */
     public record Chunk(short[] ground, short[] water, String biome, boolean upgraded) {
     }
 
-    /** How strongly a foreign edge claims a position: blend share, ground and water to close in on, biome there. */
-    public record Influence(double share, double distance, double ground, double water, String biome, boolean upgraded) {
+    /**
+     * How strongly a foreign edge claims a position: blend share, ground and water to close in on, biome there. Wet
+     * distance and level belong to the nearest water that stands above the sea at an edge; the level is NaN out of reach.
+     */
+    public record Influence(double share, double distance, double ground, double water, String biome, boolean upgraded,
+                            double wetDistance, double wetLevel) {
     }
 
     private record Edge(double x, double z, double ground, double water, String biome, boolean upgraded) {
     }
 
-    private record Point(double distance, double ground, double water, double peak, String biome, boolean upgraded) {
+    private record Point(double distance, double ground, double water, double peak, String biome, boolean upgraded,
+                         double wetDistance, double wetLevel) {
     }
 
     /**
@@ -56,11 +65,15 @@ public final class ForeignMap {
     private final Chunk[] tableChunks;
     private final int size;
     private final WorldgenSettings.Foreign config;
+    /** Water above this stands higher than the sea, and has to be held in. */
+    private final double highWater;
     private final Map<Long, List<Edge>> buckets = new HashMap<>();
     private final Map<Long, Point> lattice = new ConcurrentHashMap<>();
     private final int bucketReach;
 
-    public ForeignMap(Map<Long, Chunk> chunks, WorldgenSettings.Foreign config) {
+    public ForeignMap(Map<Long, Chunk> chunks, WorldgenSettings settings) {
+        WorldgenSettings.Foreign config = settings.foreign;
+        this.highWater = settings.general.seaLevel;
         this.size = chunks.size();
         int capacity = Integer.highestOneBit(Math.max(4, chunks.size()) * 2) * 2;
         this.tableKeys = new long[capacity];
@@ -172,11 +185,19 @@ public final class ForeignMap {
         double most = a.upgraded ? config.upgradeMaxWidth : config.maxWidth;
         double step = Math.max(Math.abs(peak - land), Math.abs(ground - land));
         double width = Math.max(config.minWidth, Math.min(most, step / config.grade));
-        if (distance >= width) {
+        double wetDistance = bilinear(a.wetDistance, b.wetDistance, c.wetDistance, d.wetDistance, tx, tz);
+        boolean wet = wetDistance < WET_REACH * config.pondReach;
+        if (distance >= width && !wet) {
             return null;
         }
-        double t = 1.0 - distance / width;
-        return new Influence(t * t * (3.0 - 2.0 * t), distance, ground, a.water, a.biome, a.upgraded);
+        double t = Math.max(0.0, 1.0 - distance / width);
+        double wetLevel = wet ? firstLevel(a, b, c, d) : Double.NaN;
+        return new Influence(t * t * (3.0 - 2.0 * t), distance, ground, a.water, a.biome, a.upgraded, wetDistance, wetLevel);
+    }
+
+    /** The water level of the lattice points around a position; they may lie on different sides of a shore. */
+    private static double firstLevel(Point a, Point b, Point c, Point d) {
+        return !Double.isNaN(a.wetLevel) ? a.wetLevel : !Double.isNaN(b.wetLevel) ? b.wetLevel : !Double.isNaN(c.wetLevel) ? c.wetLevel : d.wetLevel;
     }
 
     private static double bilinear(double a, double b, double c, double d, double tx, double tz) {
@@ -196,6 +217,8 @@ public final class ForeignMap {
         int bucketX = Math.floorDiv((int) x, BUCKET);
         int bucketZ = Math.floorDiv((int) z, BUCKET);
         double nearest = Double.MAX_VALUE;
+        double wetDistance = DRY;
+        double wetLevel = Double.NaN;
         Edge closest = null;
         double groundSum = 0.0;
         double weightSum = 0.0;
@@ -215,6 +238,10 @@ public final class ForeignMap {
                         nearest = distance;
                         closest = edge;
                     }
+                    if (edge.water > highWater && distance < wetDistance) {
+                        wetDistance = distance;
+                        wetLevel = edge.water;
+                    }
                     if (distance < 2.0 * PEAK_REACH + nearest) {
                         near.add(edge);
                     }
@@ -230,6 +257,6 @@ public final class ForeignMap {
                 peak = Math.max(peak, edge.ground);
             }
         }
-        return new Point(covers(x + 0.5, z + 0.5) ? 0.0 : nearest, groundSum / weightSum, closest.water, peak, closest.biome, closest.upgraded);
+        return new Point(covers(x + 0.5, z + 0.5) ? 0.0 : nearest, groundSum / weightSum, closest.water, peak, closest.biome, closest.upgraded, wetDistance, wetLevel);
     }
 }
