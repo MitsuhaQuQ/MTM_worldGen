@@ -314,6 +314,11 @@ public final class WorldgenSettings {
         public double normalizeRadius = 320.0;
         /** How far erosion may raise land above the skeleton, as a share of its height above the sea. */
         public double maxRaise = 0.15;
+        /**
+         * Blocks over which the base each cell drains to (a river's water, or the sea) is smoothed before relief is
+         * scaled over it, so that land does not step where two rivers of different levels part.
+         */
+        public double baseSmoothing = 32.0;
         /** How far the grid is warped when it is read, which bends valleys off the grid's eight directions. */
         public double warp = 32.0;
         public double warpWavelength = 192.0;
@@ -572,6 +577,17 @@ public final class WorldgenSettings {
         public double caveThreshold = 0.1;
         /** Cave biomes from dry to humid. */
         public String[] caves = {"minecraft:dripstone_caves", "minecraft:lush_caves"};
+        /**
+         * The deep dark: patches deep underground over about a fifth of the world, which brings sculk and ancient
+         * cities. Patches are deepDarkWavelength blocks across; their top lies below deepDarkTop, higher toward their
+         * middle by up to deepDarkTopWander blocks per unit of noise above the threshold.
+         */
+        public boolean deepDark = true;
+        public String deepDarkBiome = "minecraft:deep_dark";
+        public double deepDarkWavelength = 1024.0;
+        public double deepDarkThreshold = 0.25;
+        public double deepDarkTop = -8.0;
+        public double deepDarkTopWander = 64.0;
         /** Biome of mushroom islands. */
         public String mushroomIsland = "minecraft:mushroom_fields";
         /**
@@ -616,6 +632,7 @@ public final class WorldgenSettings {
         /** Every biome id the world can use, without duplicates, in a stable order. */
         public List<String> allBiomes() {
             Set<String> all = new LinkedHashSet<>(List.of(caves));
+            all.add(deepDarkBiome);
             all.add(mushroomIsland);
             for (BiomeZone zone : List.of(tropical, temperate, cold, polar)) {
                 for (String[] list : zone.lists()) {
@@ -734,6 +751,11 @@ public final class WorldgenSettings {
         public double majorTrunkDepthMax = 20.0;
         /** Narrower rivers still cut a channel this wide, or noise cells would lose them. */
         public double minChannelWidth = 6.0;
+        /**
+         * Share of its first edge over which a river grows from nothing to its channel: width, depth, valley and the
+         * texture it smooths out all start at zero at the source.
+         */
+        public double sourceTaper = 0.15;
         /** Valley floor width as a multiple of the river width. */
         public double valleyFloorFactor = 3.0;
         /** Valley walls: land may rise this grade above the floor at first, then steeper by the curve per block. */
@@ -750,6 +772,12 @@ public final class WorldgenSettings {
         /** Floodplains flatten low land beside rivers: this many blocks wide, plus this many per block of river width. */
         public double floodplainBase = 64.0;
         public double floodplainPerWidth = 5.0;
+        /**
+         * With erosion, rivers in the hills narrower than this have no valley or floodplain of their own, only their
+         * channel in the valleys erosion cut; from there to twice as wide they take on their floodplain, which reaches
+         * as far as it does on the plains. Mountains have none at all.
+         */
+        public double floodplainMinWidth = 50.0;
         /** Plains stay within this many blocks above the river. */
         public double floodplainRise = 5.0;
         /** Land this far above the river is no plain and stays as it is, however close. */
@@ -759,6 +787,12 @@ public final class WorldgenSettings {
         /** Ridge texture fades in over this many blocks from a valley floor, plus this many per block of river width. */
         public double textureFadeBase = 64.0;
         public double textureFadePerWidth = 2.0;
+        /**
+         * The same with erosion, which only fades out at the banks: its gullies run down to the rivers already, and
+         * fading them over the reach above would leave smooth lobes where they should end.
+         */
+        public double erodedTextureFadeBase = 12.0;
+        public double erodedTextureFadePerWidth = 0.25;
         /** How far a river node moves toward the middle of its neighbors, rounding sharp bends. */
         public double nodeSmoothing = 0.6;
         /** River nodes averaged on each side when smoothing big rivers. */
@@ -838,6 +872,7 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
         require(biomes.unrealisticBiomes != null && biomes.mountainShare >= 0.0 && biomes.mountainShare < 1.0,
                 "biomes.unrealisticBiomes must be a list, and biomes.mountainShare must be at least 0 and below 1");
         require(erosion.cellSize > 0 && general.regionSize % erosion.cellSize == 0 && erosion.margin % erosion.cellSize == 0

@@ -23,6 +23,12 @@ final class ErosionLayer {
         /** Land before erosion: the terrain skeleton without texture. */
         double height(double x, double z);
 
+        /** Water level of a river channel at a position, or NaN where there is none. */
+        double riverLevel(double x, double z);
+
+        /** Water level of a lake at a position, or NaN where there is none. */
+        double lakeLevel(double x, double z);
+
         /**
          * Makes ready whatever sampling an area needs, on the calling thread. Sampling then runs on the logic threads,
          * and anything it had to compute there could wait on a computation that needs those same threads.
@@ -77,10 +83,12 @@ final class ErosionLayer {
     }
 
     /** Height erosion takes off at a position: zero or less. */
-    double change(double blockX, double blockZ) {
-        // Read the grid through a gentle warp, so valleys wind instead of following the grid's eight directions
-        double x = blockX + config.warp * warpX.sample(blockX, blockZ);
-        double z = blockZ + config.warp * warpZ.sample(blockX, blockZ);
+    double change(double blockX, double blockZ, double warpShare) {
+        // Read the grid through a gentle warp, so valleys wind instead of following the grid's eight directions.
+        // Rivers hold their valleys in place, so the warp lets go close to them
+        double warp = config.warp * warpShare;
+        double x = blockX + warp * warpX.sample(blockX, blockZ);
+        double z = blockZ + warp * warpZ.sample(blockX, blockZ);
         int regionSize = settings.general.regionSize;
         int regionX = Math.floorDiv((int) Math.floor(x), regionSize);
         int regionZ = Math.floorDiv((int) Math.floor(z), regionSize);
@@ -169,6 +177,8 @@ final class ErosionLayer {
         double originZ = (double) regionZ * settings.general.regionSize - (double) margin * config.cellSize;
         double[] start = new double[n];
         double[] rough = new double[n];
+        double[] river = new double[n];
+        boolean[] lake = new boolean[n];
         sampler.prepare(originX, originZ, originX + size * config.cellSize, originZ + size * config.cellSize);
         LogicThreads.forEach(size, row -> {
             for (int col = 0; col < size; col++) {
@@ -177,13 +187,25 @@ final class ErosionLayer {
                 double noise = roughness.sample(x, z);
                 rough[row * size + col] = noise;
                 start[row * size + col] = sampler.height(x, z) + config.roughness * noise;
+                double lakeLevel = sampler.lakeLevel(x, z);
+                lake[row * size + col] = !Double.isNaN(lakeLevel);
+                river[row * size + col] = lake[row * size + col] ? lakeLevel : sampler.riverLevel(x, z);
             }
         });
         double sea = settings.general.seaLevel - 1;
         double[] height = Arrays.copyOf(start, n);
         double[] uplift = new double[n];
+        // Rivers and lakes are where the slopes drain to, like the sea: they keep their water level and neither rise
+        // nor wear. Valleys grow down to the rivers that are there, so in the mountains the river valleys are simply the
+        // valleys of the mountains
+        boolean[] fixed = new boolean[n];
         for (int index = 0; index < n; index++) {
-            uplift[index] = config.uplift * Math.max(0.0, start[index] - sea);
+            if (!Double.isNaN(river[index])) {
+                fixed[index] = true;
+                height[index] = river[index];
+            } else {
+                uplift[index] = config.uplift * Math.max(0.0, start[index] - sea);
+            }
         }
         int[] receiver = new int[n];
         double[] receiverDistance = new double[n];
@@ -195,6 +217,7 @@ final class ErosionLayer {
         double[] share = new double[8];
         double[] before = new double[n];
         double cellArea = (double) config.cellSize * config.cellSize;
+        int top = 0;
         for (int round = 0; round < config.rounds; round++) {
             // The land rises where the skeleton stands high; the sea and the window's rim stay where they are
             LogicThreads.forEach(size - 2, line -> {
@@ -210,7 +233,7 @@ final class ErosionLayer {
                     int index = row * size + col;
                     receiver[index] = index;
                     receiverDistance[index] = 1.0;
-                    if (height[index] < sea || col == 0 || row == 0 || col == size - 1 || row == size - 1) {
+                    if (fixed[index] || height[index] < sea || col == 0 || row == 0 || col == size - 1 || row == size - 1) {
                         continue;
                     }
                     double steepest = 0.0;
@@ -242,7 +265,7 @@ final class ErosionLayer {
                 }
             }
             // Cells ordered from where water ends up to where it starts, so each comes after the cell it drains to
-            int top = 0;
+            top = 0;
             for (int index = 0; index < n; index++) {
                 if (receiver[index] == index) {
                     stack[top++] = index;
@@ -298,7 +321,7 @@ final class ErosionLayer {
                 int row = line + 1;
                 for (int col = 1; col < size - 1; col++) {
                     int index = row * size + col;
-                    if (before[index] < sea) {
+                    if (fixed[index] || before[index] < sea) {
                         continue;
                     }
                     double laplacian = before[index - 1] + before[index + 1] + before[index - size] + before[index + size] - 4.0 * before[index];
@@ -306,22 +329,36 @@ final class ErosionLayer {
                 }
             });
         }
-        // Scale the eroded land back to the skeleton's heights, over a wide area: the valleys stay, the ranges keep
-        // the heights they were designed with
+        // Each cell's base: the level of the river or sea its water ends up in, or the window's rim. Bases follow the
+        // drainage from where it ends, and are smoothed a little so they do not step across the divides between rivers
+        double[] base = new double[n];
+        for (int k = 0; k < top; k++) {
+            int cell = stack[k];
+            int down = receiver[cell];
+            base[cell] = down != cell ? base[down] : fixed[cell] ? river[cell] : Math.min(height[cell], Math.max(sea, start[cell]));
+        }
+        base = blur(base, Math.max(1, (int) Math.round(config.baseSmoothing / config.cellSize)));
+        // Scale the relief above the bases back to the skeleton's, over a wide area: the valleys stay, the ranges keep
+        // the heights they were designed with, and nothing sinks below the river it drains to
         double[] eroded = new double[n];
         double[] designed = new double[n];
         for (int index = 0; index < n; index++) {
-            eroded[index] = Math.max(0.0, height[index] - sea);
-            designed[index] = Math.max(0.0, start[index] - config.roughness * rough[index] - sea);
+            eroded[index] = Math.max(0.0, height[index] - base[index]);
+            designed[index] = Math.max(0.0, start[index] - config.roughness * rough[index] - base[index]);
         }
         int radius = Math.max(1, (int) Math.round(config.normalizeRadius / config.cellSize));
         double[] erodedMean = blur(eroded, radius);
         double[] designedMean = blur(designed, radius);
         float[] change = new float[n];
         for (int index = 0; index < n; index++) {
-            double relief = designed[index];
-            double scaled = erodedMean[index] > 1.0 ? eroded[index] * designedMean[index] / erodedMean[index] : relief;
-            double difference = scaled - relief;
+            if (lake[index]) {
+                // Lakes fill their own basins, which erosion leaves as they are
+                continue;
+            }
+            double land = start[index] - config.roughness * rough[index];
+            double relief = Math.max(0.0, land - sea);
+            double scaled = base[index] + (erodedMean[index] > 1.0 ? eroded[index] * designedMean[index] / erodedMean[index] : designed[index]);
+            double difference = scaled - land;
             change[index] = (float) Math.max(-config.maxDepth * relief, Math.min(config.maxRaise * relief, difference));
         }
         return change;

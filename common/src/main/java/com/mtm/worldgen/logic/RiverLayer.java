@@ -153,6 +153,10 @@ final class RiverLayer {
         double c2z = b[1] - endTangent[1] * length / 3.0;
 
         boolean endsHere = entersForeign(around, regionX, regionZ, nextX, nextZ);
+        // A river starts as nothing and grows into its channel over its first edge, instead of opening at full size in
+        // a round pocket on the hillside
+        boolean source = !flow.hasInflow(lx, lz) || isDry(around, regionX, regionZ, cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz));
+        double previousStrength = source ? 0.0 : 1.0;
         double previousX = a[0];
         double previousZ = a[1];
         double previousLevel = startLevel;
@@ -176,11 +180,13 @@ final class RiverLayer {
             double level = i == config.curveSegments ? endLevel
                     : Math.max(endLevel, Math.min(previousLevel, Math.min(chord, landform.height(x, z))));
             double from = (double) (i - 1) / config.curveSegments;
+            double strength = source ? smooth(t / config.sourceTaper) : 1.0;
             curves.add(previousX, previousZ, x, z,
-                    startSize[0] + from * (endSize[0] - startSize[0]), startSize[0] + t * (endSize[0] - startSize[0]),
-                    startSize[1] + from * (endSize[1] - startSize[1]), startSize[1] + t * (endSize[1] - startSize[1]),
-                    previousLevel, level,
+                    previousStrength * (startSize[0] + from * (endSize[0] - startSize[0])), strength * (startSize[0] + t * (endSize[0] - startSize[0])),
+                    previousStrength * (startSize[1] + from * (endSize[1] - startSize[1])), strength * (startSize[1] + t * (endSize[1] - startSize[1])),
+                    previousLevel, level, previousStrength, strength,
                     riverClass);
+            previousStrength = strength;
             previousX = x;
             previousZ = z;
             previousLevel = level;
@@ -580,13 +586,29 @@ final class RiverLayer {
     }
 
     /** Collects segments and sorts them into the buckets within reach of them. */
+    /** Whether a cell carries no river: water flows through it, but too little of it to make one. */
+    private boolean isDry(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
+        return flow == null || flow.riverClass(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells)) == FlowRegion.RiverClass.NONE;
+    }
+
+    private static double smooth(double t) {
+        double clamped = Math.max(0.0, Math.min(1.0, t));
+        return clamped * clamped * (3.0 - 2.0 * clamped);
+    }
+
     private final class Curves {
-        private static final int STRIDE = 10;
+        private static final int STRIDE = RiverRegion.STRIDE;
         private double[] values = new double[STRIDE * 1024];
         private byte[] classes = new byte[1024];
         private int count;
 
         void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1, byte riverClass) {
+            add(x0, z0, x1, z1, w0, w1, d0, d1, l0, l1, 1.0, 1.0, riverClass);
+        }
+
+        void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1,
+                 double s0, double s1, byte riverClass) {
             if (count == classes.length) {
                 values = Arrays.copyOf(values, values.length * 2);
                 classes = Arrays.copyOf(classes, classes.length * 2);
@@ -602,6 +624,8 @@ final class RiverLayer {
             values[s + 7] = d1;
             values[s + 8] = l0;
             values[s + 9] = l1;
+            values[s + 10] = s0;
+            values[s + 11] = s1;
             classes[count++] = riverClass;
         }
 
@@ -609,7 +633,8 @@ final class RiverLayer {
             for (int i = 0; i < other.count; i++) {
                 int s = i * STRIDE;
                 add(other.values[s], other.values[s + 1], other.values[s + 2], other.values[s + 3], other.values[s + 4], other.values[s + 5],
-                        other.values[s + 6], other.values[s + 7], other.values[s + 8], other.values[s + 9], other.classes[i]);
+                        other.values[s + 6], other.values[s + 7], other.values[s + 8], other.values[s + 9],
+                        other.values[s + 10], other.values[s + 11], other.classes[i]);
             }
         }
 
@@ -637,7 +662,10 @@ final class RiverLayer {
             for (int i = 0; i < index.length; i++) {
                 index[i] = lists.get(i).stream().mapToInt(Integer::intValue).toArray();
             }
-            return new RiverRegion(originX, originZ, bucketSize, buckets, config, Arrays.copyOf(values, count * STRIDE),
+            boolean eroded = settings.erosion.enabled;
+            return new RiverRegion(originX, originZ, bucketSize, buckets, config,
+                    eroded ? config.erodedTextureFadeBase : config.textureFadeBase, eroded ? config.erodedTextureFadePerWidth : config.textureFadePerWidth,
+                    Arrays.copyOf(values, count * STRIDE),
                     Arrays.copyOf(classes, count), index);
         }
 

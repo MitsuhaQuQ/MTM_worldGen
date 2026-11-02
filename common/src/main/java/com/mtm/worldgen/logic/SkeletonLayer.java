@@ -276,6 +276,11 @@ final class SkeletonLayer {
         return 1.0 - smoothstep(plainsLow, plainsHigh, tier) > 0.5 ? TerrainLogic.Landform.PLAINS : TerrainLogic.Landform.HILLS;
     }
 
+    /** How far a position lies above the plains, in the hills or mountains, from 0 in the plains to 1 out of them. */
+    double uplandShare(double x, double z, double baseAboveSea) {
+        return smoothstep(plainsLow, plainsHigh, tier(x, z, baseAboveSea));
+    }
+
     /** How far a position lies in the mountain tier, from 0 in the hills to 1 well inside it. */
     double mountainShare(double x, double z, double baseAboveSea) {
         return smoothstep(zoneLow, zoneHigh, tier(x, z, baseAboveSea));

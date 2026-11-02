@@ -38,6 +38,10 @@ public final class TerrainLogic {
 
     /** Share of lake cells around a position where a lake's water ends and its rim stands. */
     private static final double LAKE_EDGE = 0.25;
+    /** Share of its growth from which a river starting at its source holds water. Erosion holds the same stretch to it. */
+    static final double SOURCE_WATER = 0.15;
+    /** Width of the flat top of a levee along a channel in the hills and mountains; it falls away at 100% beyond. */
+    private static final double LEVEE_TOP = 2.0;
 
     private static final Map<WorldKey, TerrainLogic> WORLDS = new ConcurrentHashMap<>();
 
@@ -67,6 +71,8 @@ public final class TerrainLogic {
     private final RegionCache<LogicRegion> regions;
     private final RegionCache<FlowRegion> flowRegions;
     private final RegionCache<RiverRegion> riverRegions;
+    /** Rivers as the seed lays them out, without what foreign chunks do to them, for erosion to drain into. */
+    private final RegionCache<RiverRegion> naturalRiverRegions;
     private final ErosionLayer erosion;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<FlowRegion> lastFlow = new ThreadLocal<>();
@@ -101,6 +107,8 @@ public final class TerrainLogic {
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.covers(x, z));
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
+        RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false);
+        this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize);
         this.erosion = new ErosionLayer(seed, settings, new ErosionLayer.HeightSampler() {
             @Override
             public double height(double x, double z) {
@@ -108,12 +116,34 @@ public final class TerrainLogic {
             }
 
             @Override
+            public double riverLevel(double x, double z) {
+                RiverRegion.Hit river = naturalRiver(x, z);
+                return river != null && river.strength() >= SOURCE_WATER
+                        && river.distance() <= river.halfWidth(settings.rivers.minChannelWidth) + 0.5 * settings.erosion.cellSize
+                        ? river.level() : Double.NaN;
+            }
+
+            @Override
+            public double lakeLevel(double x, double z) {
+                return sampleLakeLevel(x, z);
+            }
+
+            @Override
             public void prepare(double minX, double minZ, double maxX, double maxZ) {
                 // Interpolation reads cells a little past the area, so take the regions around it too
                 int size = settings.general.regionSize;
-                for (int regionX = Math.floorDiv((int) Math.floor(minX), size) - 1; regionX <= Math.floorDiv((int) Math.ceil(maxX), size) + 1; regionX++) {
-                    for (int regionZ = Math.floorDiv((int) Math.floor(minZ), size) - 1; regionZ <= Math.floorDiv((int) Math.ceil(maxZ), size) + 1; regionZ++) {
+                int fromX = Math.floorDiv((int) Math.floor(minX), size);
+                int toX = Math.floorDiv((int) Math.ceil(maxX), size);
+                int fromZ = Math.floorDiv((int) Math.floor(minZ), size);
+                int toZ = Math.floorDiv((int) Math.ceil(maxZ), size);
+                for (int regionX = fromX - 1; regionX <= toX + 1; regionX++) {
+                    for (int regionZ = fromZ - 1; regionZ <= toZ + 1; regionZ++) {
                         region(regionX, regionZ);
+                    }
+                }
+                for (int regionX = fromX; regionX <= toX; regionX++) {
+                    for (int regionZ = fromZ; regionZ <= toZ; regionZ++) {
+                        naturalRiverRegion(regionX, regionZ);
                     }
                 }
             }
@@ -154,6 +184,27 @@ public final class TerrainLogic {
     /** Refined river courses of a logic region. */
     public RiverRegion riverRegion(int regionX, int regionZ) {
         return riverRegions.get(regionX, regionZ);
+    }
+
+    /** How much of its warp erosion is read through at a position: none in the channels it was held to, all a little away. */
+    private double erosionWarpShare(double x, double z) {
+        RiverRegion.Hit river = naturalRiver(x, z);
+        if (river == null) {
+            return 1.0;
+        }
+        double clear = river.distance() - river.halfWidth(settings.rivers.minChannelWidth);
+        return smooth(clear / (2.0 * settings.erosion.warp + settings.erosion.cellSize));
+    }
+
+    /** Rivers of a logic region as the seed lays them out, the same as {@link #riverRegion} without foreign chunks. */
+    private RiverRegion naturalRiverRegion(int regionX, int regionZ) {
+        return foreign.isEmpty() ? riverRegion(regionX, regionZ) : naturalRiverRegions.get(regionX, regionZ);
+    }
+
+    /** Nearest river of {@link #naturalRiverRegion} within rivers.queryReach of a position, or null. */
+    private RiverRegion.Hit naturalRiver(double x, double z) {
+        int size = settings.general.regionSize;
+        return naturalRiverRegion((int) Math.floorDiv((long) Math.floor(x), size), (int) Math.floorDiv((long) Math.floor(z), size)).nearest(x, z);
     }
 
     /** Nearest river within rivers.queryReach of a position, or null. */
@@ -479,7 +530,9 @@ public final class TerrainLogic {
         boolean eroded = settings.erosion.enabled && texture != null;
         double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture, !eroded);
         if (texture != null) {
-            double change = eroded ? erosion.change(x, z) * (1.0 - skeleton.domeShare(x, z)) : 0.0;
+            // Plains lie just above their rivers by design, and erosion there would only dig below them
+            double change = eroded ? erosion.change(x, z, erosionWarpShare(x, z)) * (1.0 - skeleton.domeShare(x, z))
+                    * skeleton.uplandShare(x, z, base - (settings.general.seaLevel - 1)) : 0.0;
             texture[0] = clearance * (texture[0] + change);
         }
         return height;
@@ -523,6 +576,17 @@ public final class TerrainLogic {
         double cliff = cliffHeight(x, z);
         double ground = cliff + (river == null ? textured : smooth + (textured - smooth) * river.texture());
         double land = river == null ? ground : duned(x, z, river, carveValley(x, z, river, ground));
+        if (river != null && settings.erosion.enabled) {
+            // Mountains need no valleys of their own: erosion cut them down to the rivers already. Only the channel and
+            // its banks are shaped there, and the land around stays as erosion left it, texture and all. So do the
+            // streams of the hills, while wide rivers there still spread their floodplains, as do all rivers of the plains
+            double baseAboveSea = interpolate(FIELD_HEIGHT, x, z) - seaSurface();
+            double mountain = smooth(2.0 * skeleton.mountainShare(x, z, baseAboveSea) - 1.0);
+            double bare = Math.max(mountain, skeleton.uplandShare(x, z, baseAboveSea) * (1.0 - smooth(4.0 * river.widePlain())));
+            if (bare > 0.0) {
+                land += (duned(x, z, river, carveChannelOnly(river, cliff + textured)) - land) * bare;
+            }
+        }
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -619,6 +683,40 @@ public final class TerrainLogic {
     }
 
     private double carveValley(double x, double z, RiverRegion.Hit river, double ground) {
+        return grow(river, ground, carveChannel(x, z, river, ground));
+    }
+
+    /**
+     * Land a river shapes near its source, where it has not grown yet: its water level is that of the smooth ground it
+     * was routed on, and spurs higher than that would get a narrow slot cut through them, so it only cuts as much as
+     * it has grown. It holds no water before it is half grown, and raises no banks either, which would stand as a ridge
+     * along the gully it starts in.
+     */
+    private static double grow(RiverRegion.Hit river, double ground, double carved) {
+        if (carved < ground) {
+            return ground + (carved - ground) * river.strength();
+        }
+        return river.strength() >= SOURCE_WATER ? carved : ground;
+    }
+
+    /**
+     * A river's channel and the banks that keep its water in, with nothing of a valley around them. Banks are a narrow
+     * levee along the channel, where the land beside would lie lower than the water, and nothing beyond it.
+     */
+    private double carveChannelOnly(RiverRegion.Hit river, double ground) {
+        double half = river.halfWidth(settings.rivers.minChannelWidth);
+        double carved;
+        if (river.distance() < half) {
+            double offset = river.distance() / half;
+            carved = river.level() - river.depth() * (1.0 - offset * offset);
+        } else {
+            double levee = river.level() + settings.rivers.bankHeight - Math.max(0.0, river.distance() - half - LEVEE_TOP);
+            carved = Math.max(ground, levee);
+        }
+        return grow(river, ground, carved);
+    }
+
+    private double carveChannel(double x, double z, RiverRegion.Hit river, double ground) {
         double half = river.halfWidth(settings.rivers.minChannelWidth);
         if (river.distance() < half) {
             double offset = river.distance() / half;
@@ -733,7 +831,8 @@ public final class TerrainLogic {
             return lake[1];
         }
         RiverRegion.Hit river = sampleRiver(x, z);
-        return river != null && river.distance() < river.halfWidth(settings.rivers.minChannelWidth) ? river.level() : Double.NaN;
+        return river != null && river.strength() >= SOURCE_WATER && river.distance() < river.halfWidth(settings.rivers.minChannelWidth)
+                ? river.level() : Double.NaN;
     }
 
     /**
@@ -812,6 +911,9 @@ public final class TerrainLogic {
      */
     public String biomeAt(int x, int y, int z) {
         Column column = columns.get().column(this, x, z);
+        if (y < column.height - settings.biomes.caveDepth && biomes.isDeepDark(x, y, z)) {
+            return settings.biomes.deepDarkBiome;
+        }
         if (y < column.height - settings.biomes.caveDepth && biomes.isCave(x, z)) {
             return biomes.caveBiome(climate.humidity(x, z));
         }

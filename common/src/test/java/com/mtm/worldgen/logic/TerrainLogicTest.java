@@ -652,9 +652,13 @@ class TerrainLogicTest {
             int x = random.nextInt(32000) - 16000;
             int z = random.nextInt(32000) - 16000;
             RiverRegion.Hit river = logic.sampleRiver(x, z);
-            // Ground near the coast stays low by design, so that nothing closes off river mouths
-            if (river == null || river.level() < SETTINGS.general.seaLevel + SETTINGS.rivers.coastBlend + 4.0
-                    || river.width() < 100.0 || river.run() > 150.0 || river.run() <= 0.0
+            // Ground near the coast stays low by design, so that nothing closes off river mouths. Mountains have no
+            // floodplains: their rivers run in the valleys erosion cut
+            if (river == null || logic.sampleLandformKind(x, z) == TerrainLogic.Landform.MOUNTAINS || river.level() < SETTINGS.general.seaLevel + SETTINGS.rivers.coastBlend + 4.0
+                    // Run and width can belong to different rivers: the bank of a stream beside a big river far off
+                    // is hill land, not the big river's plain
+                    || river.width() < 100.0 || river.run() <= 0.0
+                    || river.distance() - river.halfWidth(SETTINGS.rivers.minChannelWidth) > 150.0
                     || logic.sampleLandform(x, z) > river.level() + 15.0 || !Double.isNaN(logic.sampleWaterLevel(x, z))) {
                 continue;
             }

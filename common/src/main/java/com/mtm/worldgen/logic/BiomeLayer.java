@@ -23,6 +23,7 @@ final class BiomeLayer {
     private final Fbm variantNoise;
     private final Fbm caveNoise;
     private final Fbm bandNoise;
+    private final Fbm deepDarkNoise;
     /** Keyed by list identity: the lists are the configuration's own arrays, which never change. */
     private final Map<String[], String[]> realisticLists = Collections.synchronizedMap(new IdentityHashMap<>());
 
@@ -32,6 +33,7 @@ final class BiomeLayer {
         this.variantNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT), 2, config.patchWavelength * settings.scale.biomes);
         this.caveNoise = new Fbm(Hashing.derive(seed, CAVE_SALT), 2, config.caveWavelength);
         this.bandNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT + 1), 3, config.bandWavelength);
+        this.deepDarkNoise = new Fbm(Hashing.derive(seed, CAVE_SALT + 1), 2, config.deepDarkWavelength);
     }
 
     /**
@@ -105,6 +107,18 @@ final class BiomeLayer {
             return edge;
         }
         return share > 0.33 ? pick(biomes.medium, x, z) : null;
+    }
+
+    /**
+     * Whether a position belongs to the deep dark: patches deep underground, as in vanilla, which brings its sculk and
+     * ancient cities along. Its top wanders with the noise so it does not end on one flat level.
+     */
+    boolean isDeepDark(double x, double y, double z) {
+        if (!config.deepDark) {
+            return false;
+        }
+        double noise = deepDarkNoise.sample(x, z);
+        return noise > config.deepDarkThreshold && y < config.deepDarkTop + config.deepDarkTopWander * (noise - config.deepDarkThreshold);
     }
 
     /** Whether a position deep underground belongs to a cave biome rather than the surface biome above it. */

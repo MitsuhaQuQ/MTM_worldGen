@@ -14,19 +14,31 @@ public final class RiverRegion {
      * this share of its ridge texture. Run is the distance from the nearest valley floor,
      * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1. Sand run is the distance
      * from the water of a river mouth or delta that leaves sand along its banks, infinite if there is none in reach.
+     * Strength is that of the river the position is deepest in: below 1 close to its source, where it is still growing.
+     * Wide plain is how strongly a river at least rivers.floodplainMinWidth wide claims the land with its floodplain,
+     * from 0 to 1, rising smoothly with width and falling with distance, so it never jumps between rivers.
      */
-    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain, double sandRun) {
+    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain, double sandRun,
+                      double strength, double widePlain) {
         public double halfWidth(double minimumWidth) {
             return 0.5 * Math.max(width, minimumWidth);
         }
     }
 
-    /** Values per segment: x0, z0, x1, z1, width0, width1, depth0, depth1, level0, level1. */
-    private static final int STRIDE = 10;
+    /**
+     * Values per segment: x0, z0, x1, z1, width0, width1, depth0, depth1, level0, level1, strength0, strength1.
+     * Strength grows from 0 to 1 over the first edge of a river, which starts as nothing instead of a full channel.
+     */
+    static final int STRIDE = 12;
     /** Flag on a segment's class: the river leaves sand along its banks here. */
     static final byte SANDY = 0x40;
     /** Below this distance in blocks the closest river no longer gains on the others in the water level blend. */
     private static final double BLEND_RADIUS = 4.0;
+    /** Share of the reach over which a river's say in blended values fades out, so nothing jumps where it leaves the query. */
+    private static final double REACH_FADE = 0.25;
+    /** Strength a river counts with at its very source, where dividing by zero would otherwise loom. */
+    private static final double MIN_STRENGTH = 1e-6;
+
     private static final FlowRegion.RiverClass[] CLASSES = FlowRegion.RiverClass.values();
 
     private final int originX;
@@ -35,6 +47,8 @@ public final class RiverRegion {
     private final int buckets;
     private final double reach;
     private final WorldgenSettings.Rivers config;
+    private final double fadeBase;
+    private final double fadePerWidth;
     private final double[] segments;
     private final byte[] classes;
     private final int[][] index;
@@ -45,13 +59,17 @@ public final class RiverRegion {
      * @param bucketSize edge length of the index buckets in blocks
      * @param buckets    index buckets per axis
      * @param config     river settings
+     * @param fadeBase   distance from the valley floor over which texture fades, plus fadePerWidth per block of width
      * @param segments   segment values, {@link #STRIDE} per segment
      * @param classes    river class of each segment
      * @param index      segment numbers per bucket
      */
-    RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double[] segments, byte[] classes, int[][] index) {
+    RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
+                double[] segments, byte[] classes, int[][] index) {
         this.reach = config.queryReach;
         this.config = config;
+        this.fadeBase = fadeBase;
+        this.fadePerWidth = fadePerWidth;
         this.originX = originX;
         this.originZ = originZ;
         this.bucketSize = bucketSize;
@@ -69,6 +87,8 @@ public final class RiverRegion {
         double bestDistance = 0.0;
         double bestWidth = 0.0;
         double bestDepth = 0.0;
+        double bestStrength = 1.0;
+        double bestLevel = 0.0;
         double nearestRun = Double.MAX_VALUE;
         double levelSum = 0.0;
         double weightSum = 0.0;
@@ -76,6 +96,7 @@ public final class RiverRegion {
         double high = Double.MAX_VALUE;
         double texture = 1.0;
         double floodplain = 0.0;
+        double widePlain = 0.0;
         double sandRun = Double.POSITIVE_INFINITY;
         for (int segment : index[bucketZ * buckets + bucketX]) {
             int s = segment * STRIDE;
@@ -91,23 +112,29 @@ public final class RiverRegion {
             double distance = Math.sqrt(squared);
             double width = segments[s + 4] + t * (segments[s + 5] - segments[s + 4]);
             double level = segments[s + 8] + t * (segments[s + 9] - segments[s + 8]);
-            double half = 0.5 * Math.max(width, config.minChannelWidth);
+            // Everything a river does grows with it from its source, so nothing jumps where it begins
+            double strength = Math.max(MIN_STRENGTH, segments[s + 10] + t * (segments[s + 11] - segments[s + 10]));
+            double half = 0.5 * Math.max(width, strength * config.minChannelWidth);
             double run = Math.max(0.0, distance - config.valleyFloorFactor * half);
             double wall = wall(run);
             double plainWidth = Math.min(config.floodplainBase + config.floodplainPerWidth * width, reach - config.valleyFloorFactor * half);
-            floodplain = Math.max(floodplain, 1.0 - smooth(run / plainWidth));
+            double plain = strength * (1.0 - smooth(run / plainWidth));
+            floodplain = Math.max(floodplain, plain);
+            widePlain = Math.max(widePlain, plain * smooth((width - config.floodplainMinWidth) / config.floodplainMinWidth));
             nearestRun = Math.min(nearestRun, run);
             if ((classes[segment] & SANDY) != 0) {
                 sandRun = Math.min(sandRun, Math.max(0.0, distance - half));
             }
             // The fade has to end inside the reach, or the texture would jump where a river drops out of the query
-            double fade = Math.min(config.textureFadeBase + config.textureFadePerWidth * width, reach - config.valleyFloorFactor * half);
-            texture = Math.min(texture, smooth(run / fade));
+            // Near a source the texture stays, so a stream begins in the slope's own gully instead of a pocket
+            double fade = strength * Math.min(fadeBase + fadePerWidth * width, reach - config.valleyFloorFactor * half);
+            texture = Math.min(texture, fade > 0.0 ? smooth(run / fade) : 1.0);
             low = Math.max(low, level + config.bankHeight - wall);
             high = Math.min(high, level + config.bankHeight + wall);
+            double inReach = smooth((reach - distance) / (REACH_FADE * reach));
             double closeness = 1.0 / (distance + BLEND_RADIUS);
             closeness *= closeness;
-            closeness *= closeness;
+            closeness *= closeness * inReach * strength;
             levelSum += closeness * level;
             weightSum += closeness;
             double ratio = distance / half;
@@ -116,9 +143,11 @@ public final class RiverRegion {
                 bestDistance = distance;
                 bestWidth = width;
                 bestDepth = segments[s + 6] + t * (segments[s + 7] - segments[s + 6]);
+                bestStrength = strength;
+                bestLevel = level;
             }
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, levelSum / weightSum, low, high, texture, nearestRun, floodplain, sandRun);
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength, widePlain);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */
