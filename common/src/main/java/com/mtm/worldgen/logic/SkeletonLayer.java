@@ -250,6 +250,18 @@ final class SkeletonLayer {
         return weight <= 0.0 ? 0.0 : weight * smoothstep(0.0, m.coastBand, continents.inlandDistance(baseAboveSea));
     }
 
+    /** The kind of land at a position: a plateau wherever one holds it, otherwise the tier it mostly belongs to. */
+    TerrainLogic.Landform landform(double x, double z, double baseAboveSea) {
+        if (plateauShare(x, z, baseAboveSea) > 0.5) {
+            return TerrainLogic.Landform.PLATEAU;
+        }
+        double tier = tier(x, z, baseAboveSea);
+        if (smoothstep(zoneLow, zoneHigh, tier) > 0.5) {
+            return TerrainLogic.Landform.MOUNTAINS;
+        }
+        return 1.0 - smoothstep(plainsLow, plainsHigh, tier) > 0.5 ? TerrainLogic.Landform.PLAINS : TerrainLogic.Landform.HILLS;
+    }
+
     /** Whether a position lies in the hill or mountain tier, where rivers can start. */
     boolean isUpland(double x, double z, double baseAboveSea) {
         return tier(x, z, baseAboveSea) >= plainsHigh || plateauShare(x, z, baseAboveSea) > 0.5;

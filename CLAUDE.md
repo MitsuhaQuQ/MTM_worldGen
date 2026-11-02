@@ -309,7 +309,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `/mtm locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
   - `/mtm benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
   - `/mtm debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
-- 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、跳转出生点和坐标，底栏显示高度、水位和群系；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
+- 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、随机种子、跳转出生点和坐标，底栏显示高度、水位和群系，右下角显示视图内海洋、平原、丘陵、高原、山地的比例（按地形骨架分类，`sampleLandformKind`）；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
 - 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态
 - CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行

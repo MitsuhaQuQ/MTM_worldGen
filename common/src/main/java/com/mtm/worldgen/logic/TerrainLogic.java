@@ -442,6 +442,20 @@ public final class TerrainLogic {
     }
 
     /** Surface height before water has shaped it. */
+    /** Kinds of land, as the terrain skeleton lays them out. */
+    public enum Landform {
+        OCEAN, PLAINS, HILLS, PLATEAU, MOUNTAINS
+    }
+
+    /** The kind of land at a position, without anything rivers do to it: cheap enough to sample a whole map. */
+    public Landform sampleLandformKind(double x, double z) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        if (softCap(base + skeletonHeight(x, z, base, null)) < seaSurface()) {
+            return Landform.OCEAN;
+        }
+        return skeleton.landform(x, z, base - seaSurface());
+    }
+
     public double sampleLandform(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];

@@ -48,6 +48,9 @@ public final class TerrainPreview {
     private static final int DEFAULT_SCALE = 16;
     private static final int CACHED_TILES = 400;
     private static final int PICTURE_SIZE = 1024;
+    /** Samples per side of the view when counting kinds of land, and how long the view has to rest first. */
+    private static final int CENSUS_GRID = 64;
+    private static final int CENSUS_DELAY_MS = 250;
 
     private TerrainPreview() {
     }
@@ -105,12 +108,14 @@ public final class TerrainPreview {
         JTextField seed = new JTextField(seedText, 18);
         JTextField target = new JTextField(12);
         JButton show = new JButton("Show");
+        JButton random = new JButton("Random");
         JButton spawn = new JButton("Spawn");
         JButton go = new JButton("Go to x z");
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
         bar.add(new JLabel("Seed"));
         bar.add(seed);
         bar.add(show);
+        bar.add(random);
         bar.add(spawn);
         bar.add(target);
         bar.add(go);
@@ -122,6 +127,10 @@ public final class TerrainPreview {
             seed.setText(Long.toString(map.seed));
         });
         seed.addActionListener(event -> show.doClick());
+        random.addActionListener(event -> {
+            seed.setText(Long.toString(new java.util.Random().nextLong()));
+            show.doClick();
+        });
         spawn.addActionListener(event -> map.goToSpawn());
         go.addActionListener(event -> {
             String[] parts = target.getText().trim().split("[\\s,]+");
@@ -166,6 +175,15 @@ public final class TerrainPreview {
         });
         /** Only the latest position under the cursor is worth looking up. */
         private final AtomicInteger readoutRequest = new AtomicInteger();
+        /** Shares of the kinds of land in view, worked out after the view stops moving. */
+        private final ExecutorService census = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "MTM preview census");
+            thread.setDaemon(true);
+            return thread;
+        });
+        private final AtomicInteger censusRequest = new AtomicInteger();
+        private final javax.swing.Timer censusDelay = new javax.swing.Timer(CENSUS_DELAY_MS, event -> takeCensus());
+        private volatile double[] shares;
         /** Increases with every new seed, so tiles still rendering for an old one are dropped. */
         private final AtomicInteger generation = new AtomicInteger();
         private TerrainLogic logic;
@@ -178,6 +196,7 @@ public final class TerrainPreview {
         private JLabel status;
 
         MapPanel() {
+            censusDelay.setRepeats(false);
             setPreferredSize(new Dimension(1024, 768));
             setBackground(new Color(0x202020));
             MouseAdapter mouse = new MouseAdapter() {
@@ -277,11 +296,73 @@ public final class TerrainPreview {
             });
         }
 
+        /** Samples the view on a grid and counts each kind of land, for the box in the corner. */
+        private void takeCensus() {
+            TerrainLogic current = logic;
+            if (current == null) {
+                return;
+            }
+            int request = censusRequest.incrementAndGet();
+            double left = centerX - getWidth() / 2.0 * scale;
+            double top = centerZ - getHeight() / 2.0 * scale;
+            double width = getWidth() * (double) scale;
+            double height = getHeight() * (double) scale;
+            census.submit(() -> {
+                TerrainLogic.Landform[] kinds = TerrainLogic.Landform.values();
+                int[] counts = new int[kinds.length];
+                for (int i = 0; i < CENSUS_GRID && request == censusRequest.get(); i++) {
+                    for (int j = 0; j < CENSUS_GRID; j++) {
+                        double x = left + (i + 0.5) * width / CENSUS_GRID;
+                        double z = top + (j + 0.5) * height / CENSUS_GRID;
+                        counts[current.sampleLandformKind(x, z).ordinal()]++;
+                    }
+                }
+                if (request != censusRequest.get()) {
+                    return;
+                }
+                double[] result = new double[kinds.length];
+                for (int k = 0; k < kinds.length; k++) {
+                    result[k] = counts[k] / (double) (CENSUS_GRID * CENSUS_GRID);
+                }
+                shares = result;
+                SwingUtilities.invokeLater(this::repaint);
+            });
+        }
+
+        private void drawShares(Graphics graphics) {
+            double[] current = shares;
+            if (current == null) {
+                return;
+            }
+            String[] labels = {"Ocean", "Plains", "Hills", "Plateau", "Mountains"};
+            Color[] colors = {new Color(0x3A7BD5), new Color(0x6DB24A), new Color(0xB0B050), new Color(0x9A7A50), new Color(0xE8E8E8)};
+            int lineHeight = graphics.getFontMetrics().getHeight();
+            int boxWidth = 170;
+            int boxHeight = lineHeight * (labels.length + 1) + 8;
+            int x = getWidth() - boxWidth - 10;
+            int y = getHeight() - boxHeight - 10;
+            graphics.setColor(new Color(0, 0, 0, 170));
+            graphics.fillRect(x, y, boxWidth, boxHeight);
+            graphics.setColor(Color.WHITE);
+            graphics.drawString("In view", x + 8, y + lineHeight);
+            for (int k = 0; k < labels.length; k++) {
+                int line = y + lineHeight * (k + 2);
+                graphics.setColor(colors[k]);
+                graphics.fillRect(x + 8, line - lineHeight + 5, 10, 10);
+                graphics.setColor(Color.WHITE);
+                graphics.drawString(String.format("%-10s %5.1f%%", labels[k], 100.0 * current[k]), x + 26, line);
+            }
+        }
+
         @Override
         protected void paintComponent(Graphics graphics) {
             super.paintComponent(graphics);
             if (logic == null) {
                 return;
+            }
+            if (lastCensusView == null || !lastCensusView.equals(viewKey())) {
+                lastCensusView = viewKey();
+                censusDelay.restart();
             }
             double left = centerX - getWidth() / 2.0 * scale;
             double top = centerZ - getHeight() / 2.0 * scale;
@@ -300,9 +381,16 @@ public final class TerrainPreview {
                     }
                 }
             }
+            drawShares(graphics);
             graphics.setColor(Color.WHITE);
             graphics.drawLine(getWidth() / 2 - 6, getHeight() / 2, getWidth() / 2 + 6, getHeight() / 2);
             graphics.drawLine(getWidth() / 2, getHeight() / 2 - 6, getWidth() / 2, getHeight() / 2 + 6);
+        }
+
+        private String lastCensusView;
+
+        private String viewKey() {
+            return seed + ":" + scale + ":" + Math.round(centerX) + ":" + Math.round(centerZ) + ":" + getWidth() + ":" + getHeight();
         }
 
         /** Whether a tile shows in the window, or lies right next to it. */
