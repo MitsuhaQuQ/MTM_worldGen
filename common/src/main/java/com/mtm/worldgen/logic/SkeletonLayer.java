@@ -36,6 +36,8 @@ final class SkeletonLayer {
     private static final long FOOTHILL_SALT = 0x464F4F54L;
     private static final long PLATEAU_ZONE_SALT = 0x504C4154L;
     private static final long PLATEAU_HEIGHT_SALT = 0x504C4854L;
+    /** Range of the edge noise over which a plateau edge turns from gentle to steep. */
+    private static final double EDGE_BLEND = 0.08;
     private static final long HILLS_SALT = 0x48494C4CL;
     private static final long ISOLATED_SALT = 0x49534F4CL;
     private static final long STYLE_SALT = 0x5354594C45L;
@@ -89,6 +91,7 @@ final class SkeletonLayer {
     private final Fbm foothills;
     private final Fbm plateauZone;
     private final Fbm plateauHeight;
+    private final Fbm plateauEdge;
     private final Fbm hills;
     private final Fbm style;
     private final Fbm cliffZone;
@@ -111,7 +114,12 @@ final class SkeletonLayer {
     private final double zoneHigh;
     private final double plateauLow;
     private final double plateauHigh;
+    private final double gentleLow;
+    private final double gentleHigh;
+    private final double steepEdge;
     private final double plainsLow;
+    private final double siteSpacing;
+    private final double isolatedSpacing;
     private final double plainsHigh;
     private final double hillsMiddle;
     private final ThreadLocal<SiteCache> sites = ThreadLocal.withInitial(SiteCache::new);
@@ -126,19 +134,23 @@ final class SkeletonLayer {
         this.hillSettings = settings.hills;
         this.scale = settings.heightScale();
         this.siteSeed = Hashing.derive(seed, SITE_SALT);
-        this.zone = new Fbm(Hashing.derive(seed, ZONE_SALT), 3, m.zoneWavelength);
-        this.orientation = new Fbm(Hashing.derive(seed, ORIENTATION_SALT), 2, m.orientationWavelength);
+        WorldgenSettings.Scale size = settings.scale;
+        this.siteSpacing = m.siteSpacing * size.mountains;
+        this.isolatedSpacing = settings.isolated.spacing * size.isolated;
+        this.zone = new Fbm(Hashing.derive(seed, ZONE_SALT), 3, m.zoneWavelength * size.terrainZones);
+        this.orientation = new Fbm(Hashing.derive(seed, ORIENTATION_SALT), 2, m.orientationWavelength * size.mountains);
         this.ridge = new Fbm(Hashing.derive(seed, RIDGE_SALT), 2, m.ridgeWavelength);
-        this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, m.ridgeWarpWavelength);
-        this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength);
+        this.ridgeWarpX = new Fbm(Hashing.derive(seed, RIDGE_SALT + 1), 2, m.ridgeWarpWavelength * size.mountains);
+        this.ridgeWarpZ = new Fbm(Hashing.derive(seed, RIDGE_SALT + 2), 2, m.ridgeWarpWavelength * size.mountains);
         this.texture = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT), 4);
         this.massifTexture = new Fbm(Hashing.derive(seed, DETAIL_SALT + 1), 3, m.massifTextureWavelength);
         this.gullies = new RidgedNoise(Hashing.derive(seed, DETAIL_SALT + 2), 3);
         this.foothills = new Fbm(Hashing.derive(seed, FOOTHILL_SALT), 3, m.foothillWavelength * scale);
-        this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength);
-        this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength);
-        this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale);
-        this.style = new Fbm(Hashing.derive(seed, STYLE_SALT), 2, m.styleWavelength);
+        this.plateauZone = new Fbm(Hashing.derive(seed, PLATEAU_ZONE_SALT), 3, plateaus.zoneWavelength * size.plateaus);
+        this.plateauHeight = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT), 2, plateaus.zoneWavelength * size.plateaus);
+        this.plateauEdge = new Fbm(Hashing.derive(seed, PLATEAU_HEIGHT_SALT + 1), 2, plateaus.edgeWavelength * size.plateaus);
+        this.hills = new Fbm(Hashing.derive(seed, HILLS_SALT), 3, hillSettings.wavelength * scale * size.hills);
+        this.style = new Fbm(Hashing.derive(seed, STYLE_SALT), 2, m.styleWavelength * size.mountains);
         this.cliffZone = new Fbm(Hashing.derive(seed, CLIFF_SALT), 2, m.cliffWavelength);
         this.cliffWarp = new Fbm(Hashing.derive(seed, CLIFF_SALT + 1), 2, CLIFF_WARP_WAVELENGTH);
         this.peakWarp = new Fbm(Hashing.derive(seed, ISOLATED_SALT + 1), 2, settings.isolated.peakWarpWavelength);
@@ -154,6 +166,9 @@ final class SkeletonLayer {
         NoiseStats plateauStats = new NoiseStats(plateauZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
         this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
         this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
+        this.gentleLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.gentleFade / 2.0);
+        this.gentleHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.gentleFade / 2.0);
+        this.steepEdge = new NoiseStats(plateauEdge::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING).quantile(1.0 - plateaus.steepShare);
     }
 
     /**
@@ -174,7 +189,6 @@ final class SkeletonLayer {
         double mountainZone = smoothstep(zoneLow, zoneHigh, tier);
         double plain = 1.0 - smoothstep(plainsLow, plainsHigh, tier);
         double hilly = (1.0 - plain) * (1.0 - mountainZone);
-        double openLand = 1.0 - plain * (1.0 - settings.plains.reliefShare);
         double massif = scale * m.massifHeight * mountainZone;
         // Warp the lookup so ridges between sites curve instead of running dead straight
         double wx = x + m.ridgeWarp * ridgeWarpX.sample(x, z);
@@ -199,21 +213,46 @@ final class SkeletonLayer {
             }
         }
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
-
-        double plateauWeight = smoothstep(plateauLow, plateauHigh, plateauZone.sample(x, z));
-        double plateau = openLand * scale * plateauWeight * (plateaus.minHeight + (plateaus.maxHeight - plateaus.minHeight) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
-
         double rolling = scale * hillSettings.height * (hilly + settings.plains.reliefShare * plain) * (0.5 + 0.5 * hills.sample(x, z));
+        double ground = massif + peaks + foothill + isolatedHeight(x, z);
+
+        // A plateau fills the land up to its level instead of adding to it: it rises the same out of plains and hills,
+        // and mountains taller than it still stand out of it. Hills keep some of their relief on the table
+        double plateauWeight = plateauShare(x, z, baseAboveSea);
+        double plateau = 0.0;
+        if (plateauWeight > 0.0) {
+            double level = scale * (plateaus.levelMin + (plateaus.levelMax - plateaus.levelMin) * (0.5 + 0.5 * plateauHeight.sample(x, z)));
+            plateau = plateauWeight * Math.max(0.0, level - baseAboveSea - ground);
+            rolling *= 1.0 - plateauWeight * (1.0 - plateaus.tableRelief);
+            rolling += plateauWeight * plateauWeight * plateaus.tableRelief * scale * hillSettings.height * (0.5 + 0.5 * hills.sample(x, z)) * plain;
+        }
 
         if (texture != null) {
             texture[0] = land * rugged;
         }
-        return land * (massif + peaks + foothill + plateau + rolling + isolatedHeight(x, z));
+        return land * (ground + plateau + rolling);
+    }
+
+    /**
+     * How much a plateau holds a position, from 0 to 1. Most of an edge is a gentle slope, and some stretches rise as
+     * steep escarpments; both are centered on the same line, so the plateau keeps its size. Plateaus keep back from
+     * the coast, like mountains do.
+     */
+    private double plateauShare(double x, double z, double baseAboveSea) {
+        double zoneValue = plateauZone.sample(x, z);
+        if (zoneValue <= gentleLow) {
+            return 0.0;
+        }
+        // Only the width of the edge changes along it: blending a steep and a gentle plateau would leave pits and
+        // lone blocks where the two disagree, while one outline with a varying slope keeps the plateau whole
+        double steepness = smoothstep(steepEdge - EDGE_BLEND, steepEdge + EDGE_BLEND, plateauEdge.sample(x, z));
+        double weight = smoothstep(mix(gentleLow, plateauLow, steepness), mix(gentleHigh, plateauHigh, steepness), zoneValue);
+        return weight <= 0.0 ? 0.0 : weight * smoothstep(0.0, m.coastBand, continents.inlandDistance(baseAboveSea));
     }
 
     /** Whether a position lies in the hill or mountain tier, where rivers can start. */
     boolean isUpland(double x, double z, double baseAboveSea) {
-        return tier(x, z, baseAboveSea) >= plainsHigh;
+        return tier(x, z, baseAboveSea) >= plainsHigh || plateauShare(x, z, baseAboveSea) > 0.5;
     }
 
     /**
@@ -232,8 +271,8 @@ final class SkeletonLayer {
     /** Height of the isolated peaks and dome hills around a position. */
     private double isolatedHeight(double x, double z) {
         WorldgenSettings.Isolated config = settings.isolated;
-        int cellX = (int) Math.floor(x / config.spacing);
-        int cellZ = (int) Math.floor(z / config.spacing);
+        int cellX = (int) Math.floor(x / isolatedSpacing);
+        int cellZ = (int) Math.floor(z / isolatedSpacing);
         double total = 0.0;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
@@ -277,8 +316,8 @@ final class SkeletonLayer {
     private Isolated createIsolated(int cellX, int cellZ) {
         WorldgenSettings.Isolated config = settings.isolated;
         long hash = Hashing.hash(isolatedSeed, cellX, cellZ);
-        double x = (cellX + 0.5 + 0.7 * (Hashing.unit(hash) - 0.5)) * config.spacing;
-        double z = (cellZ + 0.5 + 0.7 * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * config.spacing;
+        double x = (cellX + 0.5 + 0.7 * (Hashing.unit(hash) - 0.5)) * isolatedSpacing;
+        double z = (cellZ + 0.5 + 0.7 * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * isolatedSpacing;
         double roll = Hashing.unit(Hashing.derive(hash, 2));
         double size = Hashing.unit(Hashing.derive(hash, 3));
         double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
@@ -304,8 +343,8 @@ final class SkeletonLayer {
      * summed over nearby ridges weighted by squared height and distance, as {height, belt, summit, spurSum, spurWeight}.
      */
     private double[] mountains(double x, double z, boolean textured) {
-        int cellX = (int) Math.floor(x / m.siteSpacing);
-        int cellZ = (int) Math.floor(z / m.siteSpacing);
+        int cellX = (int) Math.floor(x / siteSpacing);
+        int cellZ = (int) Math.floor(z / siteSpacing);
         double peak = 0.0;
         double belt = 0.0;
         double summit = 0.0;
@@ -448,8 +487,8 @@ final class SkeletonLayer {
     /** Position, type and height of a site, without links. */
     private Site basicSite(int cellX, int cellZ) {
         long hash = Hashing.hash(siteSeed, cellX, cellZ);
-        double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * m.siteSpacing;
-        double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * m.siteSpacing;
+        double x = (cellX + 0.5 + m.siteJitter * (Hashing.unit(hash) - 0.5)) * siteSpacing;
+        double z = (cellZ + 0.5 + m.siteJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5)) * siteSpacing;
         double base = continents.height(continents.value(x, z)) - (settings.general.seaLevel - 1);
         double zoneWeight = smoothstep(zoneLow, zoneHigh, tier(x, z, base));
         if (zoneWeight < m.siteMinZone) {
@@ -457,7 +496,7 @@ final class SkeletonLayer {
         }
         double strength = 0.4 + 0.6 * zoneWeight;
         double height = scale * strength * (m.peakMin + (m.peakMax - m.peakMin) * Hashing.unit(Hashing.derive(hash, 2)));
-        double width = m.widthMin + (m.widthMax - m.widthMin) * Hashing.unit(Hashing.derive(hash, 3));
+        double width = settings.scale.mountains * (m.widthMin + (m.widthMax - m.widthMin) * Hashing.unit(Hashing.derive(hash, 3)));
         double style = style(x, z);
         height *= mix(m.erodedHeight, m.igneousHeight, style);
         width *= mix(m.erodedWidth, m.igneousWidth, style);

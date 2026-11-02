@@ -62,6 +62,7 @@ final class ContinentLayer {
     private final WorldgenSettings settings;
     private final WorldgenSettings.Continents config;
     private final double minGradient;
+    private final double plateSpacing;
     private final double threshold;
     private final double high;
     private final double low;
@@ -73,19 +74,21 @@ final class ContinentLayer {
     ContinentLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.config = settings.continents;
+        double size = settings.scale.continents;
+        this.plateSpacing = config.plateSpacing * size;
         this.plateSeed = Hashing.derive(seed, PLATE_SALT);
         this.groupSeed = Hashing.derive(seed, GROUP_SALT);
         this.islandSeed = Hashing.derive(seed, ISLAND_SALT);
-        this.warpX = new Fbm(Hashing.derive(seed, WARP_X_SALT), 3, config.warpWavelength);
-        this.warpZ = new Fbm(Hashing.derive(seed, WARP_Z_SALT), 3, config.warpWavelength);
-        this.detail = new Fbm(Hashing.derive(seed, DETAIL_SALT), 4, config.detailWavelength);
-        this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, config.straitWavelength);
+        this.warpX = new Fbm(Hashing.derive(seed, WARP_X_SALT), 3, config.warpWavelength * size);
+        this.warpZ = new Fbm(Hashing.derive(seed, WARP_Z_SALT), 3, config.warpWavelength * size);
+        this.detail = new Fbm(Hashing.derive(seed, DETAIL_SALT), 4, config.detailWavelength * size);
+        this.straits = new Fbm(Hashing.derive(seed, STRAIT_SALT), 2, config.straitWavelength * size);
         this.islandShore = new Fbm(Hashing.derive(seed, ISLAND_SALT + 1), 3, settings.islands.shoreWavelength);
         // Floor for the gradient in the distance estimate, half the typical plate gradient: inland the gradient
         // can approach zero, and dividing by it made the estimate jump by tens of blocks per block
-        this.minGradient = 0.5 / config.plateSpacing;
+        this.minGradient = 0.5 / plateSpacing;
 
-        NoiseStats stats = new NoiseStats(this::mainlandValue, THRESHOLD_SAMPLES_PER_AXIS, config.plateSpacing / THRESHOLD_SAMPLES_PER_PLATE);
+        NoiseStats stats = new NoiseStats(this::mainlandValue, THRESHOLD_SAMPLES_PER_AXIS, plateSpacing / THRESHOLD_SAMPLES_PER_PLATE);
         this.threshold = stats.quantile(config.oceanRatio);
         this.high = stats.quantile(HIGH_QUANTILE);
         this.low = stats.quantile(LOW_QUANTILE);
@@ -102,7 +105,7 @@ final class ContinentLayer {
         double wx = x + config.warpAmplitude * warpX.sample(x, z);
         double wz = z + config.warpAmplitude * warpZ.sample(x, z);
         double strait = config.straitMean + config.straitVariation * straits.sample(x, z);
-        return plateValue(wx / config.plateSpacing, wz / config.plateSpacing, strait) + config.detailAmplitude * detail.sample(x, z);
+        return plateValue(wx / plateSpacing, wz / plateSpacing, strait) + config.detailAmplitude * detail.sample(x, z);
     }
 
     /** Highest island value at a position: a dome above the land threshold over each island's radius. */
@@ -181,7 +184,7 @@ final class ContinentLayer {
         double roll = Hashing.unit(Hashing.derive(hash, 3));
         IslandKind kind = roll < islandConfig.sandShare ? IslandKind.SAND
                 : roll < islandConfig.sandShare + islandConfig.rockShare ? IslandKind.ROCK : IslandKind.MUSHROOM;
-        double offshore = (threshold - mainlandValue(x, z)) * config.plateSpacing;
+        double offshore = (threshold - mainlandValue(x, z)) * plateSpacing;
         double radius = islandConfig.radiusMin + Hashing.unit(Hashing.derive(hash, 4)) * (islandConfig.radiusMax - islandConfig.radiusMin);
         double margin = kind == IslandKind.MUSHROOM ? islandConfig.mushroomMargin : islandConfig.landMargin;
         if (offshore < margin + ISLAND_CLEARANCE * radius) {
@@ -209,7 +212,7 @@ final class ContinentLayer {
      * height follows it, which makes this cheap enough for every column, unlike {@link #coastDistance}.
      */
     double inlandDistance(double baseAboveSea) {
-        return baseAboveSea / config.landRange * (high - threshold) * config.plateSpacing;
+        return baseAboveSea / config.landRange * (high - threshold) * plateSpacing;
     }
 
     /**

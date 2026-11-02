@@ -61,6 +61,10 @@ processResources {
 shadowJar {
     configurations = [project.configurations.shadowBundle]
     archiveClassifier = "dev-shadow"
+    // Loaders ignore it; run on its own, the jar opens the terrain preview
+    manifest {
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview"
+    }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

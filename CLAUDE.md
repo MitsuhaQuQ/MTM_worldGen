@@ -154,7 +154,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - 顺坡纹理延伸到山脊外 `textureReach` 格，开阔坡面同样顺坡，更远处的基座才换成无折痕的噪声
   - 纹理另叠一层波长约 240 格的细沟（`gullyShare`、`gullyWavelength`），同样顺坡，打散光滑坡面上等高线般的方块台阶；不要用各向同性的小起伏，它只会绕出更多小圈
   - 纹理幅度与波长须同比调整：坡度约等于幅度 ÷ 波长；不要用随位置变化的角度旋转绝对坐标，会把纹理卷成漩涡
-  - 高原：独立区域整体抬升 40–80 格（300 基准），边缘为缓坡
+  - 高原（`plateaus` 组）：独立区域，不受平原、丘陵、山地三档影响，覆盖约 12%；把地面垫到统一的台面高度（300 基准 125–150，即约 Y=375–440），高于台面的山照常突出，台面保留部分丘陵起伏（`tableRelief`）；离海岸时让开；算作高地，可成为河源。边缘以缓坡为主，约三成段落是陡峭的台地边坡（`steepShare`、`edgeWavelength`），沿边缘只改变边坡宽度、不混合两种高原，否则过渡处会出现坑和孤块。曾是在原地形上叠加 40–80 格，平原上只剩两成，看起来像山脉的附属
   - 丘陵：造山带以外的起伏区，起伏 10–25 格（300 基准）
   - 骨架按方块逐列计算（粗网格表达不了山脊），粗网格另存采样值供水系使用
 - 丘陵、山地增加随机地陷、溶洞地貌（`sinkholes` 组，`SinkholeLayer`）：陡壁圆坑进入高度图，坑下的溶洞只改方块（`solidHeight`），坑底通向溶洞，因此这是洞穴少数的地表入口；只出现在干燥、平缓、海拔足够的高地，不计入预估地表
@@ -261,7 +261,8 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 ## 配置
 
 - 配置文件 `config/mtm_worldgen.json`，格式为 JSON；不存在时自动生成默认值，缺失的字段使用默认值，非法值在创建世界时直接报错
-- 所有地形参数都在配置里（`WorldgenSettings`，按 general、slopes、continents、mountains、plains、plateaus、hills、isolated、seaStacks、overhangs、sinkholes、foreign、surface、beaches、islands、spawn、climate、rivers、biomes 分组）；新增地形参数时一律加入配置，不写死在代码里
+- 所有地形参数都在配置里（`WorldgenSettings`，按 general、slopes、continents、mountains、plains、plateaus、hills、isolated、seaStacks、overhangs、sinkholes、foreign、scale、surface、beaches、islands、spawn、climate、rivers、biomes 分组）；新增地形参数时一律加入配置，不写死在代码里
+  - 地貌尺度（`scale` 组）：大陆、地势三档、山脉、高原、丘陵、孤峰、气候、群系各一个水平倍率（默认 1，允许 0.25–8），放大或缩小这类地貌的分布和大小；高度和方块尺度的量（河宽、坡度、山体纹理）不变，保持 1 格 = 1 米。新增大尺度波长时要乘上对应倍率
   - 只有算法内部常量留在代码：哈希盐值、搜索窗口、统计采样、与原版公式绑定的阈值
 - 配置在世界创建时随密度函数写入 level.dat 并锁定，之后修改配置文件不影响已有世界（避免接缝）
 - 1.19 起种子只存在于 `RandomState`，生成器和群系源都不再持有：`RandomStateMixin` 在创建时把种子传给密度函数，其余地方从 `RandomState` 或气候采样器取 `TerrainLogic`
@@ -308,6 +309,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `/mtm locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
   - `/mtm benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
   - `/mtm debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
+- 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、跳转出生点和坐标，底栏显示高度、水位和群系；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
 - 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态
 - CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行

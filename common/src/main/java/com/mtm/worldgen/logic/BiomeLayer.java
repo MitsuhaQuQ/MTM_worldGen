@@ -21,7 +21,7 @@ final class BiomeLayer {
     BiomeLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.config = settings.biomes;
-        this.variantNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT), 2, config.patchWavelength);
+        this.variantNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT), 2, config.patchWavelength * settings.scale.biomes);
         this.caveNoise = new Fbm(Hashing.derive(seed, CAVE_SALT), 2, config.caveWavelength);
         this.bandNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT + 1), 3, config.bandWavelength);
     }

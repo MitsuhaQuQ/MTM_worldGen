@@ -19,7 +19,7 @@ public final class HeightMapRenderer {
     private static final int SNOW_RGB = 0xFFFFFF;
     private static final int ROCK_RGB = 0x8C8C8C;
     private static final Color LAKE_COLOR = new Color(0x40E0D0);
-    private static final Color[] RIVER_COLORS = {null, new Color(0x7FD0FF), new Color(0x2080FF), new Color(0x0020C0), new Color(0xE00020)};
+    private static final Color[] RIVER_COLORS = {null, new Color(0x7FD0FF), new Color(0x2080FF), new Color(0x0020C0), new Color(0x0020C0)};
     /** Light from the north-west; brightness change per unit of grade across one pixel. */
     private static final double SHADE_STRENGTH = 1.2;
 
@@ -33,6 +33,15 @@ public final class HeightMapRenderer {
      * @param blocksPerPixel horizontal scale
      */
     public static BufferedImage render(TerrainLogic logic, int centerX, int centerZ, int sizePx, int blocksPerPixel) {
+        return render(logic, centerX, centerZ, sizePx, blocksPerPixel, true);
+    }
+
+    /**
+     * @param detailed with rivers: carved valleys, lakes, beaches and the drainage network. They need the drainage of
+     *                 every region in view, which takes long over wide areas; without them only the landform is drawn,
+     *                 with snow from the snow line, which is cheap enough for an overview of a whole continent
+     */
+    public static BufferedImage render(TerrainLogic logic, int centerX, int centerZ, int sizePx, int blocksPerPixel, boolean detailed) {
         WorldgenSettings settings = logic.settings();
         BufferedImage image = new BufferedImage(sizePx, sizePx, BufferedImage.TYPE_INT_RGB);
         int originX = centerX - sizePx / 2 * blocksPerPixel;
@@ -41,8 +50,9 @@ public final class HeightMapRenderer {
         double[] heights = new double[(sizePx + 1) * (sizePx + 1)];
         for (int py = 0; py <= sizePx; py++) {
             for (int px = 0; px <= sizePx; px++) {
-                heights[py * (sizePx + 1) + px] =
-                        logic.sampleSurfaceHeight(originX + px * blocksPerPixel, originZ + py * blocksPerPixel);
+                int x = originX + px * blocksPerPixel;
+                int z = originZ + py * blocksPerPixel;
+                heights[py * (sizePx + 1) + px] = detailed ? logic.sampleSurfaceHeight(x, z) : logic.sampleLandform(x, z);
             }
         }
 
@@ -52,11 +62,11 @@ public final class HeightMapRenderer {
                 int x = originX + px * blocksPerPixel;
                 int z = originZ + py * blocksPerPixel;
                 double height = heights[py * (sizePx + 1) + px];
-                boolean beach = height >= sea && logic.sampleBeach(x, z);
+                boolean beach = detailed && height >= sea && logic.sampleBeach(x, z);
                 int rgb = beach ? BEACH_RGB : color(height, settings);
-                if (height >= sea && logic.sampleSnow(x, z)) {
+                if (height >= sea && (detailed ? logic.sampleSnow(x, z) : height >= logic.sampleSnowLine(x, z))) {
                     rgb = SNOW_RGB;
-                } else if (height >= sea && logic.sampleRock(x, z)) {
+                } else if (detailed && height >= sea && logic.sampleRock(x, z)) {
                     rgb = ROCK_RGB;
                 }
                 if (height >= sea) {
@@ -65,17 +75,19 @@ public final class HeightMapRenderer {
                     double shade = Math.max(-0.6, Math.min(0.6, -(gradeX + gradeZ) * SHADE_STRENGTH));
                     rgb = shade >= 0 ? blend(rgb, 0xFFFFFF, shade) : blend(rgb, 0x000000, -shade);
                 }
-                if (onRegionBorder(x, blocksPerPixel, settings) || onRegionBorder(z, blocksPerPixel, settings)) {
+                if (detailed && (onRegionBorder(x, blocksPerPixel, settings) || onRegionBorder(z, blocksPerPixel, settings))) {
                     rgb = blend(rgb, REGION_BORDER_RGB, 0.35);
                 }
                 image.setRGB(px, py, rgb);
             }
         }
-        drawRivers(image, logic, originX, originZ, sizePx, blocksPerPixel);
+        if (detailed) {
+            drawRivers(image, logic, originX, originZ, sizePx, blocksPerPixel);
+        }
         return image;
     }
 
-    /** Draws the drainage network, thicker and redder as rivers rise in class, and lakes as turquoise cells. */
+    /** Draws the drainage network, darker and thicker as rivers rise in class, and lakes as turquoise cells. */
     private static void drawRivers(BufferedImage image, TerrainLogic logic, int originX, int originZ, int sizePx, int blocksPerPixel) {
         WorldgenSettings settings = logic.settings();
         int cellSize = settings.rivers.flowCellSize;

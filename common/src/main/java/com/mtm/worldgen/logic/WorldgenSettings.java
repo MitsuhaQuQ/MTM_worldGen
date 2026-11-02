@@ -20,7 +20,19 @@ import java.util.Set;
 public final class WorldgenSettings {
     public static final WorldgenSettings DEFAULT = new WorldgenSettings();
 
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    /** Made on first use: the terrain preview runs these settings outside the game, where there is no JSON library. */
+    private static final class Json {
+        static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+
+        /** Everything that names a Gson type stays in here, or loading the settings would already need the library. */
+        static WorldgenSettings read(String json) {
+            try {
+                return GSON.fromJson(json, WorldgenSettings.class);
+            } catch (JsonParseException e) {
+                throw new IllegalArgumentException(e.getMessage(), e);
+            }
+        }
+    }
     /** Bottom of MTM worlds, unchanged from vanilla. */
     private static final int MIN_Y = -64;
     /** Vanilla limits the top of the world to this. */
@@ -45,6 +57,7 @@ public final class WorldgenSettings {
     public final Overhangs overhangs = new Overhangs();
     public final Sinkholes sinkholes = new Sinkholes();
     public final Foreign foreign = new Foreign();
+    public final Scale scale = new Scale();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -209,12 +222,27 @@ public final class WorldgenSettings {
         public double reliefShare = 0.2;
     }
 
+    /**
+     * Plateaus: table lands in zones of their own, raised to a common level whatever tier they lie on. Levels are
+     * heights above the sea on the 300 block scale; the zone noise decides where they lie and how wide their edges are.
+     */
     public static final class Plateaus {
-        public double zoneWavelength = 9216.0;
-        public double coverage = 0.07;
-        public double fade = 0.2;
-        public double minHeight = 40.0;
-        public double maxHeight = 80.0;
+        public double zoneWavelength = 12288.0;
+        public double coverage = 0.12;
+        /**
+         * Width of the plateau edge, as a share of the zone noise: narrow on the steep stretches that stand as table land
+         * escarpments, wide on the gentle slopes that make up most of an edge. Which stretch is which follows a noise
+         * of this wavelength, with this share of the edge steep.
+         */
+        public double fade = 0.06;
+        public double gentleFade = 0.26;
+        public double steepShare = 0.3;
+        public double edgeWavelength = 2400.0;
+        /** The table stands this high above the sea, varying between the two over the plateau. */
+        public double levelMin = 125.0;
+        public double levelMax = 150.0;
+        /** Share of the hill relief kept on the table, which would otherwise be dead flat. */
+        public double tableRelief = 0.3;
     }
 
     /** Isolated peaks where hills meet mountains, and dome hills inside the hill tier. */
@@ -253,6 +281,34 @@ public final class WorldgenSettings {
         /** Wander of the outline, as a share of the radius, and its wavelength. */
         public double warp = 0.3;
         public double warpWavelength = 48.0;
+    }
+
+    /**
+     * Horizontal size of each kind of landform, as a multiple of its defaults: above 1 larger and further apart, below 1
+     * smaller and closer together. Heights and everything measured in blocks, such as river widths, slopes and the
+     * texture on mountain sides, stay as they are, so the world keeps its 1 block = 1 meter scale.
+     */
+    public static final class Scale {
+        /** Continents and oceans, with their straits and coastlines. */
+        public double continents = 1.0;
+        /** The zones of plains, hills and mountains. */
+        public double terrainZones = 1.0;
+        /** Mountain ranges: how far apart their peaks stand, how wide they are, and how their course bends. */
+        public double mountains = 1.0;
+        /** Plateau zones and the stretches of their edges. */
+        public double plateaus = 1.0;
+        /** Rolling hills. */
+        public double hills = 1.0;
+        /** Isolated peaks and dome hills: how far apart they stand. */
+        public double isolated = 1.0;
+        /** Climate zones and humidity. */
+        public double climate = 1.0;
+        /** Patches of one biome. */
+        public double biomes = 1.0;
+
+        double[] all() {
+            return new double[]{continents, terrainZones, mountains, plateaus, hills, isolated, climate, biomes};
+        }
     }
 
     /** Chunks that MTM did not generate, such as region files merged in from another world. Sizes are in blocks. */
@@ -729,6 +785,9 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        for (double value : scale.all()) {
+            require(value >= 0.25 && value <= 8.0, "every scale must lie between 0.25 and 8");
+        }
         require(RiverLayer.margin(rivers) + foreign.riverLookAhead <= general.regionSize / rivers.flowCellSize,
                 "foreign.riverLookAhead must stay within the neighboring regions");
         require(rivers.deltaBranchesMin >= 2 && rivers.deltaBranchesMax <= 4 && rivers.deltaBranchesMin <= rivers.deltaBranchesMax,
@@ -777,16 +836,12 @@ public final class WorldgenSettings {
     }
 
     public String toJson() {
-        return GSON.toJson(this);
+        return Json.GSON.toJson(this);
     }
 
     /** Parses and validates; fields missing from the JSON keep their defaults. */
     public static WorldgenSettings fromJson(String json) {
-        try {
-            WorldgenSettings settings = GSON.fromJson(json, WorldgenSettings.class);
-            return (settings != null ? settings : new WorldgenSettings()).validate();
-        } catch (JsonParseException e) {
-            throw new IllegalArgumentException(e.getMessage(), e);
-        }
+        WorldgenSettings settings = Json.read(json);
+        return (settings != null ? settings : new WorldgenSettings()).validate();
     }
 }

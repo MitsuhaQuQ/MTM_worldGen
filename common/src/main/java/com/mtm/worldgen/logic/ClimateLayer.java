@@ -39,9 +39,9 @@ final class ClimateLayer {
     ClimateLayer(long seed, WorldgenSettings settings) {
         this.config = settings.climate;
         this.surface = settings.surface;
-        this.temperature = new Fbm(Hashing.derive(seed, TEMPERATURE_SALT), 3, config.temperatureWavelength);
+        this.temperature = new Fbm(Hashing.derive(seed, TEMPERATURE_SALT), 3, config.temperatureWavelength * settings.scale.climate);
         this.jitter = new Fbm(Hashing.derive(seed, JITTER_SALT), 2, config.zoneJitterWavelength);
-        this.humidity = new Fbm(Hashing.derive(seed, HUMIDITY_SALT), 3, config.humidityWavelength);
+        this.humidity = new Fbm(Hashing.derive(seed, HUMIDITY_SALT), 3, config.humidityWavelength * settings.scale.climate);
 
         double polarShare = 1.0 - config.tropicalShare - config.temperateShare - config.coldShare;
         NoiseStats temperatures = new NoiseStats(temperature::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);

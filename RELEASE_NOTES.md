@@ -1,5 +1,10 @@
 # Release notes
 
+## Unreleased
+
+- Terrain preview: run `java -jar` on the mod jar to browse the terrain of a seed in a window, or `java -jar <mod jar> <seed> [x z blocksPerPixel picture.png]` to write a map picture
+- Config switches `general.caves`, `general.ores` and `general.undergroundFallingBlocks`
+
 ## v0.1.0
 
 First public build of MTM-Worldgen for Minecraft 1.20.1, on Fabric and Forge. It is an early preview: terrain may still change between versions, and worlds made with it should not be relied on for long-term saves yet.
