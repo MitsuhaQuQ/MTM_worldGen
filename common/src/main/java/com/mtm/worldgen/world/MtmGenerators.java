@@ -205,7 +205,9 @@ public final class MtmGenerators {
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_SHORE), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
                         SurfaceRules.sequence(SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.BEACH), SurfaceRules.sequence(
-                        SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.SAND.defaultBlockState())),
+                        SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.sequence(
+                                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.MOUTH_CLAY), SurfaceRules.state(Blocks.CLAY.defaultBlockState())),
+                                SurfaceRules.state(Blocks.SAND.defaultBlockState()))),
                         SurfaceRules.ifTrue(SurfaceRules.DEEP_UNDER_FLOOR,
                                 SurfaceRules.state(Blocks.SANDSTONE.defaultBlockState()))))));
     }

@@ -43,6 +43,7 @@ public final class WorldgenSettings {
     public final Isolated isolated = new Isolated();
     public final SeaStacks seaStacks = new SeaStacks();
     public final Overhangs overhangs = new Overhangs();
+    public final Sinkholes sinkholes = new Sinkholes();
     public final Climate climate = new Climate();
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
@@ -241,6 +242,26 @@ public final class WorldgenSettings {
         public double warpWavelength = 48.0;
     }
 
+    /** Collapse sinkholes in hills and mountains, with a cave chamber below. Sizes are in blocks. */
+    public static final class Sinkholes {
+        /** One candidate per square of this size. */
+        public double spacing = 640.0;
+        public double chance = 0.35;
+        public double radiusMin = 10.0;
+        public double radiusMax = 24.0;
+        public double depthMin = 14.0;
+        public double depthMax = 34.0;
+        /** They need ground this far above the sea and this gentle (a fraction) around them. */
+        public double minAboveSea = 40.0;
+        public double maxGrade = 0.5;
+        /** Wander of the outline, as a share of the radius, and its wavelength. */
+        public double warp = 0.3;
+        public double warpWavelength = 22.0;
+        /** Chamber below the pit: its radius as a multiple of the pit's, and half its height. */
+        public double chamberRadius = 2.2;
+        public double chamberHeight = 14.0;
+    }
+
     /** Overhangs on steep faces. The height is on the 300 block scale, other sizes in blocks. */
     public static final class Overhangs {
         /** How far rock juts out or recedes at most. */
@@ -407,6 +428,9 @@ public final class WorldgenSettings {
         public double treeLine = 0.85;
         /** Highland starts this fraction of the way from the sea to the snow line. */
         public double highlandLine = 0.4;
+        /** Altitude bands wander up and down by this many blocks, over this distance. */
+        public double bandWander = 36.0;
+        public double bandWavelength = 128.0;
         /** Blocks below the surface where cave biomes can start. */
         public double caveDepth = 48.0;
         public double caveWavelength = 1024.0;
@@ -420,7 +444,7 @@ public final class WorldgenSettings {
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
                 ids("desert", "badlands", "savanna"), ids("savanna", "sparse_jungle"), ids("jungle", "bamboo_jungle"),
                 ids("swamp", "mangrove_swamp"), ids("savanna_plateau", "windswept_savanna"),
-                ids("meadow"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
+                ids("meadow", "stony_peaks"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
         public BiomeZone temperate = new BiomeZone().with(
                 ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach"),
                 ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
@@ -482,6 +506,15 @@ public final class WorldgenSettings {
         public double routeWavelength = 512.0;
         /** Water at least this deep over the ground of a filled depression is a lake. */
         public double lakeMinDepth = 2.0;
+        /** Inland sinks in deserts: one candidate per square of this many routing cells, far from the sea. */
+        public int sinkSpacing = 5;
+        public double sinkMinCoastDistance = 500.0;
+        /** Depth of the basin below the water, and how far its rim rises above it. */
+        public double sinkDepth = 7.0;
+        public double sinkRim = 12.0;
+        /** Wander of the shore, as a share of a routing cell's weight, and its wavelength. */
+        public double sinkWarp = 0.35;
+        public double sinkWavelength = 96.0;
         /** Lake outlets of at most this many nodes that drop at least this far into other water are left out. */
         public int shortOutletLength = 6;
         public double shortOutletDrop = 8.0;
@@ -507,6 +540,9 @@ public final class WorldgenSettings {
         /** Sand width varies along the banks; above 1 it gives out in places, and plants reach the water. */
         public double mouthSandContrast = 1.3;
         public double mouthSandWavelength = 110.0;
+        /** Clay flats among that sand, where this noise lies above the threshold. */
+        public double mouthClayWavelength = 160.0;
+        public double mouthClayThreshold = 0.2;
         /** Low dunes on that sand, which keep it from lying in long straight steps. */
         public double duneHeight = 1.6;
         public double duneWavelength = 44.0;

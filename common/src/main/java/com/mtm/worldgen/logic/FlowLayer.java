@@ -21,6 +21,7 @@ final class FlowLayer {
     private static final long ROUTE_SALT = 0x524F555445L;
     /** Height tiles kept: enough for the window, which spans 19 tiles per axis by default. */
     private static final int TILES = 512;
+    private static final long SINK_SALT = 0x53494E4B4CL;
 
     interface HeightSampler {
         double height(double x, double z);
@@ -30,10 +31,16 @@ final class FlowLayer {
         boolean isUpland(double x, double z);
     }
 
+    interface SinkTest {
+        boolean canSink(double x, double z);
+    }
+
     private final WorldgenSettings settings;
     private final WorldgenSettings.Rivers config;
     private final HeightSampler heights;
     private final UplandTest uplands;
+    private final SinkTest sinks;
+    private final long sinkSeed;
     private final double sea;
     /** Area of a routing cell in coarse cells, the unit of catchments. */
     private final int cellArea;
@@ -41,11 +48,13 @@ final class FlowLayer {
     private final long nodeSeed;
     private final RegionCache<float[]> tiles;
 
-    FlowLayer(long seed, WorldgenSettings settings, HeightSampler heights, UplandTest uplands) {
+    FlowLayer(long seed, WorldgenSettings settings, HeightSampler heights, UplandTest uplands, SinkTest sinks) {
         this.settings = settings;
         this.config = settings.rivers;
         this.heights = heights;
         this.uplands = uplands;
+        this.sinks = sinks;
+        this.sinkSeed = Hashing.derive(seed, SINK_SALT);
         this.sea = settings.general.seaLevel - 1;
         int ratio = config.flowCellSize / settings.general.cellSize;
         this.cellArea = ratio * ratio;
@@ -57,11 +66,11 @@ final class FlowLayer {
     /**
      * Heights of one region's worth of routing cells, sampled at their river nodes so rivers meet the real ground
      * there. The second layer holds the same heights with route noise, which steers water but never sets its level,
-     * and the third marks uplands, where rivers can start.
+     * the third marks uplands, where rivers can start, and the fourth inland sinks, where they can end.
      */
     private float[] tile(int tileX, int tileZ) {
         int size = settings.general.regionSize / config.flowCellSize;
-        float[] tile = new float[3 * size * size];
+        float[] tile = new float[4 * size * size];
         for (int z = 0; z < size; z++) {
             for (int x = 0; x < size; x++) {
                 double[] node = RiverLayer.node(nodeSeed, config, tileX * size + x, tileZ * size + z);
@@ -69,9 +78,18 @@ final class FlowLayer {
                 tile[z * size + x] = (float) height;
                 tile[(size + z) * size + x] = (float) (height < sea ? height : Math.max(sea, height + config.routeNoise * routeNoise.sample(node[0], node[1])));
                 tile[(2 * size + z) * size + x] = uplands.isUpland(node[0], node[1]) ? 1.0F : 0.0F;
+                tile[(3 * size + z) * size + x] = isSinkCell(tileX * size + x, tileZ * size + z) && sinks.canSink(node[0], node[1]) ? 1.0F : 0.0F;
             }
         }
         return tile;
+    }
+
+    /** Whether a cell is the one candidate for an inland sink in its square of sinkSpacing cells. */
+    private boolean isSinkCell(int cellX, int cellZ) {
+        int spacing = config.sinkSpacing;
+        long hash = Hashing.hash(sinkSeed, Math.floorDiv(cellX, spacing), Math.floorDiv(cellZ, spacing));
+        return Math.floorMod(cellX, spacing) == (int) (Hashing.unit(hash) * spacing)
+                && Math.floorMod(cellZ, spacing) == (int) (Hashing.unit(Hashing.mix(hash)) * spacing);
     }
 
     FlowRegion compute(int regionX, int regionZ) {
@@ -109,7 +127,7 @@ final class FlowLayer {
                 // Rivers start in hills and mountains: water that only ever fell on the plains forms none of its own
                 classes[target] = (byte) (uplandCatchment[source] * cellArea < config.streamCells ? FlowRegion.RiverClass.NONE
                         : classify(regionCatchment[target], tributaries[source])).ordinal();
-                lakeLevels[target] = grid.filled[source] - grid.height[source] >= config.lakeMinDepth ? grid.filled[source] : Float.NaN;
+                lakeLevels[target] = grid.sink[source] || grid.filled[source] - grid.height[source] >= config.lakeMinDepth ? grid.filled[source] : Float.NaN;
                 waterLevels[target] = (float) Math.max(sea, grid.filled[source]);
             }
         }
@@ -199,6 +217,8 @@ final class FlowLayer {
         final float[] noisy;
         /** Whether a river can start at a cell. */
         final boolean[] upland;
+        /** Whether a cell is an inland sink, which takes in water like the sea. */
+        final boolean[] sink;
         /** Water surface once depressions have filled up to their spill point. */
         final float[] filled;
         final byte[] direction;
@@ -211,6 +231,7 @@ final class FlowLayer {
             this.height = new float[size * size];
             this.noisy = new float[size * size];
             this.upland = new boolean[size * size];
+            this.sink = new boolean[size * size];
             this.filled = new float[size * size];
             this.direction = new byte[size * size];
             this.down = new int[size * size];
@@ -236,13 +257,14 @@ final class FlowLayer {
                     height[z * size + x] = tile[Math.floorMod(cellZ, tileSize) * tileSize + Math.floorMod(cellX, tileSize)];
                     noisy[z * size + x] = tile[(tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)];
                     upland[z * size + x] = tile[(2 * tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)] > 0.5F;
+                    sink[z * size + x] = tile[(3 * tileSize + Math.floorMod(cellZ, tileSize)) * tileSize + Math.floorMod(cellX, tileSize)] > 0.5F;
                 }
             }
             route();
         }
 
         /**
-         * Priority flood: starts at the sea and the window's rim, then always continues from the lowest water level
+         * Priority flood: starts at the sea, inland sinks and the window's rim, then always continues from the lowest water level
          * reached so far. Each cell drains to the cell that reached it, so depressions and flats route out through
          * their spill point. Ties go by arrival, which keeps the result independent of anything but the heights.
          */
@@ -256,7 +278,7 @@ final class FlowLayer {
                 down[cell] = -1;
                 int x = cell % size;
                 int z = cell / size;
-                if (height[cell] < sea || x == 0 || z == 0 || x == size - 1 || z == size - 1) {
+                if (height[cell] < sea || sink[cell] || x == 0 || z == 0 || x == size - 1 || z == size - 1) {
                     reached[cell] = true;
                     filled[cell] = height[cell];
                     order[cell] = noisy[cell];

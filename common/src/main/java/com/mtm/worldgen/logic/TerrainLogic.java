@@ -43,8 +43,11 @@ public final class TerrainLogic {
     private final CoastLayer coasts;
     private final BiomeLayer biomes;
     private final OverhangLayer overhangs;
+    private final SinkholeLayer sinkholes;
+    private final Fbm sinkShore;
     private final Fbm mouthSandNoise;
     private final Fbm duneNoise;
+    private final Fbm mouthClayNoise;
     private final Fbm beachWidth;
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
@@ -68,7 +71,10 @@ public final class TerrainLogic {
         this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.overhangs = new OverhangLayer(seed, settings);
+        this.sinkholes = new SinkholeLayer(seed, settings, this);
+        this.sinkShore = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 1), 3, settings.rivers.sinkWavelength);
         this.mouthSandNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 1), 3, settings.rivers.mouthSandWavelength);
+        this.mouthClayNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 3), 2, settings.rivers.mouthClayWavelength);
         this.duneNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 2), 2, settings.rivers.duneWavelength);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
@@ -79,7 +85,7 @@ public final class TerrainLogic {
         this.strataNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT + 1), 2, settings.surface.strataWavelength);
         this.strataSeed = Hashing.derive(seed, ROCK_PATCH_SALT + 2);
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
-        FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland);
+        FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland, this::canSink);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast);
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
@@ -164,6 +170,11 @@ public final class TerrainLogic {
         return columns.get().column(this, x, z).highestSolid();
     }
 
+    /** The sinkhole of a site cell as x, floor height, z, or null. */
+    public double[] sinkholePit(int cellX, int cellZ) {
+        return sinkholes.pit(cellX, cellZ);
+    }
+
     /** Whether a block column has overhangs. */
     public boolean hasOverhangs(int x, int z) {
         return columns.get().column(this, x, z).overhangProfile() != NO_OVERHANG;
@@ -225,7 +236,7 @@ public final class TerrainLogic {
      * plus the terrain skeleton evaluated at the exact position, softly capped below the maximum height.
      */
     public double sampleSurfaceHeight(double x, double z) {
-        return stacks.raise(x, z, sampleShapedLand(x, z));
+        return sinkholes.lower(x, z, stacks.raise(x, z, sampleShapedLand(x, z)));
     }
 
     /**
@@ -233,6 +244,35 @@ public final class TerrainLogic {
      */
     public double preliminaryHeight(int x, int z) {
         return columns.get().column(this, x, z).shaped;
+    }
+
+    /** Whether desert lowland far from the sea can hold an inland lake that rivers end in. */
+    private boolean canSink(double x, double z) {
+        double temperature = climate.temperature(x, z);
+        return climate.zone(temperature) == ClimateLayer.Zone.TROPICAL && !climate.nearZoneBorder(temperature)
+                && climate.humidity(x, z) < settings.biomes.dryHumidity && !isUpland(x, z)
+                && sampleCoastDistance(x, z) > settings.rivers.sinkMinCoastDistance;
+    }
+
+    /**
+     * Height of the ground a sinkhole would open in at a position, or NaN if it cannot open there: it needs fairly
+     * gentle, dry upland well above the sea.
+     */
+    double sinkholeGround(double x, double z) {
+        WorldgenSettings.Sinkholes config = settings.sinkholes;
+        double height = sampleShapedLand(x, z);
+        if (height < settings.general.seaLevel + config.minAboveSea || !isUpland(x, z) || isNearWater(x, z)) {
+            return Double.NaN;
+        }
+        double grade = Math.hypot(sampleShapedLand(x + config.radiusMax, z) - sampleShapedLand(x - config.radiusMax, z),
+                sampleShapedLand(x, z + config.radiusMax) - sampleShapedLand(x, z - config.radiusMax)) / (2.0 * config.radiusMax);
+        return grade > config.maxGrade ? Double.NaN : height;
+    }
+
+    /** Whether water shapes the land at a position, which keeps sinkholes away. */
+    private boolean isNearWater(double x, double z) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        return river != null && river.texture() < 1.0 || !Double.isNaN(sampleLakeLevel(x, z));
     }
 
     /** Surface height before sea stacks stand on it. */
@@ -307,7 +347,18 @@ public final class TerrainLogic {
         double shaped = land + (ground - land) * inside;
         double rim = smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
-        return shaped < bank ? shaped + (bank - shaped) * rim : shaped;
+        return sinkBasin(x, z, lake, shaped < bank ? shaped + (bank - shaped) * rim : shaped);
+    }
+
+    /** Land dug out for an inland lake, which unlike other lakes has no hollow of its own to fill. */
+    private double sinkBasin(double x, double z, double[] lake, double land) {
+        if (lake[2] <= 0.0) {
+            return land;
+        }
+        WorldgenSettings.Rivers rivers = settings.rivers;
+        double dug = smooth((lake[2] + rivers.sinkWarp * sinkShore.sample(x, z) - 0.2) / 0.5);
+        double rim = lake[1] + rivers.sinkRim;
+        return Math.min(land, rim + (lake[1] - rivers.sinkDepth - rim) * dug);
     }
 
     /** Whether a sea stack can stand at a position: in the water a little way off a rocky coast. */
@@ -359,6 +410,15 @@ public final class TerrainLogic {
     private boolean isMouthSand(double x, double z, RiverRegion.Hit river) {
         WorldgenSettings.Rivers rivers = settings.rivers;
         return river.sandRun() < rivers.mouthSandWidth * (1.0 + rivers.mouthSandContrast * mouthSandNoise.sample(x, z));
+    }
+
+    /** Whether a block column on the banks of a river mouth is a clay flat rather than sand. */
+    public boolean isMouthClay(int x, int z) {
+        if (mouthClayNoise.sample(x, z) <= settings.rivers.mouthClayThreshold) {
+            return false;
+        }
+        RiverRegion.Hit river = sampleRiver(x, z);
+        return river != null && isMouthSand(x, z, river);
     }
 
     /** Land with low dunes where it lies on the sand of a river mouth, rising from the water's edge. */
@@ -469,6 +529,7 @@ public final class TerrainLogic {
         double tz = smooth(v - cellZ);
         double share = 0.0;
         double levelSum = 0.0;
+        double sink = 0.0;
         for (int dz = 0; dz <= 1; dz++) {
             for (int dx = 0; dx <= 1; dx++) {
                 int cells = settings.general.regionSize / size;
@@ -479,10 +540,11 @@ public final class TerrainLogic {
                     double weight = (dx == 0 ? 1.0 - tx : tx) * (dz == 0 ? 1.0 - tz : tz);
                     share += weight;
                     levelSum += weight * flow.lakeLevel(lx, lz);
+                    sink += flow.isSink(lx, lz) ? weight : 0.0;
                 }
             }
         }
-        return share > 0.0 ? new double[]{share, levelSum / share} : null;
+        return share > 0.0 ? new double[]{share, levelSum / share, sink} : null;
     }
 
     private FlowRegion flowRegionAt(int regionX, int regionZ) {
@@ -593,7 +655,7 @@ public final class TerrainLogic {
 
     /** Share of cliff bands at a position, from 0 to 1. Slope limits do not hold where it is above zero. */
     public double sampleCliffShare(double x, double z) {
-        if (stacks.raise(x, z, Double.NEGATIVE_INFINITY) != Double.NEGATIVE_INFINITY) {
+        if (stacks.raise(x, z, Double.NEGATIVE_INFINITY) != Double.NEGATIVE_INFINITY || sinkholes.contains(x, z)) {
             return 1.0;
         }
         double base = interpolate(FIELD_HEIGHT, x, z);
@@ -843,6 +905,8 @@ public final class TerrainLogic {
         private double strataOffset = Double.NaN;
         private int igneous = -1;
         private double[] overhangProfile;
+        private SinkholeLayer.Site sinkhole;
+        private boolean sinkholeKnown;
         private double highestSolid = Double.NaN;
 
         Column(TerrainLogic owner, int x, int z) {
@@ -850,7 +914,7 @@ public final class TerrainLogic {
             this.x = x;
             this.z = z;
             this.shaped = owner.sampleShapedLand(x, z);
-            this.height = owner.stacks.raise(x, z, shaped);
+            this.height = owner.sinkholes.lower(x, z, owner.stacks.raise(x, z, shaped));
         }
 
         double[] overhangProfile() {
@@ -871,6 +935,16 @@ public final class TerrainLogic {
         }
 
         double solidHeight(int y) {
+            if (!sinkholeKnown) {
+                sinkhole = owner.sinkholes.near(x, z);
+                sinkholeKnown = true;
+            }
+            if (sinkhole != null) {
+                double inside = owner.sinkholes.chamberDepth(sinkhole, x, y, z);
+                if (inside > 0.0) {
+                    return Math.min(height, y - inside);
+                }
+            }
             double[] profile = overhangProfile();
             if (profile == NO_OVERHANG || y > highestSolid()) {
                 return height;

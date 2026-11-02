@@ -16,12 +16,14 @@ final class BiomeLayer {
     private final WorldgenSettings.Biomes config;
     private final Fbm variantNoise;
     private final Fbm caveNoise;
+    private final Fbm bandNoise;
 
     BiomeLayer(long seed, WorldgenSettings settings) {
         this.settings = settings;
         this.config = settings.biomes;
         this.variantNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT), 2, config.patchWavelength);
         this.caveNoise = new Fbm(Hashing.derive(seed, CAVE_SALT), 2, config.caveWavelength);
+        this.bandNoise = new Fbm(Hashing.derive(seed, VARIANT_SALT + 1), 3, config.bandWavelength);
     }
 
     /**
@@ -54,13 +56,15 @@ final class BiomeLayer {
             return pick(rockyCoast ? biomes.rockyShore : biomes.beach, x, z);
         }
         if (snowLine > 0.0) {
-            if (height >= snowLine) {
+            // The bands wander, or forest would stop along one exact contour line around every mountain
+            double banded = height + config.bandWander * bandNoise.sample(x, z);
+            if (banded >= snowLine) {
                 return pick(biomes.snowPeak, x, z);
             }
-            if (height >= config.treeLine * snowLine) {
+            if (banded >= config.treeLine * snowLine) {
                 return pick(biomes.alpine, x, z);
             }
-            if (height >= sea + config.highlandLine * (snowLine - sea)) {
+            if (banded >= sea + config.highlandLine * (snowLine - sea)) {
                 return pick(dry && biomes.dryHighland.length > 0 ? biomes.dryHighland : biomes.highland, x, z);
             }
         }

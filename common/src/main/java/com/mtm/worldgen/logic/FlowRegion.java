@@ -97,6 +97,11 @@ public final class FlowRegion {
         return !Float.isNaN(lakeLevels[localZ * cells + localX]);
     }
 
+    /** Whether a cell is an inland lake with no outlet, where a river ends without reaching the sea. */
+    public boolean isSink(int localX, int localZ) {
+        return isLake(localX, localZ) && !flows(localX, localZ);
+    }
+
     /** Water level of a lake cell. Only valid where {@link #isLake} holds. */
     public float lakeLevel(int localX, int localZ) {
         return lakeLevels[localZ * cells + localX];

@@ -165,6 +165,55 @@ class TerrainLogicTest {
         assertTrue(overhangs < 0.03 * columns, overhangs + " of " + columns + " land columns have overhangs");
     }
 
+    /** A sinkhole sinks the ground to its floor, with air in its chamber below the height map. */
+    @Test
+    void sinkholesOpenIntoChambers() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        int found = 0;
+        for (int cellX = -16; cellX < 16; cellX++) {
+            for (int cellZ = -16; cellZ < 16; cellZ++) {
+                double[] pit = logic.sinkholePit(cellX, cellZ);
+                if (pit == null) {
+                    continue;
+                }
+                found++;
+                int x = (int) Math.floor(pit[0]);
+                int z = (int) Math.floor(pit[2]);
+                double floor = logic.surfaceHeight(x, z);
+                assertTrue(floor <= pit[1] + 1.0, "pit floor " + floor + " above " + pit[1]);
+                int below = (int) Math.floor(floor) - 4;
+                assertTrue(logic.solidHeight(x, below, z) < below, "no chamber below the pit at " + x + "," + z);
+            }
+        }
+        assertTrue(found > 0, "no sinkholes");
+    }
+
+    /** Inland sinks hold water below their rim and take in no land higher than themselves as a dry hole. */
+    @Test
+    void inlandSinksHoldWater() {
+        int sinks = 0;
+        for (long seed : new long[]{SEED, 2L, 3L}) {
+            TerrainLogic logic = new TerrainLogic(seed, SETTINGS);
+            int size = SETTINGS.rivers.flowCellSize;
+            for (int regionX = -4; regionX < 4; regionX++) {
+                for (int regionZ = -4; regionZ < 4; regionZ++) {
+                    FlowRegion flow = logic.flowRegion(regionX, regionZ);
+                    for (int lx = 0; lx < flow.cells(); lx++) {
+                        for (int lz = 0; lz < flow.cells(); lz++) {
+                            if (flow.isSink(lx, lz)) {
+                                sinks++;
+                                double x = (regionX * flow.cells() + lx + 0.5) * size;
+                                double z = (regionZ * flow.cells() + lz + 0.5) * size;
+                                assertTrue(logic.sampleSurfaceHeight(x, z) < flow.lakeLevel(lx, lz), "dry sink at " + x + "," + z);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(sinks > 0, "no inland sinks");
+    }
+
     @Test
     void sameSeedGivesSameSurface() {
         TerrainLogic a = new TerrainLogic(SEED, SETTINGS);
@@ -561,7 +610,7 @@ class TerrainLogicTest {
             for (int lx = 0; lx < cells; lx++) {
                 double height = logic.sampleSurfaceHeight((lx + 0.5) * size, (lz + 0.5) * size);
                 // Routing samples coarsely, so cells right at the coast can count as sea
-                assertTrue(flow.flows(lx, lz) || height < sea + 16.0 + SETTINGS.heightScale() * SETTINGS.beaches.cliffHeight, "land sink at height " + height);
+                assertTrue(flow.flows(lx, lz) || flow.isSink(lx, lz) || height < sea + 16.0 + SETTINGS.heightScale() * SETTINGS.beaches.cliffHeight, "land sink at height " + height);
             }
         }
     }
