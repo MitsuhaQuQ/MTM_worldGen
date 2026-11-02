@@ -44,6 +44,7 @@ import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.ChunkStorage;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.levelgen.FlatLevelSource;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
@@ -55,6 +56,7 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -396,7 +398,9 @@ public final class MtmGameTests {
             ForeignChunks.run(level, logic, root);
             assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk not in the snapshot");
             ForeignMap.Chunk found = logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z));
-            assertTrue(Math.abs(found.ground()[0] - SETTINGS.foreign.flatGround) <= 8, "ground at " + found.ground()[0]);
+            // Only Fabric runs its tests in a superflat world; a normal map is not raised
+            boolean flat = level.getChunkSource().getGenerator() instanceof FlatLevelSource;
+            assertTrue(!flat || Math.abs(found.ground()[0] - SETTINGS.foreign.flatGround) <= 8, "ground at " + found.ground()[0]);
             long before = Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis();
             ForeignChunks.run(level, logic, root);
             assertTrue(before == Files.getLastModifiedTime(regions.resolve(new RegionFileName(pos).name())).toMillis(), "fitted twice");
@@ -420,6 +424,63 @@ public final class MtmGameTests {
             TerrainLogic.forget(seed, SETTINGS);
         }
         helper.succeed();
+    }
+
+    /**
+     * Tags decide what a chunk is, whatever the snapshot holds: another MTM world's chunk is foreign even with this
+     * algorithm version, and a new map merged in at a place already fitted gets fitted in turn.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public static void foreignChunksAreToldByTheirTags(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        long seed = SEED + 2;
+        TerrainLogic logic = TerrainLogic.forWorld(seed, SETTINGS);
+        ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
+        try {
+            Path root = Files.createTempDirectory("mtm_foreign");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            CompoundTag other = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+            other.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
+            other.putLong(ForeignChunks.WORLD_TAG, logic.worldId() + 1);
+            writeChunk(level, regions, pos, other);
+            ForeignChunks.run(level, logic, root);
+            assertTrue(logic.foreign().contains(pos.x, pos.z), "chunk of another MTM world taken for our own");
+            CompoundTag fitted = readChunk(level, regions, pos);
+            assertTrue(fitted.getLong(ForeignChunks.FITTED_TAG) == logic.worldId(), "fitted chunk not marked");
+            assertTrue(!fitted.contains(ForeignChunks.WORLD_TAG), "tags of the other world left");
+
+            short before = logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z)).ground()[0];
+            CompoundTag again = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+            again.remove(ForeignChunks.VERSION_TAG);
+            again.remove(ForeignChunks.WORLD_TAG);
+            writeChunk(level, regions, pos, again);
+            ForeignChunks.run(level, logic, root);
+            CompoundTag merged = readChunk(level, regions, pos);
+            assertTrue(merged.getLong(ForeignChunks.FITTED_TAG) == logic.worldId(), "new map at a fitted place not fitted");
+            assertTrue(logic.foreign().chunks().get(ForeignMap.key(pos.x, pos.z)).ground()[0] == before, "new map not in the snapshot");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
+    private static void writeChunk(ServerLevel level, Path regions, ChunkPos pos, CompoundTag chunk) throws IOException {
+        try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
+            storage.write(pos, chunk);
+            storage.flushWorker();
+        }
+        // File times can be too coarse to show a second write within one test
+        Path file = regions.resolve(new RegionFileName(pos).name());
+        Files.setLastModifiedTime(file, FileTime.fromMillis(Files.getLastModifiedTime(file).toMillis() + 2000L));
+    }
+
+    private static CompoundTag readChunk(ServerLevel level, Path regions, ChunkPos pos) throws IOException {
+        try (ChunkStorage storage = new ChunkStorage(regions, level.getServer().getFixerUpper(), false)) {
+            return storage.read(pos).join().orElseThrow();
+        }
     }
 
     private record RegionFileName(ChunkPos pos) {

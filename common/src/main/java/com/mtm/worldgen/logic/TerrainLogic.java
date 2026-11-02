@@ -47,6 +47,7 @@ public final class TerrainLogic {
     private final OverhangLayer overhangs;
     private final SinkholeLayer sinkholes;
     private volatile ForeignMap foreign = ForeignMap.EMPTY;
+    private final long worldId;
     private final Fbm sinkShore;
     private final Fbm mouthSandNoise;
     private final Fbm duneNoise;
@@ -73,6 +74,7 @@ public final class TerrainLogic {
         this.climate = new ClimateLayer(seed, settings);
         this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
+        this.worldId = Hashing.derive(seed, settings.toJson().hashCode());
         this.overhangs = new OverhangLayer(seed, settings);
         this.sinkholes = new SinkholeLayer(seed, settings, this);
         this.sinkShore = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 1), 3, settings.rivers.sinkWavelength);
@@ -106,6 +108,11 @@ public final class TerrainLogic {
 
     public WorldgenSettings settings() {
         return settings;
+    }
+
+    /** Stands for this seed and these settings: two worlds that differ in either have different terrain. */
+    public long worldId() {
+        return worldId;
     }
 
     public LogicRegion region(int regionX, int regionZ) {

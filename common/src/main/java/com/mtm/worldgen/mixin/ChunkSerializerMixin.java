@@ -13,14 +13,21 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Marks the chunks MTM generates, which tells them from region files merged in from other worlds. */
+/** Marks the chunks of a world, which tells them from region files merged in from other worlds, MTM or not. */
 @Mixin(ChunkSerializer.class)
 abstract class ChunkSerializerMixin {
     @Inject(method = "write", at = @At("RETURN"))
     private static void mtm$stamp(ServerLevel level, ChunkAccess chunk, CallbackInfoReturnable<CompoundTag> cir) {
         TerrainLogic logic = level.dimension() == Level.OVERWORLD ? MtmGenerators.terrainLogic(level) : null;
-        if (logic != null && !logic.foreign().contains(chunk.getPos().x, chunk.getPos().z)) {
-            cir.getReturnValue().putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
+        if (logic == null) {
+            return;
+        }
+        CompoundTag tag = cir.getReturnValue();
+        if (logic.foreign().contains(chunk.getPos().x, chunk.getPos().z)) {
+            tag.putLong(ForeignChunks.FITTED_TAG, logic.worldId());
+        } else {
+            tag.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
+            tag.putLong(ForeignChunks.WORLD_TAG, logic.worldId());
         }
     }
 }
