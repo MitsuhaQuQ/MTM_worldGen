@@ -12,9 +12,10 @@ public final class RiverRegion {
      * deepest in. The water level is a blend of all rivers in reach, weighted by closeness, so it does not jump
      * between two rivers. Land must stay between low and high, the valley walls of all rivers in reach, and keeps
      * this share of its ridge texture. Run is the distance from the nearest valley floor,
-     * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1.
+     * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1. Sand run is the distance
+     * from the water of a river mouth or delta that leaves sand along its banks, infinite if there is none in reach.
      */
-    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain) {
+    public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain, double sandRun) {
         public double halfWidth(double minimumWidth) {
             return 0.5 * Math.max(width, minimumWidth);
         }
@@ -22,6 +23,8 @@ public final class RiverRegion {
 
     /** Values per segment: x0, z0, x1, z1, width0, width1, depth0, depth1, level0, level1. */
     private static final int STRIDE = 10;
+    /** Flag on a segment's class: the river leaves sand along its banks here. */
+    static final byte SANDY = 0x40;
     /** Below this distance in blocks the closest river no longer gains on the others in the water level blend. */
     private static final double BLEND_RADIUS = 4.0;
     private static final FlowRegion.RiverClass[] CLASSES = FlowRegion.RiverClass.values();
@@ -73,6 +76,7 @@ public final class RiverRegion {
         double high = Double.MAX_VALUE;
         double texture = 1.0;
         double floodplain = 0.0;
+        double sandRun = Double.POSITIVE_INFINITY;
         for (int segment : index[bucketZ * buckets + bucketX]) {
             int s = segment * STRIDE;
             double dx = segments[s + 2] - segments[s];
@@ -93,6 +97,9 @@ public final class RiverRegion {
             double plainWidth = Math.min(config.floodplainBase + config.floodplainPerWidth * width, reach - config.valleyFloorFactor * half);
             floodplain = Math.max(floodplain, 1.0 - smooth(run / plainWidth));
             nearestRun = Math.min(nearestRun, run);
+            if ((classes[segment] & SANDY) != 0) {
+                sandRun = Math.min(sandRun, Math.max(0.0, distance - half));
+            }
             // The fade has to end inside the reach, or the texture would jump where a river drops out of the query
             double fade = Math.min(config.textureFadeBase + config.textureFadePerWidth * width, reach - config.valleyFloorFactor * half);
             texture = Math.min(texture, smooth(run / fade));
@@ -111,7 +118,7 @@ public final class RiverRegion {
                 bestDepth = segments[s + 6] + t * (segments[s + 7] - segments[s + 6]);
             }
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, levelSum / weightSum, low, high, texture, nearestRun, floodplain);
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, levelSum / weightSum, low, high, texture, nearestRun, floodplain, sandRun);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */
@@ -159,7 +166,7 @@ public final class RiverRegion {
     }
 
     public FlowRegion.RiverClass riverClass(int segment) {
-        return CLASSES[classes[segment]];
+        return CLASSES[classes[segment] & ~SANDY];
     }
 
     /** Whether this region holds exactly the same segments as another. */

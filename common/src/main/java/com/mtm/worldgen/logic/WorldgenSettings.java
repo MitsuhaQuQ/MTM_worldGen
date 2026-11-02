@@ -497,6 +497,38 @@ public final class WorldgenSettings {
         /** Rivers vary by this fraction of their width. */
         /** Nodes before the sea over which rivers settle down to sea level, so that they do not fall into it. */
         public int estuaryLength = 5;
+        /** Rivers widen by this factor toward the sea, up to the given width. */
+        public double estuaryWidening = 2.0;
+        public double estuaryMaxWidth = 600.0;
+        /** Share of river mouths with sand along the banks of their last nodes, and how far it reaches from the water. */
+        public double sandyMouthChance = 0.6;
+        public int sandyMouthNodes = 2;
+        public double mouthSandWidth = 48.0;
+        /** Sand width varies along the banks; above 1 it gives out in places, and plants reach the water. */
+        public double mouthSandContrast = 1.3;
+        public double mouthSandWavelength = 110.0;
+        /** Low dunes on that sand, which keep it from lying in long straight steps. */
+        public double duneHeight = 1.6;
+        public double duneWavelength = 44.0;
+        /** Share of big rivers on a low, soft shore that end in a delta. */
+        public double deltaChance = 0.3;
+        /** Nodes above the sea where a delta opens. */
+        public int deltaLength = 3;
+        /** Channels of a delta, the main stem included. */
+        public int deltaBranchesMin = 2;
+        public int deltaBranchesMax = 4;
+        /** How far branches end from the main mouth, how far they run out to sea, and how far they wander. */
+        public double deltaSpread = 400.0;
+        public double deltaOverrun = 112.0;
+        public double deltaMeander = 80.0;
+        /** Branch width varies by this share, over this many stretches of a branch. */
+        public double deltaWidthVariation = 0.6;
+        public double deltaWidthBends = 7.0;
+        /** Size of a branch as a share of the river at the head of the delta. */
+        public double deltaBranchWidth = 0.4;
+        public double deltaBranchDepth = 0.6;
+        /** Land around a delta may rise this far above the sea. */
+        public double deltaMaxRelief = 14.0;
         public double widthVariation = 0.1;
         /** A side branch widens by this factor over its last edge, rounding the corners where it meets the main river. */
         public double mouthFlare = 1.6;
@@ -626,6 +658,10 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(rivers.deltaBranchesMin >= 2 && rivers.deltaBranchesMax <= 4 && rivers.deltaBranchesMin <= rivers.deltaBranchesMax,
+                "rivers.deltaBranchesMin and deltaBranchesMax must lie between 2 and 4");
+        require(RiverLayer.margin(rivers) + Math.max(rivers.estuaryLength, rivers.majorTrunkSmoothing) <= general.regionSize / rivers.flowCellSize,
+                "rivers.deltaLength and deltaSpread must keep deltas within the neighboring regions");
         require(rivers.queryReach >= 0 && rivers.queryReach <= general.regionSize - rivers.flowCellSize * 2,
                 "rivers.queryReach must leave the rivers of neighboring regions in reach");
         require(rivers.streamCells < rivers.tributaryCells && rivers.tributaryCells < rivers.trunkCells,

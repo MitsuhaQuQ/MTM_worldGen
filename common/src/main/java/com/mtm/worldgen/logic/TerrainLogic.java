@@ -43,6 +43,8 @@ public final class TerrainLogic {
     private final CoastLayer coasts;
     private final BiomeLayer biomes;
     private final OverhangLayer overhangs;
+    private final Fbm mouthSandNoise;
+    private final Fbm duneNoise;
     private final Fbm beachWidth;
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
@@ -66,6 +68,8 @@ public final class TerrainLogic {
         this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
         this.overhangs = new OverhangLayer(seed, settings);
+        this.mouthSandNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 1), 3, settings.rivers.mouthSandWavelength);
+        this.duneNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 2), 2, settings.rivers.duneWavelength);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
         this.snowLineNoise = new Fbm(Hashing.derive(seed, SNOW_SALT), 2, settings.surface.snowLineWavelength);
         this.stacks = new SeaStackLayer(seed, settings, this);
@@ -77,7 +81,7 @@ public final class TerrainLogic {
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
-        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand);
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast);
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
     }
 
@@ -291,7 +295,7 @@ public final class TerrainLogic {
         RiverRegion.Hit river = sampleRiver(x, z);
         double cliff = cliffHeight(x, z);
         double ground = cliff + (river == null ? textured : smooth + (textured - smooth) * river.texture());
-        double land = river == null ? ground : carveValley(x, z, river, ground);
+        double land = river == null ? ground : duned(x, z, river, carveValley(x, z, river, ground));
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -349,6 +353,22 @@ public final class TerrainLogic {
     private boolean isRockyCoast(double x, double z) {
         CoastLayer.Type type = sampleCoastType(x, z);
         return type == CoastLayer.Type.ROCK || type == CoastLayer.Type.CLIFF;
+    }
+
+    /** Whether a position lies on the sand along a river mouth. The edge wanders, or it would trace the river exactly. */
+    private boolean isMouthSand(double x, double z, RiverRegion.Hit river) {
+        WorldgenSettings.Rivers rivers = settings.rivers;
+        return river.sandRun() < rivers.mouthSandWidth * (1.0 + rivers.mouthSandContrast * mouthSandNoise.sample(x, z));
+    }
+
+    /** Land with low dunes where it lies on the sand of a river mouth, rising from the water's edge. */
+    private double duned(double x, double z, RiverRegion.Hit river, double land) {
+        double reach = 2.0 * settings.rivers.mouthSandWidth;
+        if (river.sandRun() >= reach || land < seaSurface()) {
+            return land;
+        }
+        double fade = (1.0 - smooth(river.sandRun() / reach)) * smooth(river.sandRun() / 12.0);
+        return land + settings.rivers.duneHeight * fade * duneNoise.sample(x, z);
     }
 
     private double carveValley(double x, double z, RiverRegion.Hit river, double ground) {
@@ -639,6 +659,10 @@ public final class TerrainLogic {
      * dropping to nothing, and extend a little offshore as shallow sandy sea floor.
      */
     public boolean sampleBeach(double x, double z) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        if (river != null && isMouthSand(x, z, river) && sampleSurfaceHeight(x, z) < settings.general.seaLevel - 1 + settings.beaches.maxHeight) {
+            return true;
+        }
         double distance = sampleCoastDistance(x, z);
         if (distance < -settings.beaches.offshore) {
             return false;

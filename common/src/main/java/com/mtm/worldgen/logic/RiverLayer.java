@@ -2,6 +2,7 @@ package com.mtm.worldgen.logic;
 
 import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
+import com.mtm.worldgen.noise.ValueNoise;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,15 +18,22 @@ final class RiverLayer {
     private static final long NODE_SALT = 0x4E4F4445L;
     private static final long MEANDER_SALT = 0x4D45414EL;
     private static final long SIZE_SALT = 0x53495A45L;
+    private static final long DELTA_SALT = 0x44454C5441L;
 
     interface FlowSource {
         FlowRegion flowRegion(int regionX, int regionZ);
+    }
+
+    interface ShoreTest {
+        boolean isRocky(double x, double z);
     }
 
     private final WorldgenSettings settings;
     private final WorldgenSettings.Rivers config;
     private final FlowSource flows;
     private final FlowLayer.HeightSampler landform;
+    private final ShoreTest shore;
+    private final long deltaSeed;
     private final long nodeSeed;
     private final long meanderSeed;
     private final long sizeSeed;
@@ -33,11 +41,13 @@ final class RiverLayer {
     private final int cellSize;
     private final int cells;
 
-    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform) {
+    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore) {
         this.settings = settings;
         this.config = settings.rivers;
         this.flows = flows;
         this.landform = landform;
+        this.shore = shore;
+        this.deltaSeed = Hashing.derive(seed, DELTA_SALT);
         this.nodeSeed = nodeSeed(seed);
         this.meanderSeed = Hashing.derive(seed, MEANDER_SALT);
         this.sizeSeed = Hashing.derive(seed, SIZE_SALT);
@@ -53,7 +63,7 @@ final class RiverLayer {
 
         int originX = regionX * cells;
         int originZ = regionZ * cells;
-        int margin = Math.max(1, ceilDiv(config.queryReach, cellSize) + 3);
+        int margin = margin(config);
         // Rows run in parallel into their own lists and join in row order, so the result does not depend on timing
         int rows = cells + 2 * margin;
         Curves[] parts = new Curves[rows];
@@ -92,6 +102,7 @@ final class RiverLayer {
         if (flow.isLake(lx, lz) && nextFlow.isLake(nextLx, nextLz)) {
             return;
         }
+        addDelta(around, regionX, regionZ, cellX, cellZ, curves);
         double[] a = smoothNode(around, regionX, regionZ, cellX, cellZ);
         double[] b = smoothNode(around, regionX, regionZ, nextX, nextZ);
         // Tangents run from the neighbor behind to the neighbor ahead, so the curves of consecutive edges join smoothly
@@ -105,7 +116,7 @@ final class RiverLayer {
         // A side branch opens only a little into the confluence: enough for a rounded mouth, not the width of the main river
         boolean mainStem = nextFlow.hasInflow(nextLx, nextLz) && nextX + nextFlow.inflowX(nextLx, nextLz) == cellX
                 && nextZ + nextFlow.inflowZ(nextLx, nextLz) == cellZ;
-        double[] endSize = nextClass == FlowRegion.RiverClass.NONE ? startSize
+        double[] endSize = nextClass == FlowRegion.RiverClass.NONE ? mouthSize(around, regionX, regionZ, cellX, cellZ, flow.riverClass(lx, lz), startSize)
                 : !mainStem ? new double[]{config.mouthFlare * startSize[0], startSize[1]}
                 : size(around, regionX, regionZ, nextClass, nextFlow.catchment(nextLx, nextLz), nextX, nextZ);
 
@@ -134,6 +145,10 @@ final class RiverLayer {
         double previousZ = a[1];
         double previousLevel = startLevel;
         byte riverClass = (byte) flow.riverClass(lx, lz).ordinal();
+        int toSea = seaSteps(around, regionX, regionZ, cellX, cellZ);
+        if (toSea >= 0 && toSea <= config.sandyMouthNodes && Hashing.unit(Hashing.derive(hash, 3)) < config.sandyMouthChance) {
+            riverClass |= RiverRegion.SANDY;
+        }
         for (int i = 1; i <= config.curveSegments; i++) {
             double t = (double) i / config.curveSegments;
             double u = 1.0 - t;
@@ -154,6 +169,108 @@ final class RiverLayer {
                     startSize[1] + from * (endSize[1] - startSize[1]), startSize[1] + t * (endSize[1] - startSize[1]),
                     previousLevel, level,
                     riverClass);
+            previousX = x;
+            previousZ = z;
+            previousLevel = level;
+        }
+    }
+
+    /**
+     * Branches of a delta, for the cell at its head. A delta opens this many nodes up the main stem of a big river that
+     * reaches a low, soft shore. The branches fan out from there on top of the main stem, which runs on as one of them.
+     */
+    private void addDelta(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, Curves curves) {
+        FlowRegion head = flowAt(around, regionX, regionZ, cellX, cellZ);
+        FlowRegion.RiverClass riverClass = head.riverClass(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells));
+        if (riverClass != FlowRegion.RiverClass.TRUNK && riverClass != FlowRegion.RiverClass.MAJOR_TRUNK) {
+            return;
+        }
+        int x = cellX;
+        int z = cellZ;
+        for (int i = 0; i < config.deltaLength; i++) {
+            int[] down = step(around, regionX, regionZ, x, z, 1);
+            int[] back = down == null || flowAt(around, regionX, regionZ, down[0], down[1]) == null
+                    ? null : step(around, regionX, regionZ, down[0], down[1], -1);
+            if (back == null || back[0] != x || back[1] != z) {
+                return;
+            }
+            x = down[0];
+            z = down[1];
+        }
+        double sea = settings.general.seaLevel - 1;
+        FlowRegion end = flowAt(around, regionX, regionZ, x, z);
+        int endX = Math.floorMod(x, cells);
+        int endZ = Math.floorMod(z, cells);
+        if (end.flows(endX, endZ) || end.isLake(endX, endZ) || end.waterLevel(endX, endZ) > sea + 1.0) {
+            return;
+        }
+        long hash = Hashing.hash(deltaSeed, x, z);
+        if (Hashing.unit(hash) >= config.deltaChance) {
+            return;
+        }
+        double[] apex = smoothNode(around, regionX, regionZ, cellX, cellZ);
+        double[] mouth = node(x, z);
+        double[] forward = unit(mouth[0] - apex[0], mouth[1] - apex[1]);
+        double normalX = -forward[1];
+        double normalZ = forward[0];
+        double spread = config.deltaSpread;
+        double apexLevel = riverLevel(around, regionX, regionZ, cellX, cellZ);
+        if (apexLevel > sea + config.deltaMaxRelief) {
+            return;
+        }
+        for (int side = -1; side <= 1; side++) {
+            double px = mouth[0] + normalX * side * spread;
+            double pz = mouth[1] + normalZ * side * spread;
+            double midX = 0.5 * (apex[0] + px);
+            double midZ = 0.5 * (apex[1] + pz);
+            if (landform.height(px, pz) > sea + config.deltaMaxRelief || landform.height(midX, midZ) > sea + config.deltaMaxRelief
+                    || shore.isRocky(px, pz) || shore.isRocky(midX, midZ)) {
+                return;
+            }
+        }
+        double roll = Hashing.unit(Hashing.mix(hash));
+        int extras = config.deltaBranchesMin - 1 + (int) (roll * (config.deltaBranchesMax - config.deltaBranchesMin + 1));
+        double flip = Hashing.unit(Hashing.derive(hash, 1)) < 0.5 ? -1.0 : 1.0;
+        double[] size = size(around, regionX, regionZ, riverClass, head.catchment(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells)), cellX, cellZ);
+        for (int branch = 0; branch < extras; branch++) {
+            double offset = flip * spread * (branch == 0 ? 1.0 : branch == 1 ? -1.0 : 0.5);
+            addBranch(apex, mouth, forward, normalX, normalZ, offset, size, apexLevel, Hashing.derive(hash, 10 + branch), curves);
+        }
+    }
+
+    private void addBranch(double[] apex, double[] mouth, double[] forward, double normalX, double normalZ, double offset,
+                           double[] size, double apexLevel, long hash, Curves curves) {
+        double sea = settings.general.seaLevel - 1;
+        double endX = mouth[0] + normalX * offset + forward[0] * config.deltaOverrun;
+        double endZ = mouth[1] + normalZ * offset + forward[1] * config.deltaOverrun;
+        double length = Math.hypot(endX - apex[0], endZ - apex[1]);
+        double c1x = apex[0] + forward[0] * length / 3.0;
+        double c1z = apex[1] + forward[1] * length / 3.0;
+        double[] arrival = unit(endX - c1x, endZ - c1z);
+        double c2x = endX - arrival[0] * length / 3.0;
+        double c2z = endZ - arrival[1] * length / 3.0;
+        double phase = 2.0 * Math.PI * Hashing.unit(hash);
+        int segments = config.curveSegments * config.deltaLength;
+        double width = config.deltaBranchWidth * size[0];
+        double depth = config.deltaBranchDepth * size[1];
+        double previousX = apex[0];
+        double previousZ = apex[1];
+        double previousLevel = apexLevel;
+        double previousWidth = width * (1.0 + config.deltaWidthVariation * ValueNoise.sample(hash, 0.0, 0.5));
+        byte riverClass = (byte) (FlowRegion.RiverClass.TRIBUTARY.ordinal() | RiverRegion.SANDY);
+        for (int i = 1; i <= segments; i++) {
+            double t = (double) i / segments;
+            double u = 1.0 - t;
+            // Uneven bends and width: a channel of one size on one smooth curve looks drawn
+            double wander = config.deltaMeander * Math.sin(Math.PI * t) * (Math.sin(3.0 * Math.PI * t + phase)
+                    + 0.6 * Math.sin(7.0 * Math.PI * t + 2.0 * phase) + 0.3 * Math.sin(13.0 * Math.PI * t + 3.0 * phase));
+            double x = u * u * u * apex[0] + 3.0 * u * u * t * c1x + 3.0 * u * t * t * c2x + t * t * t * endX - forward[1] * wander;
+            double z = u * u * u * apex[1] + 3.0 * u * u * t * c1z + 3.0 * u * t * t * c2z + t * t * t * endZ + forward[0] * wander;
+            double level = i == segments ? sea
+                    : Math.max(sea, Math.min(previousLevel, Math.min(apexLevel + t * (sea - apexLevel), landform.height(x, z))));
+            double nextWidth = width * (1.0 + config.deltaWidthVariation * ValueNoise.sample(hash, t * config.deltaWidthBends, 0.5));
+            curves.add(previousX, previousZ, x, z, previousWidth, nextWidth, depth, depth, previousLevel, level, riverClass);
+            previousWidth = nextWidth;
             previousX = x;
             previousZ = z;
             previousLevel = level;
@@ -273,7 +390,24 @@ final class RiverLayer {
         double spread = widthFactor(slopeAt(around, regionX, regionZ, cellX, cellZ, reach(riverClass)));
         double[] position = node(cellX, cellZ);
         double variation = Math.max(-1.0, Math.min(1.0, 2.0 * widthNoise.sample(position[0], position[1])));
-        return new double[]{spread * width * (1.0 + config.widthVariation * variation), depth};
+        double base = spread * width * (1.0 + config.widthVariation * variation);
+        boolean opens = riverClass != FlowRegion.RiverClass.STREAM;
+        int toSea = opens ? seaSteps(around, regionX, regionZ, cellX, cellZ) : -1;
+        return new double[]{toSea < 0 ? base : opened(base, toSea), depth};
+    }
+
+    /** Width of a river opening into its estuary, this many nodes from the sea. */
+    private double opened(double width, int toSea) {
+        double share = 1.0 - (double) toSea / config.estuaryLength;
+        return Math.max(width, Math.min(config.estuaryMaxWidth, width * (1.0 + (config.estuaryWidening - 1.0) * share * share)));
+    }
+
+    /** Size where a river ends in the sea, opening one node further than its last edge. */
+    private double[] mouthSize(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, FlowRegion.RiverClass riverClass, double[] last) {
+        if (riverClass == FlowRegion.RiverClass.STREAM || seaSteps(around, regionX, regionZ, cellX, cellZ) != 1) {
+            return last;
+        }
+        return new double[]{Math.max(last[0], Math.min(config.estuaryMaxWidth, last[0] * opened(1.0, 0) / opened(1.0, 1))), last[1]};
     }
 
     /**
@@ -283,24 +417,34 @@ final class RiverLayer {
     private double riverLevel(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
         FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);
         double level = flow.waterLevel(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells));
+        int steps = seaSteps(around, regionX, regionZ, cellX, cellZ);
+        if (steps < 0) {
+            return level;
+        }
+        double sea = settings.general.seaLevel - 1;
+        double share = (double) steps / config.estuaryLength;
+        return sea + (level - sea) * share * share;
+    }
+
+    /** Nodes from a cell to the sea, or -1 if the sea is further than the estuary or the river ends in a lake. */
+    private int seaSteps(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
         double sea = settings.general.seaLevel - 1;
         int x = cellX;
         int z = cellZ;
         for (int step = 0; step < config.estuaryLength; step++) {
             FlowRegion here = flowAt(around, regionX, regionZ, x, z);
             if (here == null) {
-                return level;
+                return -1;
             }
             int lx = Math.floorMod(x, cells);
             int lz = Math.floorMod(z, cells);
             if (!here.flows(lx, lz)) {
-                double share = (double) step / config.estuaryLength;
-                return here.waterLevel(lx, lz) > sea + 1.0 ? level : sea + (level - sea) * share * share;
+                return here.waterLevel(lx, lz) > sea + 1.0 ? -1 : step;
             }
             x += here.downstreamX(lx, lz);
             z += here.downstreamZ(lx, lz);
         }
-        return level;
+        return -1;
     }
 
     /**
@@ -372,6 +516,12 @@ final class RiverLayer {
     private static double[] unit(double x, double z) {
         double length = Math.hypot(x, z);
         return length > 0.0 ? new double[]{x / length, z / length} : new double[]{0.0, 0.0};
+    }
+
+    /** Cells beyond a region whose edges can reach into it, deltas included. */
+    static int margin(WorldgenSettings.Rivers config) {
+        return Math.max(1, ceilDiv(config.queryReach, config.flowCellSize) + 3) + config.deltaLength
+                + ceilDiv((int) Math.ceil(config.deltaSpread + config.deltaOverrun), config.flowCellSize);
     }
 
     private static int ceilDiv(int value, int divisor) {
