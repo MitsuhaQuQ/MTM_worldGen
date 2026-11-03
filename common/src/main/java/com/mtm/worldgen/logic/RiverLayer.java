@@ -566,15 +566,20 @@ final class RiverLayer {
         return config.plainWidthFactor + t * (config.steepWidthFactor - config.plainWidthFactor);
     }
 
-    /** Fall of the water per block over a stretch of river around a cell, so width does not jump from node to node. */
+    /**
+     * Fall of the water per block over a stretch of river around a cell, so width does not jump from node to node. The
+     * stretch ends at lakes: their water lies flat, and counted in, it would spread the river leaving a mountain lake
+     * as wide as one on a plain.
+     */
     private double slopeAt(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, int reach) {
         int[] top = {cellX, cellZ};
         int[] bottom = {cellX, cellZ};
+        boolean inLake = isLake(around, regionX, regionZ, top);
         for (int i = 0; i < reach; i++) {
             int[] up = step(around, regionX, regionZ, top[0], top[1], -1);
-            top = up != null ? up : top;
+            top = up != null && (inLake || !isLake(around, regionX, regionZ, up)) ? up : top;
             int[] down = step(around, regionX, regionZ, bottom[0], bottom[1], 1);
-            bottom = down != null ? down : bottom;
+            bottom = down != null && (inLake || !isLake(around, regionX, regionZ, down)) ? down : bottom;
         }
         FlowRegion high = flowAt(around, regionX, regionZ, top[0], top[1]);
         FlowRegion low = flowAt(around, regionX, regionZ, bottom[0], bottom[1]);
@@ -584,6 +589,11 @@ final class RiverLayer {
         double fall = high.waterLevel(Math.floorMod(top[0], cells), Math.floorMod(top[1], cells))
                 - low.waterLevel(Math.floorMod(bottom[0], cells), Math.floorMod(bottom[1], cells));
         return fall / (Math.hypot(top[0] - bottom[0], top[1] - bottom[1]) * cellSize);
+    }
+
+    private boolean isLake(FlowRegion[] around, int regionX, int regionZ, int[] cell) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cell[0], cell[1]);
+        return flow != null && flow.isLake(Math.floorMod(cell[0], cells), Math.floorMod(cell[1], cells));
     }
 
     private static double[] unit(double x, double z) {

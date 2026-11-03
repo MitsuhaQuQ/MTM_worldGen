@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 1;
+    public static final int ALGORITHM_VERSION = 2;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -276,7 +276,13 @@ public final class TerrainLogic {
      * their level. Each point's level depends on that point alone, so neighboring regions agree.
      */
     private RiverRegion fitRivers(int regionX, int regionZ) {
-        return riverRegion(regionX, regionZ).lowered(this::sampleLandform);
+        // Lakes keep the rivers through them at their own level: their beds lie below it, and a river lowered onto the
+        // bed would run under the lake, which then leaves no channel for it and walls it in at the shore
+        return riverRegion(regionX, regionZ).lowered((x, z) -> {
+            double[] lake = sampleLake(x, z);
+            double land = sampleLandform(x, z);
+            return lake == null ? land : Math.max(land, lake[1]);
+        });
     }
 
     /** Coarse surface height at a cell center, by global cell index. */
@@ -774,9 +780,12 @@ public final class TerrainLogic {
         // Lakes fill the land as it is, so shores follow the terrain. Inside one, valley banks give way to the basin,
         // and along its edge a rim closes any gap below the water. Land is never pulled down to a lake: rivers nearby
         // can run higher, and the ground beside them would drop away.
+        // What the river cut stays, though: where the land stands above the water, the river still needs its channel
+        // through, and a rim across the channel would dam it
         double inside = smooth((lake[0] - LAKE_EDGE) / LAKE_EDGE);
-        double shaped = land + (ground - land) * inside;
-        double rim = smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
+        double shaped = land > ground ? land + (ground - land) * inside : land;
+        boolean channel = river != null && river.distance() < river.halfWidth(settings.rivers.minChannelWidth);
+        double rim = channel ? 0.0 : smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
         return sinkBasin(x, z, lake, shaped < bank ? shaped + (bank - shaped) * rim : shaped);
     }
