@@ -1,5 +1,13 @@
 # Release notes
 
+## v0.3.2
+
+A fix for rivers below waterfalls. Chunks already saved by v0.3.1 count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- The pool above a waterfall no longer raises a round plateau about a hundred blocks across around the fall, which walled off streams running into the river below it
+
 ## v0.3.1
 
 A fix for creeks in mountains with cliff bands. Chunks already saved by v0.3.0 count as an older version, and terrain generated around them blends toward their edges.
