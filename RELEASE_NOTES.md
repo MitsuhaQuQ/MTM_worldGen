@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.4.2
 
 Fixes for lake outlets and creeks. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
 
