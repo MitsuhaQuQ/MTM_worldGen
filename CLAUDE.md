@@ -373,7 +373,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `/mwg debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
 - 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、随机种子、跳转出生点和坐标，底栏显示高度、水位和群系，右下角显示视图内海洋、平原、丘陵、高原、山地的比例（按地形骨架分类，`sampleLandformKind`）；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
-- 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态；河流查询会算出所到之处的侵蚀，大范围随机取样的测试要把范围控制在区域缓存放得下的大小（曾用 ±16000，单个测试 9 分钟）；每个测试各自计算侵蚀区域，测试堆设为 3 GB（默认 512 MB 会 OOM），全部约 3 分钟
+- 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行；只读取默认世界的测试共用一个 `TerrainLogic`（`TerrainLogicTest.SHARED`，区域缓存放大到 1024），每个侵蚀区域只算一次；比较两个实例、依赖计算顺序或设置外来区块的测试自己建实例。共用实例必须放大缓存：用默认的 64 时并行的测试互相挤掉区域，比各建一个还慢（433 s → 631 s）；放大后约 100 s。测试堆 6 GB。河流查询会算出所到之处的侵蚀，各自建实例的大范围取样测试仍要控制范围（曾用 ±16000，单个测试 9 分钟）
 - CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行
 - 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`（Windows 任务打 Amidst 的 zip，Ubuntu 任务连同两个 mod jar 和 Amidst jar 一起发布），标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
 - 平台服务：common 中的 `com.mtm.worldgen.platform.Platform` 接口，各加载器通过 `META-INF/services` 注册实现

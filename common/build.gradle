@@ -16,8 +16,8 @@ dependencies {
 
 test {
     useJUnitPlatform()
-    // Tests run in parallel, each with its own logic and its own erosion regions in the making
-    maxHeapSize = "3g"
+    // Tests run in parallel, and most share one logic whose caches hold every region they visit
+    maxHeapSize = "6g"
     // Test methods share nothing: each builds its own terrain logic
     systemProperty "junit.jupiter.execution.parallel.enabled", "true"
     systemProperty "junit.jupiter.execution.parallel.mode.default", "concurrent"

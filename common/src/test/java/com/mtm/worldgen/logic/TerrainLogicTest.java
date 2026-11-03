@@ -23,6 +23,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TerrainLogicTest {
     private static final long SEED = 1234567890123L;
     private static final WorldgenSettings SETTINGS = WorldgenSettings.DEFAULT;
+    /**
+     * One logic for the tests that only sample the default world, so each erosion region is computed once for all of
+     * them rather than once per test. Tests that compare logics, depend on the order regions are computed in, or set
+     * foreign chunks build their own. Its caches hold every region the tests visit: with the usual 64, tests sampling
+     * different places at once push each other's regions out, and the run gets slower than with a logic each.
+     */
+    private static final TerrainLogic SHARED = new TerrainLogic(SEED, largeCaches());
+
+    private static WorldgenSettings largeCaches() {
+        WorldgenSettings settings = WorldgenSettings.fromJson(SETTINGS.toJson());
+        settings.general.regionCacheSize = 1024;
+        return settings;
+    }
 
     @Test
     void regionsDoNotDependOnComputationOrder() {
@@ -76,7 +89,7 @@ class TerrainLogicTest {
 
     @Test
     void surfaceIsContinuousAcrossRegionBorders() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int border = SETTINGS.general.regionSize;
         double maxStep = 0.0;
         for (int z = -border; z <= border; z += 7) {
@@ -94,7 +107,7 @@ class TerrainLogicTest {
 
     @Test
     void surfaceStaysBelowMaximumAndHasMountains() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double highest = 0.0;
         for (int x = -20000; x < 20000; x += 64) {
             for (int z = -20000; z < 20000; z += 64) {
@@ -111,7 +124,7 @@ class TerrainLogicTest {
      */
     @Test
     void slopesStayWithinLimits() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double limit = SETTINGS.slopes.mountain / 100.0;
         Random random = new Random(7);
         List<Double> grades = new ArrayList<>();
@@ -146,7 +159,7 @@ class TerrainLogicTest {
     /** Overhangs stay rare, leave the height map alone, and never pass the height that bounds chunk filling. */
     @Test
     void overhangsStayBoundedAndRare() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         Random random = new Random(11);
         int columns = 0;
         int overhangs = 0;
@@ -173,7 +186,7 @@ class TerrainLogicTest {
     /** A sinkhole sinks the ground to its floor, with air in its chamber below the height map. */
     @Test
     void sinkholesOpenIntoChambers() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int found = 0;
         for (int cellX = -16; cellX < 16; cellX++) {
             for (int cellZ = -16; cellZ < 16; cellZ++) {
@@ -312,7 +325,7 @@ class TerrainLogicTest {
     /** New terrain meets foreign chunks at their height, and leaves terrain far away as it was. */
     @Test
     void landClosesInOnForeignChunks() {
-        TerrainLogic plain = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic plain = SHARED;
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         BlockColumn spot = logic.findSpawn();
         int chunkX = spot.x() >> 4;
@@ -346,7 +359,7 @@ class TerrainLogicTest {
 
     @Test
     void sameSeedGivesSameSurface() {
-        TerrainLogic a = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic a = SHARED;
         TerrainLogic b = new TerrainLogic(SEED, SETTINGS);
         for (int i = 0; i < 1000; i++) {
             int x = i * 37 - 18000;
@@ -368,7 +381,7 @@ class TerrainLogicTest {
 
     @Test
     void rockAndSnowFollowHeightAndSlope() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         WorldgenSettings.Surface surface = SETTINGS.surface;
         double sea = SETTINGS.general.seaLevel - 1;
         int rockCount = 0;
@@ -417,7 +430,7 @@ class TerrainLogicTest {
 
     @Test
     void tropicalAndColdZonesNeverTouch() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int step = 512;
         for (int x = -30000; x < 30000; x += step) {
             for (int z = -30000; z < 30000; z += step) {
@@ -436,7 +449,7 @@ class TerrainLogicTest {
 
     @Test
     void biomesFollowAltitudeAndWater() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double sea = SETTINGS.general.seaLevel - 1;
         for (int x = -8000; x < 8000; x += 97) {
             for (int z = -8000; z < 8000; z += 97) {
@@ -458,7 +471,7 @@ class TerrainLogicTest {
      */
     @Test
     void desertsGetDunesAndOases() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         WorldgenSettings flat = new WorldgenSettings();
         flat.deserts.dunes = false;
         TerrainLogic plain = new TerrainLogic(SEED, flat);
@@ -562,7 +575,7 @@ class TerrainLogicTest {
     /** Catchments only grow downstream, and a river leaving a region must not shrink in the next one. */
     @Test
     void riversKeepTheirSizeAcrossRegionBorders() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int cells = logic.flowRegion(0, 0).cells();
         int crossings = 0;
         for (int rx = -6; rx < 6; rx++) {
@@ -594,7 +607,7 @@ class TerrainLogicTest {
     /** Both regions at a border must see exactly the same rivers, or a curve went missing on one side. */
     @Test
     void riverCoursesAreContinuousAcrossRegionBorders() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int border = SETTINGS.general.regionSize;
         RiverRegion west = logic.riverRegion(0, 0);
         RiverRegion east = logic.riverRegion(1, 0);
@@ -630,7 +643,7 @@ class TerrainLogicTest {
     /** Beside a channel the ground must reach the water surface, or the water would stand as a wall. */
     @Test
     void riversStayBetweenTheirBanks() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         Random random = new Random(11);
         double sea = SETTINGS.general.seaLevel - 1;
         List<Double> excess = new ArrayList<>();
@@ -657,7 +670,7 @@ class TerrainLogicTest {
     /** A lake must keep its basin wherever rivers run in: this is what used to cut rivers off at the shore. */
     @Test
     void lakesKeepTheirBasinsNextToRivers() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int size = SETTINGS.rivers.flowCellSize;
         int lakes = 0;
         for (int rx = -2; rx <= 2; rx++) {
@@ -684,7 +697,7 @@ class TerrainLogicTest {
     /** Where a river's route ends in the sea, the real surface there must be sea, with nothing closing off the mouth. */
     @Test
     void riversEndInOpenSea() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double sea = SETTINGS.general.seaLevel - 1;
         long nodeSeed = RiverLayer.nodeSeed(SEED);
         int mouths = 0;
@@ -718,7 +731,7 @@ class TerrainLogicTest {
     /** Low land beside a big river is a plain within a few blocks of it, and never below it. */
     @Test
     void lowlandsBesideBigRiversArePlains() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         Random random = new Random(13);
         List<Double> rises = new ArrayList<>();
         // River queries erode every region they reach, so the area stays within what the region cache holds
@@ -750,7 +763,7 @@ class TerrainLogicTest {
     /** Channels carry river biomes, which freeze in the cold zones and stay open elsewhere. */
     @Test
     void riversCarryRiverBiomes() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double sea = SETTINGS.general.seaLevel - 1;
         int checked = 0;
         for (int rx = -3; rx < 3; rx++) {
@@ -776,7 +789,7 @@ class TerrainLogicTest {
 
     @Test
     void coastsCoverAllTypes() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         java.util.EnumMap<CoastLayer.Type, Integer> counts = new java.util.EnumMap<>(CoastLayer.Type.class);
         Random random = new Random(21);
         for (int i = 0; i < 20000; i++) {
@@ -790,7 +803,7 @@ class TerrainLogicTest {
     /** Islands are scattered sparsely over the sea, away from land. */
     @Test
     void islandsDotTheOcean() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         double sea = SETTINGS.general.seaLevel - 1;
         int ocean = 0;
         int island = 0;
@@ -810,7 +823,7 @@ class TerrainLogicTest {
 
     @Test
     void waterNeverRunsUphill() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         for (int rx = -1; rx <= 1; rx++) {
             for (int rz = -1; rz <= 1; rz++) {
                 FlowRegion flow = logic.flowRegion(rx, rz);
@@ -832,7 +845,7 @@ class TerrainLogicTest {
 
     @Test
     void landDrainsWithoutSinks() {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         FlowRegion flow = logic.flowRegion(0, 0);
         int cells = flow.cells();
         int size = SETTINGS.general.regionSize / cells;
@@ -879,7 +892,7 @@ class TerrainLogicTest {
     @Test
     void oceanCoversRoughlyTheConfiguredRatio
 () {
-        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        TerrainLogic logic = SHARED;
         int ocean = 0;
         int total = 0;
         double sea = SETTINGS.general.seaLevel - 1;
