@@ -23,6 +23,7 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "MINECRAFT=$(grep '^minecraft_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_ENV"
       - run: ./gradlew :common:test assemble
       - name: Publish the release
         env:
@@ -30,8 +31,8 @@ jobs:
         run: |
           notes=$(awk -v tag="$GITHUB_REF_NAME" '$0 == "## " tag {found = 1; next} found && /^## / {exit} found {print}' RELEASE_NOTES.md)
           gh release create "$GITHUB_REF_NAME" \
-            "fabric/build/libs/mtm_worldgen-fabric-$VERSION.jar" \
-            "forge/build/libs/mtm_worldgen-forge-$VERSION.jar" \
+            "fabric/build/libs/mtm_worldgen-fabric-$VERSION-$MINECRAFT.jar" \
+            "forge/build/libs/mtm_worldgen-forge-$VERSION-$MINECRAFT.jar" \
             --title "MTM-Worldgen $VERSION" \
             --notes "$notes" \
             --prerelease

@@ -21,6 +21,12 @@ subprojects {
         archivesName = "${rootProject.archives_base_name}-${project.name}"
     }
 
+    // Jars carry the Minecraft version after the mod's own, as in mtm_worldgen-fabric-0.2.0-1.20.1.jar; the version
+    // inside the mod metadata stays the mod's alone
+    tasks.withType(AbstractArchiveTask).configureEach {
+        archiveVersion = "${project.version}-${rootProject.minecraft_version}"
+    }
+
     loom {
         silentMojangMappingsLicense()
     }
