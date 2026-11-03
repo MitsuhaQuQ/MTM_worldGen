@@ -565,10 +565,15 @@ public final class TerrainLogic {
     private double sampleShapedLand(double x, double z) {
         double land = sampleCarvedLand(x, z);
         Creek creek = creekAt(x, z);
-        if (creek == null || creek.hit.distance() >= creek.half) {
+        if (creek == null) {
             return land;
         }
-        double offset = creek.hit.distance() / creek.half;
+        double distance = creek.hit.distance();
+        if (distance >= creek.half) {
+            // The walls of the small valley the creek has cut, rising from its banks until they meet the slope
+            return Math.min(land, creek.level() + (distance - creek.half) * settings.erosion.creekValleyGrade);
+        }
+        double offset = distance / creek.half;
         return Math.min(land, creek.level() - settings.erosion.creekDepth * creek.grown * (1.0 - offset * offset));
     }
 
@@ -649,11 +654,11 @@ public final class TerrainLogic {
         }
         double wide = Math.log(hit.area() / config.creekArea) / Math.log(config.creekWideArea / config.creekArea);
         double half = 0.5 * (config.creekMinWidth + (config.creekMaxWidth - config.creekMinWidth) * smooth(wide));
-        if (hit.distance() >= half + CREEK_BANK) {
+        double grown = smooth((hit.area() / config.creekArea - 1.0) / CREEK_GROWTH) * smooth((share - CREEK_SHARE) / CREEK_SHARE);
+        if (grown <= 0.0 || hit.distance() >= half + CREEK_BANK + config.creekIncision * grown / config.creekValleyGrade) {
             return null;
         }
-        double grown = smooth((hit.area() / config.creekArea - 1.0) / CREEK_GROWTH) * smooth((share - CREEK_SHARE) / CREEK_SHARE);
-        if (grown <= 0.0 || !Double.isNaN(sampleLakeLevel(x, z))) {
+        if (!Double.isNaN(sampleLakeLevel(x, z))) {
             return null;
         }
         // A creek runs on into the river it reaches, which takes over in its channel. Ending it short would leave its
@@ -667,8 +672,9 @@ public final class TerrainLogic {
 
     /**
      * Water level of a creek across from a position: the lowest ground on a line through its course, so the water
-     * never stands above the bank on either side, even where the course runs a little off the floor of its gully.
-     * Positions across the creek share the line, and with it the level.
+     * never stands above the bank on either side, even where the course runs a little off the floor of its gully, and
+     * below that by as much as the creek has cut in. Positions across the creek share the line, and with it the level.
+     * A creek never cuts below the river it runs into, or it would end lower than the river's water.
      */
     private double creekLevel(double x, double z, Creek creek) {
         double centerX = x + creek.hit.toX();
@@ -679,7 +685,9 @@ public final class TerrainLogic {
             double across = 0.5 * k * reach;
             level = Math.min(level, sampleCarvedLand(centerX - across * creek.hit.alongZ(), centerZ + across * creek.hit.alongX()));
         }
-        return level;
+        double cut = level - settings.erosion.creekIncision * creek.grown;
+        RiverRegion.Hit river = sampleRiver(centerX, centerZ);
+        return river != null && river.strength() >= SOURCE_WATER ? Math.max(cut, Math.min(level, river.level())) : cut;
     }
 
     /** Height of the continent layer alone, without the region cache: for sparse samples across a wide area. */

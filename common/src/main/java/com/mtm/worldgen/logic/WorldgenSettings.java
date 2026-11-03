@@ -341,6 +341,12 @@ public final class WorldgenSettings {
         public double creekMinWidth = 3.0;
         public double creekMaxWidth = 6.0;
         public double creekDepth = 1.5;
+        /**
+         * How far a full grown creek cuts its water below the lowest ground across it, and the grade of the walls of the
+         * small valley that leaves. Without them creeks lie on open slopes as ribbons of water.
+         */
+        public double creekIncision = 4.0;
+        public double creekValleyGrade = 0.8;
     }
 
     /**
@@ -893,8 +899,9 @@ public final class WorldgenSettings {
                         && erosion.rounds >= 0 && erosion.warpWavelength > 0.0 && erosion.diffusion >= 0.0 && erosion.diffusion < 0.25,
                 "erosion.cellSize must divide the region size and margin, the blend and warp must fit in the margin, and erosion.diffusion must stay below 0.25");
         require(erosion.creekArea > 0.0 && erosion.creekWideArea > erosion.creekArea && erosion.creekMinWidth >= 2.0
-                        && erosion.creekMaxWidth >= erosion.creekMinWidth && erosion.creekDepth >= 0.0,
-                "erosion creeks need 0 < creekArea < creekWideArea, creekMinWidth at least 2 (water one block wide does not hold), creekMaxWidth >= creekMinWidth and creekDepth >= 0");
+                        && erosion.creekMaxWidth >= erosion.creekMinWidth && erosion.creekDepth >= 0.0
+                        && erosion.creekIncision >= 0.0 && erosion.creekValleyGrade > 0.0,
+                "erosion creeks need 0 < creekArea < creekWideArea, creekMinWidth at least 2 (water one block wide does not hold), creekMaxWidth >= creekMinWidth, creekDepth and creekIncision >= 0 and creekValleyGrade > 0");
         for (double value : scale.all()) {
             require(value >= 0.25 && value <= 8.0, "every scale must lie between 0.25 and 8");
         }
