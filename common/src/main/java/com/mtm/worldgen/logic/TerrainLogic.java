@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 6;
+    public static final int ALGORITHM_VERSION = 7;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];

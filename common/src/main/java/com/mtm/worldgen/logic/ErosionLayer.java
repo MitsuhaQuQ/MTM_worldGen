@@ -638,7 +638,50 @@ final class ErosionLayer {
                 down[index] = -1;
             }
         }
+        pruneStraightCreeks(creek, down);
         return new Eroded(change, creek, down);
+    }
+
+    /**
+     * Leaves out creeks that run their whole course as one straight line: no other creek joins them, and most of
+     * their cells drain the same way. Erosion on an even slope only carves rows of parallel gullies down it, and
+     * creeks in them ran as straight ditches side by side for hundreds of blocks. Creeks of a branching network keep
+     * all their branches, however straight. Each creek is judged from its mouth, so the result does not depend on
+     * the order the cells are visited in.
+     */
+    private void pruneStraightCreeks(float[] creek, byte[] down) {
+        int n = creek.length;
+        byte[] inflows = new byte[n];
+        for (int index = 0; index < n; index++) {
+            if (creek[index] > 0.0F) {
+                int next = index + offset[down[index]];
+                if (creek[next] > 0.0F) {
+                    inflows[next]++;
+                }
+            }
+        }
+        int[] directions = new int[8];
+        List<Integer> line = new ArrayList<>();
+        for (int mouth = 0; mouth < n; mouth++) {
+            if (creek[mouth] <= 0.0F || creek[mouth + offset[down[mouth]]] > 0.0F) {
+                continue;
+            }
+            line.clear();
+            Arrays.fill(directions, 0);
+            boolean branches = false;
+            for (int index = mouth; index >= 0 && !branches; index = mainSource(creek, down, index)) {
+                branches = inflows[index] > 1;
+                line.add(index);
+                directions[down[index]]++;
+            }
+            int most = Arrays.stream(directions).max().orElse(0);
+            if (!branches && line.size() >= config.creekStraightCells && most >= config.creekStraightShare * line.size()) {
+                for (int index : line) {
+                    creek[index] = 0.0F;
+                    down[index] = -1;
+                }
+            }
+        }
     }
 
     /** Box blur of a grid, twice over, which comes close to a Gaussian of about this radius. */

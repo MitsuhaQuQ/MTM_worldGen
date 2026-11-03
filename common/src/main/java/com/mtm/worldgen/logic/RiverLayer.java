@@ -625,7 +625,8 @@ final class RiverLayer {
 
     /**
      * Whether a cell lies on a short drop from a lake down to a river or lake right below it. Such a link would only
-     * be a steep gash between two bodies of water, so the upper lake is left without a visible outlet.
+     * be a steep gash between two bodies of water, so the upper lake is left without a visible outlet. Only lakes that
+     * streams feed lose theirs.
      */
     private boolean isShortOutlet(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
         int length = 1;
@@ -639,7 +640,13 @@ final class RiverLayer {
             x = up[0];
             z = up[1];
         }
-        double lakeLevel = flowAt(around, regionX, regionZ, x, z).waterLevel(Math.floorMod(x, cells), Math.floorMod(z, cells));
+        FlowRegion lake = flowAt(around, regionX, regionZ, x, z);
+        // A lake that tributaries or trunks run into keeps its outlet, however short and steep: without one their
+        // water would end in a lake in the middle of the forest, and waterfalls take the drop
+        if (lake.riverClass(Math.floorMod(x, cells), Math.floorMod(z, cells)).compareTo(FlowRegion.RiverClass.STREAM) > 0) {
+            return false;
+        }
+        double lakeLevel = lake.waterLevel(Math.floorMod(x, cells), Math.floorMod(z, cells));
         x = cellX;
         z = cellZ;
         while (true) {

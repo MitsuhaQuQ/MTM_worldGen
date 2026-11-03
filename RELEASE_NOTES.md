@@ -1,5 +1,14 @@
 # Release notes
 
+## Unreleased
+
+Fixes for lake outlets and creeks. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- A lake that tributaries or trunks flow into keeps its outlet even when it is short and steep, with waterfalls taking the drop. Leaving the outlet out made such lakes look like inland lakes with no way out, in forests far from any desert
+- Creeks that run their whole course as one straight line, with no other creek joining them, are left out (`erosion.creekStraightCells`, `erosion.creekStraightShare`). On even slopes erosion carved rows of parallel gullies, and their creeks ran side by side as straight ditches
+
 ## v0.4.1
 
 A fix for the Fabric jar, which crashed the game at startup outside the development environment (`could not find any targets matching 'carveBlock' ... No refMap loaded`). Its mixin config now names the refmap that maps vanilla's method names, and the build checks both loaders' jars for it. Terrain is unchanged from v0.4.0, and the Forge jar was never affected.

@@ -348,6 +348,13 @@ public final class WorldgenSettings {
          */
         public double creekIncision = 4.0;
         public double creekValleyGrade = 0.8;
+        /**
+         * Creeks that no other creek joins are left out when they run at least creekStraightCells cells and drain the
+         * same way along at least creekStraightShare of them: on an even slope erosion only carves rows of parallel
+         * gullies, and creeks in them ran as straight ditches side by side.
+         */
+        public int creekStraightCells = 8;
+        public double creekStraightShare = 0.7;
     }
 
     /**
@@ -1036,8 +1043,9 @@ public final class WorldgenSettings {
                 "erosion.cellSize must divide the region size and margin, the blend and warp must fit in the margin, and erosion.diffusion must stay below 0.25");
         require(erosion.creekArea > 0.0 && erosion.creekWideArea > erosion.creekArea && erosion.creekMinWidth >= 2.0
                         && erosion.creekMaxWidth >= erosion.creekMinWidth && erosion.creekDepth >= 0.0
-                        && erosion.creekIncision >= 0.0 && erosion.creekValleyGrade > 0.0,
-                "erosion creeks need 0 < creekArea < creekWideArea, creekMinWidth at least 2 (water one block wide does not hold), creekMaxWidth >= creekMinWidth, creekDepth and creekIncision >= 0 and creekValleyGrade > 0");
+                        && erosion.creekIncision >= 0.0 && erosion.creekValleyGrade > 0.0
+                        && erosion.creekStraightCells >= 1 && erosion.creekStraightShare > 0.0 && erosion.creekStraightShare <= 1.0,
+                "erosion creeks need 0 < creekArea < creekWideArea, creekMinWidth at least 2 (water one block wide does not hold), creekMaxWidth >= creekMinWidth, creekDepth and creekIncision >= 0, creekValleyGrade > 0, creekStraightCells >= 1 and 0 < creekStraightShare <= 1");
         for (double value : scale.all()) {
             require(value >= 0.25 && value <= 8.0, "every scale must lie between 0.25 and 8");
         }
