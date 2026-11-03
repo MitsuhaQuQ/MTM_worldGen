@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.5.0
 
 Lakes take their shape from the ground, and rivers lay sediment bars. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
 
