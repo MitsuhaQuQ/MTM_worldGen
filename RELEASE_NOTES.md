@@ -1,5 +1,13 @@
 # Release notes
 
+## v0.3.1
+
+A fix for creeks in mountains with cliff bands. Chunks already saved by v0.3.0 count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- Creeks no longer run uphill across cliff ledges before dropping off the next cliff: cliff bands give way along creeks, which cut a notch through them, and follow the land as erosion left it
+
 ## v0.3.0
 
 New river landforms and Amidst for MTM worlds. Terrain along rivers and creeks has changed since v0.2.0: chunks already saved by v0.2.0 count as an older version, and terrain generated around them blends toward their edges. New settings take their defaults when an existing `config/mtm_worldgen.json` lacks them; delete the file to have them all written out.
