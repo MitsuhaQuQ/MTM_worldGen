@@ -6,6 +6,7 @@ import com.mtm.worldgen.noise.RidgedNoise;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.DoubleBinaryOperator;
 
 /**
  * Pipeline step 3: terrain skeleton on land, added on top of the continent base. A pure function of
@@ -101,6 +102,8 @@ final class SkeletonLayer {
     private final Fbm cliffWarp;
     private final Fbm peakWarp;
     private final ContinentLayer continents;
+    /** How much a position belongs to the desert, before the coast and the land's shape have their say. */
+    private final DoubleBinaryOperator desert;
     private final long isolatedSeed;
     private final WorldgenSettings settings;
     private final WorldgenSettings.Mountains m;
@@ -131,9 +134,10 @@ final class SkeletonLayer {
     private final ThreadLocal<SiteCache> sites = ThreadLocal.withInitial(SiteCache::new);
     private final ThreadLocal<Map<Long, Isolated>> isolated = ThreadLocal.withInitial(HashMap::new);
 
-    SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents) {
+    SkeletonLayer(long seed, WorldgenSettings settings, ContinentLayer continents, DoubleBinaryOperator desert) {
         this.settings = settings;
         this.continents = continents;
+        this.desert = desert;
         this.isolatedSeed = Hashing.derive(seed, ISOLATED_SALT);
         this.m = settings.mountains;
         this.plateaus = settings.plateaus;
@@ -232,7 +236,18 @@ final class SkeletonLayer {
             }
         }
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));
-        double rolling = scale * hillSettings.height * (hilly + settings.plains.reliefShare * plain) * (0.5 + 0.5 * hills.sample(x, z));
+        double hillNoise = hills.sample(x, z);
+        double hillShare = hilly + settings.plains.reliefShare * plain;
+        if (hillShare > 0.0) {
+            // Desert hills are dunes: the rolling relief flattens out around its middle, so the desert neither sinks
+            // into a basin that would fill with a lake nor rises, and the dunes lie on the gentle ground left
+            double dry = desert.applyAsDouble(x, z);
+            if (dry > 0.0) {
+                dry *= smoothstep(0.0, settings.deserts.coastFade, continents.inlandDistance(baseAboveSea));
+                hillNoise *= 1.0 - dry * (1.0 - settings.deserts.hillRelief);
+            }
+        }
+        double rolling = scale * hillSettings.height * hillShare * (0.5 + 0.5 * hillNoise);
         double ground = massif + peaks + foothill + isolatedHeight(x, z);
 
         // A plateau fills the land up to its level instead of adding to it: it rises the same out of plains and hills,

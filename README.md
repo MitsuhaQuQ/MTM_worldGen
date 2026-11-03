@@ -33,6 +33,7 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 - **Rock detail.** Cliff bands with exposed rock strata on steep faces, overhangs on high cliffs, sea stacks off rocky coasts, and sinkholes in dry uplands that open into caves.
 - **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast, some through deltas. Steep rivers fall through level pools and waterfalls.
 - **River landforms.** Creeks run down the eroded gullies in small valleys of their own. Streams leaving steep ground spread alluvial fans, larger rivers in the hills leave terraces on their valley sides, and rivers winding over plains leave oxbow lakes.
+- **Deserts.** Hills in the desert flatten into low ground covered by fields of dune ridges, which run across one wind direction with a gentle windward side and a steeper lee. Here and there a small pond lies in a hollow between the dunes, ringed by grass, a few trees and sugar cane.
 - **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity. Vegetation follows altitude bands from lowland forest to alpine meadow and snow, and the deep dark spreads deep underground.
 - **Coasts and islands.** Sand, gravel, rock and sea cliff coasts follow each other along the shore, and sand, rock and mushroom islands dot the open sea.
 - **Surface.** Bare rock on steep ground and snow above the snow line. Caves and ravines stay below the surface.
@@ -109,6 +110,7 @@ The file only applies to new worlds. Each world stores its settings when created
 | `plains`, `hills`, `mountains`, `plateaus` | Tier shares, heights, ridge shape and mountain styles |
 | `isolated` | Isolated peaks and dome hills |
 | `seaStacks`, `overhangs`, `sinkholes` | Rock detail on coasts and cliffs, and sinkholes with their caves |
+| `deserts` | Dunes and oases in the desert |
 | `erosion` | The erosion simulation and the creeks it leaves |
 | `rivers` | Routing, river classes, widths, valleys, floodplains, lakes, waterfalls, fans, terraces and oxbow lakes |
 | `surface`, `beaches`, `islands` | Snow lines, bare rock, coast types and islands |

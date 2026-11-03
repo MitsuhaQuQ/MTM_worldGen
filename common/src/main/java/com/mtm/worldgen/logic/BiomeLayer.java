@@ -148,13 +148,40 @@ final class BiomeLayer {
         };
     }
 
+    /**
+     * How far inside the patches of one biome of a zone's dry list a position lies, from 0 at their edge (or outside
+     * them) to 1 at the given fade, a share of one patch's range of the noise, inside them. Lets terrain made for a
+     * biome fade out before its border instead of stopping there.
+     */
+    double dryShare(double x, double z, ClimateLayer.Zone zone, String biome, double fade) {
+        String[] biomes = zoneBiomes(zone).dry;
+        double position = biomes.length == 1 ? 0.5 : slot(biomes.length, x, z);
+        double best = 0.0;
+        for (int i = 0; i < biomes.length; i++) {
+            if (!biomes[i].equals(biome) || position < i || position > i + 1) {
+                continue;
+            }
+            // The two ends of the list have no neighbor to give way to
+            double below = i == 0 ? Double.MAX_VALUE : position - i;
+            double above = i == biomes.length - 1 ? Double.MAX_VALUE : i + 1 - position;
+            double t = Math.max(0.0, Math.min(1.0, Math.min(below, above) / fade));
+            best = Math.max(best, t * t * (3.0 - 2.0 * t));
+        }
+        return best;
+    }
+
     /** Chooses from a list by low-frequency noise, stretched because fractal noise clusters around zero. */
     private String pick(String[] biomes, double x, double z) {
         if (biomes.length == 1) {
             return biomes[0];
         }
-        double noise = Math.max(-1.0, Math.min(1.0, 2.0 * variantNoise.sample(x, z)));
-        int index = (int) ((0.5 + 0.5 * noise) * biomes.length);
+        int index = (int) slot(biomes.length, x, z);
         return biomes[Math.min(index, biomes.length - 1)];
+    }
+
+    /** Position in a list of this length that {@link #pick} reads, from 0 to the length. */
+    private double slot(int length, double x, double z) {
+        double noise = Math.max(-1.0, Math.min(1.0, 2.0 * variantNoise.sample(x, z)));
+        return (0.5 + 0.5 * noise) * length;
     }
 }

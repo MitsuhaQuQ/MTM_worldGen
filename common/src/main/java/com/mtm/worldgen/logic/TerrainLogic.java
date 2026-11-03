@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 5;
+    public static final int ALGORITHM_VERSION = 6;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -48,6 +48,8 @@ public final class TerrainLogic {
     private static final double CREEK_SHARE = 0.3;
     private static final double CREEK_BANK = 2.0;
     private static final double CREEK_GROWTH = 1.0;
+    /** Share of the desert's climate by which creeks have given way, when dunes are a few tenths of a block high. */
+    private static final double DESERT_CREEK_FADE = 0.05;
     /** Blocks from a creek's course over which cliff bands come back. */
     private static final double CREEK_CLIFF_FADE = 48.0;
     /** Spread of the noise over which a stretch of river terraces fades in and out. */
@@ -67,6 +69,7 @@ public final class TerrainLogic {
     private final BiomeLayer biomes;
     private final OverhangLayer overhangs;
     private final SinkholeLayer sinkholes;
+    private final DesertLayer deserts;
     private volatile ForeignMap foreign = ForeignMap.EMPTY;
     private final long worldId;
     private final Fbm sinkShore;
@@ -101,13 +104,14 @@ public final class TerrainLogic {
         this.settings = settings;
         this.seed = seed;
         this.continents = new ContinentLayer(seed, settings);
-        this.skeleton = new SkeletonLayer(seed, settings, continents);
         this.climate = new ClimateLayer(seed, settings);
-        this.coasts = new CoastLayer(seed, settings);
         this.biomes = new BiomeLayer(seed, settings);
+        this.skeleton = new SkeletonLayer(seed, settings, continents, this::desertClimate);
+        this.coasts = new CoastLayer(seed, settings);
         this.worldId = Hashing.derive(seed, WORLD_SALT);
         this.overhangs = new OverhangLayer(seed, settings);
         this.sinkholes = new SinkholeLayer(seed, settings, this);
+        this.deserts = new DesertLayer(seed, settings, this);
         this.sinkShore = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 1), 3, settings.rivers.sinkWavelength);
         this.mouthSandNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 1), 3, settings.rivers.mouthSandWavelength);
         this.mouthClayNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 3), 2, settings.rivers.mouthClayWavelength);
@@ -592,12 +596,124 @@ public final class TerrainLogic {
         return Math.min(land, creek.level() - settings.erosion.creekDepth * creek.grown * (1.0 - offset * offset));
     }
 
-    /** Surface height shaped by rivers and lakes, before creeks cut into it. */
+    /** Surface height shaped by rivers and lakes, with dunes and oases in the desert, before creeks cut into it. */
     private double sampleCarvedLand(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
         double smooth = base + skeletonHeight(x, z, base, texture);
-        return carve(x, z, softCap(smooth), softCap(smooth + texture[0]));
+        double ground = softCap(smooth);
+        DesertLayer.Site oasis = deserts.oasis(x, z);
+        double carved = carve(x, z, ground, softCap(smooth + texture[0]), duneHeight(x, z, ground, base, oasis));
+        return oasis == null ? carved : deserts.pond(oasis, x, z, carved);
+    }
+
+    /** Surface height shaped by rivers and lakes alone, as an oasis finds the ground before it lies there. */
+    private double sampleRiverShapedLand(double x, double z) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        double[] texture = new double[1];
+        double smooth = base + skeletonHeight(x, z, base, texture);
+        return carve(x, z, softCap(smooth), softCap(smooth + texture[0]), 0.0);
+    }
+
+    /** Height of the dunes at a position, where they grow in the desert, and none around lakes and oases. */
+    private double duneHeight(double x, double z, double ground, double base, DesertLayer.Site oasis) {
+        WorldgenSettings.Deserts config = settings.deserts;
+        if (!config.dunes || config.duneHeight <= 0.0) {
+            return 0.0;
+        }
+        double share = deserts.fieldShare(x, z);
+        if (share <= 0.0) {
+            return 0.0;
+        }
+        share *= desertShare(x, z, ground, base);
+        if (share <= 0.0) {
+            return 0.0;
+        }
+        // Lakes fill the land as it is, and dunes in one would stand out of the water as rows of islands
+        double[] lake = sampleLake(x, z);
+        if (lake != null) {
+            share *= 1.0 - smooth(lake[0] / LAKE_EDGE);
+        }
+        if (oasis != null) {
+            share *= 1.0 - deserts.cleared(oasis, x, z);
+        }
+        return share <= 0.0 ? 0.0 : share * deserts.dunes(x, z);
+    }
+
+    /**
+     * How much a position belongs to the desert by its climate and biome patches alone, from 0 at the edge of the
+     * desert biome to 1 well inside it: dry enough, away from the borders of the climate zone, and in the desert's
+     * patches of the zone's dry list. Each condition fades out before it fails, so terrain made for the desert never
+     * steps up at its border. Needs neither the land nor the region cache, so the skeleton can ask for it.
+     */
+    private double desertClimate(double x, double z) {
+        WorldgenSettings.Deserts config = settings.deserts;
+        double dry = (settings.biomes.dryHumidity - climate.humidity(x, z)) / config.humidityFade;
+        if (dry <= 0.0) {
+            return 0.0;
+        }
+        double temperature = climate.temperature(x, z);
+        double share = smooth(dry) * smooth(climate.borderDistance(temperature) / settings.climate.zoneTransition)
+                * Math.max(0.0, Math.min(1.0, continents.islandClearance(x, z)));
+        return share <= 0.0 ? 0.0 : share * biomes.dryShare(x, z, climate.zone(temperature), settings.biomes.desert, config.patchFade);
+    }
+
+    /**
+     * How much a position belongs to desert lowland, from 0 at the edge of the desert biome to 1 well inside it: its
+     * climate, off the coast, below the highland band and out of the mountains, which keep their own shape. Ground is
+     * the smooth land.
+     */
+    double desertShare(double x, double z, double ground, double base) {
+        double share = desertClimate(x, z);
+        if (share <= 0.0) {
+            return 0.0;
+        }
+        WorldgenSettings.Deserts config = settings.deserts;
+        share *= 1.0 - smooth(skeleton.mountainShare(x, z, base - seaSurface()) / config.mountainFade);
+        share *= smooth((sampleCoastDistance(x, z) - settings.biomes.beachDepth) / config.coastFade);
+        double snowLine = sampleSnowLine(x, z);
+        if (snowLine > 0.0) {
+            WorldgenSettings.Biomes biomeConfig = settings.biomes;
+            double highland = seaSurface() + biomeConfig.highlandLine * (snowLine - seaSurface()) - biomeConfig.bandWander;
+            share *= smooth((highland - ground) / config.highlandFade);
+        }
+        return share;
+    }
+
+    /**
+     * Ground an oasis would lie on at a position, or NaN if it cannot lie there: deep in the desert, on flat land across
+     * all it clears, and clear of rivers, lakes and foreign chunks, whose water and valleys it would run into.
+     */
+    double oasisGround(double x, double z, double reach) {
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        if (desertShare(x, z, sampleSmoothLand(x, z), base) < settings.deserts.oasisMinShare || foreignNear(x, z)) {
+            return Double.NaN;
+        }
+        RiverRegion.Hit river = sampleRiver(x, z);
+        if (river != null && river.distance() - 3.0 * river.halfWidth(settings.rivers.minChannelWidth) < reach) {
+            return Double.NaN;
+        }
+        // Land as rivers left it, which floodplains raise or lower from the landform by several blocks
+        double center = sampleRiverShapedLand(x, z);
+        double low = center;
+        double high = center;
+        for (int k = 0; k < 4; k++) {
+            double px = x + (k == 0 ? reach : k == 1 ? -reach : 0.0);
+            double pz = z + (k == 2 ? reach : k == 3 ? -reach : 0.0);
+            if (!Double.isNaN(sampleLakeLevel(px, pz))) {
+                return Double.NaN;
+            }
+            double height = sampleRiverShapedLand(px, pz);
+            low = Math.min(low, height);
+            high = Math.max(high, height);
+        }
+        return high - low > settings.deserts.maxRelief || !Double.isNaN(sampleLakeLevel(x, z)) ? Double.NaN : center;
+    }
+
+    /** Whether a block column lies on the green land around an oasis. */
+    public boolean isOasis(int x, int z) {
+        DesertLayer.Site oasis = deserts.oasis(x, z);
+        return oasis != null && deserts.isGreen(oasis, x, z);
     }
 
     /**
@@ -659,7 +775,10 @@ public final class TerrainLogic {
             return null;
         }
         double base = interpolate(FIELD_HEIGHT, x, z);
-        double share = skeleton.uplandShare(x, z, base - seaSurface()) * (1.0 - skeleton.domeShare(x, z));
+        // Deserts have no running creeks: their hills give way to dunes, and the gullies between them stay dry. Creeks
+        // are gone by the time dunes are any height, whose land the small valleys would cut off in steps
+        double share = skeleton.uplandShare(x, z, base - seaSurface()) * (1.0 - skeleton.domeShare(x, z))
+                * (1.0 - smooth(desertClimate(x, z) / DESERT_CREEK_FADE));
         if (share <= CREEK_SHARE) {
             return null;
         }
@@ -802,7 +921,7 @@ public final class TerrainLogic {
      * spreading with distance, so land only changes where it would not leave a valley. Mountains that already fall
      * away toward a river stay as they are, and a river always runs in a channel.
      */
-    private double carve(double x, double z, double smooth, double textured) {
+    private double carve(double x, double z, double smooth, double textured, double dunes) {
         RiverRegion.Hit river = sampleRiver(x, z);
         double cliff = cliffHeight(x, z);
         // Without erosion, texture fades out toward rivers, which were routed on the smooth land. Erosion already cut
@@ -817,7 +936,7 @@ public final class TerrainLogic {
         }
         double[] lake = sampleLake(x, z);
         if (lake == null) {
-            return land;
+            return duned(x, z, river, land, dunes);
         }
         // Lakes fill the land as it is, so shores follow the terrain. Inside one, valley banks give way to the basin,
         // and along its edge a rim closes any gap below the water. Land is never pulled down to a lake: rivers nearby
@@ -829,7 +948,7 @@ public final class TerrainLogic {
         boolean channel = river != null && river.distance() < river.halfWidth(settings.rivers.minChannelWidth);
         double rim = channel ? 0.0 : smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
-        return sinkBasin(x, z, lake, shaped < bank ? shaped + (bank - shaped) * rim : shaped);
+        return duned(x, z, river, sinkBasin(x, z, lake, shaped < bank ? shaped + (bank - shaped) * rim : shaped), dunes);
     }
 
     /**
@@ -848,6 +967,29 @@ public final class TerrainLogic {
         }
         double trench = river == null ? 1.0 : smooth((river.distance() - river.halfWidth(config.minChannelWidth)) / config.fanTrench);
         return land + deposit * trench;
+    }
+
+    /**
+     * Land with desert dunes on it. They go on last, after the valleys and lake basins are shaped: desert lowland lies
+     * on wide floodplains, which would lay dunes flat with the rest of their low relief, and the rims of inland sinks
+     * cap the land around them. Dunes fade out toward lakes on their own. They stay off valley floors, out of
+     * the water, and off the sea floor. The distance is to the nearest valley floor of all rivers in reach: the river
+     * a position counts as being in changes from one column to the next, and its distance would jump with it. Oxbow
+     * lakes hold the land down to their water at their banks, so dunes give way to them before that.
+     */
+    private double duned(double x, double z, RiverRegion.Hit river, double land, double dunes) {
+        if (dunes <= 0.0 || land < seaSurface()) {
+            return land;
+        }
+        if (river == null) {
+            return land + dunes;
+        }
+        WorldgenSettings.Deserts config = settings.deserts;
+        double share = smooth((river.run() - config.riverGap) / config.riverFade);
+        if (share > 0.0 && settings.rivers.oxbows) {
+            share *= smooth(riversAt(x, z).oxbowClearance(x, z, config.riverFade) / config.riverFade);
+        }
+        return land + dunes * share;
     }
 
     /**
@@ -1125,6 +1267,10 @@ public final class TerrainLogic {
         if (oxbow != null) {
             return oxbow[0];
         }
+        DesertLayer.Site oasis = deserts.oasis(x, z);
+        if (oasis != null && deserts.inPond(oasis, x, z) && sampleSurfaceHeight(x, z) < oasis.level()) {
+            return oasis.level();
+        }
         // Water two blocks wide does not hold, so a creek only fills once it has grown half way
         Creek creek = creekAt(x, z);
         return creek != null && creek.grown >= 0.5 && creek.hit.distance() < creek.half ? creek.level() : Double.NaN;
@@ -1234,9 +1380,15 @@ public final class TerrainLogic {
         ForeignMap.Influence influence = map.isEmpty() ? null : map.influence(x, z, sampleSmoothLand(x, z));
         double height = sampleSurfaceHeight(x, z);
         String foreignBiome = influence == null ? null : biomes.foreignBiome(x, z, influence, climate.zone(temperature), height);
-        return foreignBiome != null ? foreignBiome : biomes.surfaceBiome(x, z, climate.zone(temperature), height, sampleCoastDistance(x, z),
+        if (foreignBiome != null) {
+            return foreignBiome;
+        }
+        String biome = biomes.surfaceBiome(x, z, climate.zone(temperature), height, sampleCoastDistance(x, z),
                 sampleSnowLine(x, z), climate.humidity(x, z), isRiverChannel(x, z), isRockyCoast(x, z), continents.islandKind(x, z),
                 climate.nearZoneBorder(temperature), !settings.biomes.unrealisticOnMountains && isMountainous(x, z));
+        // The green land of an oasis brings grass and a few trees along with its biome
+        DesertLayer.Site oasis = biome.equals(settings.biomes.desert) ? deserts.oasis(x, z) : null;
+        return oasis != null && deserts.isGreen(oasis, x, z) ? settings.biomes.oasis : biome;
     }
 
     /**

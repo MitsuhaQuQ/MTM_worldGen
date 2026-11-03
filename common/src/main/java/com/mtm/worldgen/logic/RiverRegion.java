@@ -288,6 +288,34 @@ public final class RiverRegion {
     }
 
     /**
+     * Roughly how far a position lies from the water of the nearest oxbow lake, in blocks, up to a limit: across its
+     * arc from its banks, and along it past the ends of its arms. For what lies on the land around oxbows to give way
+     * to them before their banks.
+     */
+    double oxbowClearance(double x, double z, double limit) {
+        double span = Math.toRadians(oxbowSpan);
+        double clearance = limit;
+        for (int o = 0; o < oxbows.length; o += OXBOW_STRIDE) {
+            double half = 0.5 * oxbows[o + 5];
+            double radius = oxbows[o + 4];
+            double dx = x - oxbows[o];
+            double dz = z - oxbows[o + 1];
+            double reach = radius * (1.0 + 1.5 * OXBOW_WOBBLE) + half + limit;
+            if (Math.abs(dx) >= reach || Math.abs(dz) >= reach) {
+                continue;
+            }
+            double signed = Math.atan2(dx * oxbows[o + 3] - dz * oxbows[o + 2], dx * oxbows[o + 2] + dz * oxbows[o + 3]);
+            double phase = oxbows[o] * PHASE_X + oxbows[o + 1] * PHASE_Z;
+            double arm = signed < 0.0 ? span * (1.0 - OXBOW_SKEW * (0.5 + 0.5 * Math.sin(3.0 * phase))) : span;
+            double bent = radius * (1.0 + OXBOW_WOBBLE * Math.sin(2.0 * signed + phase) + 0.5 * OXBOW_WOBBLE * Math.sin(5.0 * signed + 2.0 * phase));
+            double across = Math.abs(Math.sqrt(dx * dx + dz * dz) - bent) - half;
+            double along = radius * (Math.abs(signed) - arm);
+            clearance = Math.min(clearance, Math.max(0.0, Math.max(across, along)));
+        }
+        return clearance;
+    }
+
+    /**
      * Height the alluvial fans in reach add to the land at a position: most at a fan's apex, where its river leaves the
      * steep ground, thinning out to nothing at its rim, within a sector opening downstream. Where fans overlap, the
      * thickest counts.

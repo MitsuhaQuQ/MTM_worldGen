@@ -452,6 +452,79 @@ class TerrainLogicTest {
         }
     }
 
+    /**
+     * Dunes only ever add to the desert, gently, and fade out before its edge; this seed has a desert around -19000
+     * 17500. Oases hold their water in banks, and their green land carries the oasis biome.
+     */
+    @Test
+    void desertsGetDunesAndOases() {
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        WorldgenSettings flat = new WorldgenSettings();
+        flat.deserts.dunes = false;
+        TerrainLogic plain = new TerrainLogic(SEED, flat);
+        Random random = new Random(17);
+        double added = 0.0;
+        int inside = 0;
+        double steepest = 0.0;
+        for (int i = 0; i < 20000; i++) {
+            int x = -20000 + random.nextInt(2400);
+            int z = 16400 + random.nextInt(2400);
+            double dunes = logic.sampleSurfaceHeight(x, z) - plain.sampleSurfaceHeight(x, z);
+            assertTrue(dunes > -1e-9, "dunes dig at " + x + "," + z);
+            if (dunes > 0.0) {
+                assertEquals(SETTINGS.biomes.desert, logic.sampleBiome(x, z), "dunes outside the desert at " + x + "," + z);
+                double gx = logic.sampleSurfaceHeight(x + 1, z) - plain.sampleSurfaceHeight(x + 1, z) - dunes;
+                double gz = logic.sampleSurfaceHeight(x, z + 1) - plain.sampleSurfaceHeight(x, z + 1) - dunes;
+                steepest = Math.max(steepest, Math.hypot(gx, gz));
+                inside++;
+                added += dunes;
+            }
+        }
+        assertTrue(inside > 1000 && added / inside > 1.0, "too few dunes: " + inside + " columns, " + added / Math.max(1, inside) + " high");
+        // Half the slope limit of hills, with room for the wandering crests
+        assertTrue(steepest < 0.6 * SETTINGS.slopes.hills / 100.0, "dunes as steep as " + steepest);
+
+        int oases = 0;
+        for (int x = -24000; x <= 24000; x += 48) {
+            for (int z = -24000; z <= 24000; z += 48) {
+                if (!logic.isOasis(x, z)) {
+                    continue;
+                }
+                oases++;
+                checkOasis(logic, x, z);
+                z += (int) SETTINGS.deserts.oasisSpacing;
+            }
+        }
+        assertTrue(oases > 0, "no oases");
+    }
+
+    /** Walks the green land around a column: it takes the oasis biome, and its pond's water never stands above a bank. */
+    private static void checkOasis(TerrainLogic logic, int x0, int z0) {
+        int reach = (int) (SETTINGS.deserts.pondRadiusMax * SETTINGS.deserts.greenRadius * (1.0 + SETTINGS.deserts.greenWarp)) * 2;
+        int water = 0;
+        for (int x = x0 - reach; x <= x0 + reach; x++) {
+            for (int z = z0 - reach; z <= z0 + reach; z++) {
+                if (!logic.isOasis(x, z)) {
+                    continue;
+                }
+                double level = logic.sampleWaterLevel(x, z);
+                if (Double.isNaN(level)) {
+                    assertEquals(SETTINGS.biomes.oasis, logic.sampleBiome(x, z), "green land without its biome at " + x + "," + z);
+                    continue;
+                }
+                water++;
+                for (int d = 0; d < 4; d++) {
+                    int nx = x + (d == 0 ? -1 : d == 1 ? 1 : 0);
+                    int nz = z + (d == 2 ? -1 : d == 3 ? 1 : 0);
+                    if (Double.isNaN(logic.sampleWaterLevel(nx, nz))) {
+                        assertTrue(logic.sampleSurfaceHeight(nx, nz) >= level - 1e-6, "oasis water spills at " + nx + "," + nz);
+                    }
+                }
+            }
+        }
+        assertTrue(water > 0, "oasis without water near " + x0 + "," + z0);
+    }
+
     @Test
     void badlandsCanStayOffMountains() {
         WorldgenSettings settings = new WorldgenSettings();

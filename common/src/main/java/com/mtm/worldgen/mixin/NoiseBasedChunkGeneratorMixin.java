@@ -4,6 +4,7 @@ import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.TerrainCondition;
 import com.mtm.worldgen.world.MtmCarving;
 import com.mtm.worldgen.world.MtmGenerators;
+import com.mtm.worldgen.world.MtmOasis;
 import com.mtm.worldgen.world.MtmWater;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.StructureManager;
@@ -42,6 +43,10 @@ public abstract class NoiseBasedChunkGeneratorMixin {
     private void mtm_worldgen$endSurface(WorldGenRegion region, StructureManager structures, RandomState random,
                                          ChunkAccess chunk, CallbackInfo ci) {
         TerrainCondition.end();
+        TerrainLogic logic = MtmGenerators.terrainLogic(random);
+        if (logic != null) {
+            MtmOasis.plant(logic, chunk);
+        }
     }
 
     @Inject(method = "applyCarvers", at = @At("HEAD"), cancellable = true)

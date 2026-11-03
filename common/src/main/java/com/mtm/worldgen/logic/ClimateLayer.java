@@ -81,6 +81,12 @@ final class ClimateLayer {
                 || Math.abs(temperature - temperateEnd) < margin;
     }
 
+    /** How far a temperature lies inside its zone past the transition at its borders; negative within a transition. */
+    double borderDistance(double temperature) {
+        double nearest = Math.min(Math.abs(temperature - polarEnd), Math.min(Math.abs(temperature - coldEnd), Math.abs(temperature - temperateEnd)));
+        return nearest - config.zoneTransition;
+    }
+
     /** Humidity in [0, 1]. */
     double humidity(double x, double z) {
         double value = (humidity.sample(x, z) - humidityLow) / (humidityHigh - humidityLow);

@@ -56,6 +56,7 @@ public final class WorldgenSettings {
     public final SeaStacks seaStacks = new SeaStacks();
     public final Overhangs overhangs = new Overhangs();
     public final Sinkholes sinkholes = new Sinkholes();
+    public final Deserts deserts = new Deserts();
     public final Foreign foreign = new Foreign();
     public final Scale scale = new Scale();
     public final Erosion erosion = new Erosion();
@@ -419,6 +420,71 @@ public final class WorldgenSettings {
         public double chamberHeight = 14.0;
     }
 
+    /**
+     * Dunes and oases in the desert biome (biomes.desert). Sizes and heights are in blocks. Everything fades out toward
+     * the edge of the desert, uplands, rivers, lakes and the coast, so nothing steps up at a biome border.
+     */
+    public static final class Deserts {
+        /**
+         * Transverse dune ridges across one wind direction per world: a gentle windward slope, a steeper lee face
+         * (leeShare of the wavelength) and rounded crests. The height is from trough to crest, and the slopes stay
+         * around half those of hills.
+         */
+        public boolean dunes = true;
+        public double duneHeight = 8.0;
+        public double duneWavelength = 240.0;
+        public double duneLeeShare = 0.4;
+        /** Crests wander off a straight line by this much, over this distance. */
+        public double crestWarp = 40.0;
+        public double crestWarpWavelength = 900.0;
+        /** Ridges break into separate dunes along their length at this wavelength; below the threshold they stop. */
+        public double segmentWavelength = 400.0;
+        public double segmentThreshold = -0.4;
+        /** Dune fields cover part of the desert, in patches of this size, between these noise values. */
+        public double fieldWavelength = 3000.0;
+        public double fieldLow = -0.15;
+        public double fieldHigh = 0.1;
+        /**
+         * Fades toward the edge of the desert: in humidity, in the biome patch noise (as a share of one patch), from the
+         * coast inland, and in height below the highland band.
+         */
+        public double humidityFade = 0.05;
+        public double patchFade = 0.12;
+        public double coastFade = 400.0;
+        public double highlandFade = 40.0;
+        /** Dunes keep this far back from river valley floors, and come back to full height over this distance beyond. */
+        public double riverGap = 0.0;
+        public double riverFade = 96.0;
+        /** Share of the mountain tier from which dunes are gone: mountains keep their own shape. */
+        public double mountainFade = 0.5;
+        /**
+         * Share of the hills' rolling relief kept in the desert, where hills give way to dunes: lower, and gentler by
+         * the same share, since the wavelength stays.
+         */
+        public double hillRelief = 0.35;
+
+        /** Oases: one candidate per square of this size, kept where the desert is all around. */
+        public boolean oases = true;
+        public double oasisSpacing = 1400.0;
+        public double oasisChance = 0.45;
+        public double oasisMinShare = 0.8;
+        /** Radius of the pond, its depth, and how far its shore wanders, as a share of the radius, at this wavelength. */
+        public double pondRadiusMin = 12.0;
+        public double pondRadiusMax = 28.0;
+        public double pondDepth = 3.0;
+        public double shoreWarp = 0.3;
+        public double shoreWavelength = 18.0;
+        /** Green land around the pond, and the dunes cleared around it, as multiples of its radius. */
+        public double greenRadius = 3.0;
+        public double greenWarp = 0.25;
+        public double clearRadius = 6.0;
+        /** The ground around an oasis rises no more than this across the cleared radius. */
+        public double maxRelief = 10.0;
+        /** Share of the grass along the water that grows sugar cane, and its tallest stalks. */
+        public double caneChance = 0.3;
+        public int caneHeight = 3;
+    }
+
     /** Overhangs on steep faces. The height is on the 300 block scale, other sizes in blocks. */
     public static final class Overhangs {
         /** How far rock juts out or recedes at most. */
@@ -607,6 +673,9 @@ public final class WorldgenSettings {
         public double deepDarkTopWander = 64.0;
         /** Biome of mushroom islands. */
         public String mushroomIsland = "minecraft:mushroom_fields";
+        /** The desert, which gets dunes and oases (deserts group), and the biome of the green land around an oasis. */
+        public String desert = "minecraft:desert";
+        public String oasis = "minecraft:savanna";
         /**
          * Whether the biomes below may grow on mountains. Badlands lay terracotta bands at fixed heights, which on a
          * mountain hundreds of blocks tall run around it as rings of color. When off, mountain ranges and their slopes
@@ -651,6 +720,7 @@ public final class WorldgenSettings {
             Set<String> all = new LinkedHashSet<>(List.of(caves));
             all.add(deepDarkBiome);
             all.add(mushroomIsland);
+            all.add(oasis);
             for (BiomeZone zone : List.of(tropical, temperate, cold, polar)) {
                 for (String[] list : zone.lists()) {
                     all.addAll(List.of(list));
@@ -1003,6 +1073,17 @@ public final class WorldgenSettings {
                         "biome lists must not be empty, except swamp and dryHighland");
             }
         }
+        require(deserts.duneHeight >= 0.0 && deserts.duneWavelength > 0.0 && deserts.duneLeeShare > 0.0 && deserts.duneLeeShare < 1.0
+                        && deserts.fieldHigh > deserts.fieldLow && deserts.humidityFade > 0.0 && deserts.patchFade > 0.0
+                        && deserts.coastFade > 0.0 && deserts.highlandFade > 0.0 && deserts.mountainFade > 0.0 && deserts.riverGap >= 0.0 && deserts.riverFade > 0.0
+                        && deserts.hillRelief >= 0.0 && deserts.hillRelief <= 1.0,
+                "deserts: dune sizes and fades must be positive, deserts.duneLeeShare in (0, 1) and deserts.hillRelief in [0, 1]");
+        // An oasis only reaches within its own candidate square, so a column needs to look at one site
+        require(deserts.pondRadiusMin > 0.0 && deserts.pondRadiusMax >= deserts.pondRadiusMin && deserts.pondDepth > 0.0
+                        && deserts.greenRadius >= 1.0 && deserts.clearRadius >= deserts.greenRadius * (1.0 + deserts.greenWarp)
+                        && deserts.oasisChance >= 0.0 && deserts.oasisChance <= 1.0 && deserts.caneHeight >= 1
+                        && deserts.pondRadiusMax * deserts.clearRadius < DesertLayer.SITE_MARGIN * deserts.oasisSpacing,
+                "deserts: oasis sizes must be positive, deserts.clearRadius must cover the green land, and an oasis must fit its square");
         require(beaches.maxWidth > beaches.minWidth, "beaches.maxWidth must be above beaches.minWidth");
         require(climate.coastDistances.length >= 2 && climate.coastDistances.length == climate.continentalness.length,
                 "climate.coastDistances and climate.continentalness must have the same length of at least 2");
