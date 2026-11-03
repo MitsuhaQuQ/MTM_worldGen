@@ -1,5 +1,9 @@
 # Release notes
 
+## v0.4.1
+
+A fix for the Fabric jar, which crashed the game at startup outside the development environment (`could not find any targets matching 'carveBlock' ... No refMap loaded`). Its mixin config now names the refmap that maps vanilla's method names, and the build checks both loaders' jars for it. Terrain is unchanged from v0.4.0, and the Forge jar was never affected.
+
 ## v0.4.0
 
 Dunes and oases in the desert. Terrain in and around deserts has changed since v0.3.2: chunks already saved by v0.3.2 count as an older version, and terrain generated around them blends toward their edges. New settings take their defaults when an existing `config/mtm_worldgen.json` lacks them; delete the file to have them all written out.

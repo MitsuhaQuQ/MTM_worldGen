@@ -350,6 +350,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `gradlew :amidst:jar` 出可运行 jar；`gradlew :amidst:windowsZip` 只能在 Windows 上跑，用 jpackage 打出带 Java 运行时和 Fabric jar 的 `AMIDST-MTM.exe`（mod jar 放在 `app/mods`，不进类路径，由系统属性 `amidst.mtmjar` 指过去）
   - 测试只跑 `*Test` 和 `TestWorldEntryEquality`：测试目录里还有很多以 `Test` 开头的测试世界和辅助类，JUnit 会把它们当成无效测试
 - 构建环境：Gradle 8.10.2（wrapper）、Architectury Loom 1.7、Mojang 官方映射；版本号集中在根目录 `gradle.properties`
+- Mixin 配置 `mtm_worldgen.mixins.json` 在 jar 里必须写明 `refmap`，源码里却不能写（Forge 开发环境会因此找不到注入目标，Architectury 也会警告）：Fabric 为了开发环境直接把 common 的原始配置拷进资源（`processResources`），Architectury 补上 refmap 的那份被当作重复文件丢掉，所以由 Fabric 的 `shadowJar` 打包时补上；缺了它开发环境和 GameTest 照常通过，正式游戏里启动即崩（v0.1.0–v0.4.0 的 Fabric jar 都是这样）。两个加载器的 `remapJar` 会检查 jar 里的配置和 refmap
 - JDK：Gradle 本身可用 JDK 21 运行；编译与运行 1.20.1 需要 JDK 17 工具链，已关闭工具链自动下载
   - 若 Gradle 找不到 JDK 17，在 `~/.gradle/gradle.properties` 中设置 `org.gradle.java.installations.paths=<JDK 17 路径>`，或在命令行加 `-Porg.gradle.java.installations.paths=...`（本机已在用户配置中设置好）
 - 命令：

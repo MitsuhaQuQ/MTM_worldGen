@@ -74,3 +74,15 @@ shadowJar {
 remapJar {
     inputFile.set shadowJar.archiveFile
 }
+
+// Mixins name methods by their Mojang names, which only exist in dev: in a real game they find their targets through the
+// refmap their config names. The Fabric jar takes its config straight from the common sources, which once left it out
+remapJar {
+    doLast {
+        def jar = zipTree(archiveFile.get().asFile)
+        def config = new groovy.json.JsonSlurper().parse(jar.matching { include "mtm_worldgen.mixins.json" }.singleFile)
+        if (!config.refmap || jar.matching { include config.refmap }.isEmpty()) {
+            throw new GradleException("${archiveFile.get().asFile.name}: mtm_worldgen.mixins.json names no refmap in the jar")
+        }
+    }
+}
