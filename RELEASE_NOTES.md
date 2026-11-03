@@ -1,6 +1,8 @@
 # Release notes
 
-## Unreleased
+## v0.3.0
+
+New river landforms and Amidst for MTM worlds. Terrain along rivers and creeks has changed since v0.2.0: chunks already saved by v0.2.0 count as an older version, and terrain generated around them blends toward their edges. New settings take their defaults when an existing `config/mtm_worldgen.json` lacks them; delete the file to have them all written out.
 
 ### Water
 
@@ -8,6 +10,7 @@
 - Alluvial fans: where a stream leaves steep ground for gentle ground it spreads a low fan of sediment, with the stream running in a trench across it (`rivers.fans`)
 - River terraces: the sides of hill and mountain valleys step down to flat benches along the larger rivers (`rivers.terraces`)
 - Oxbow lakes: crescent lakes left by cut-off meanders lie beside rivers winding over plains (`rivers.oxbows`)
+- Each of these can be switched off in the configuration
 
 ### Tools and settings
 

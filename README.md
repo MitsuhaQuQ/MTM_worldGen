@@ -28,15 +28,24 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 
 - **Continents and oceans.** Land is grouped into continents separated by straits and open oceans, about 30% ocean by default.
 - **Three tiers of land.** One continuous field divides land into plains, hills and mountains, so hills always lie between plains and mountains and can also stand alone. Plains are left wide enough for big cities.
-- **Mountains.** Ranges follow winding ridges, and blend along their length between a steep igneous form and a gentle wind-worn one. Isolated peaks stand where hills meet mountains, and rounded dome hills stand among the hills. Along coasts, mountains give way to hills.
-- **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast.
-- **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity.
+- **Mountains.** Ranges follow winding ridges, and blend along their length between a steep igneous form and a gentle wind-worn one. A water erosion simulation carves them and the hills into branching gullies, ravines and spurs. Isolated peaks stand where hills meet mountains, and rounded dome hills stand among the hills. Along coasts, mountains give way to hills.
+- **Plateaus and great plains.** Plateaus are zones of their own with table tops at a common height and steep or gentle edges. Wide great plains join up into areas over ten thousand blocks across.
+- **Rock detail.** Cliff bands with exposed rock strata on steep faces, overhangs on high cliffs, sea stacks off rocky coasts, and sinkholes in dry uplands that open into caves.
+- **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast, some through deltas. Steep rivers fall through level pools and waterfalls.
+- **River landforms.** Creeks run down the eroded gullies in small valleys of their own. Streams leaving steep ground spread alluvial fans, larger rivers in the hills leave terraces on their valley sides, and rivers winding over plains leave oxbow lakes.
+- **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity. Vegetation follows altitude bands from lowland forest to alpine meadow and snow, and the deep dark spreads deep underground.
 - **Coasts and islands.** Sand, gravel, rock and sea cliff coasts follow each other along the shore, and sand, rock and mushroom islands dot the open sea.
 - **Surface.** Bare rock on steep ground and snow above the snow line. Caves and ravines stay below the surface.
 
 Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on Fabric and Forge, and in any exploration order.
 
-Not done yet: deltas, harbors, sinkholes and karst, vegetation zones, cliffs and rock strata, saving terrain logic to disk, and blending into existing worlds.
+Every detail feature can be switched off in the configuration.
+
+Not done yet: harbors, rias and tidal flats, sandbars, glacial landforms, rock debris below cliffs, and rain shadows.
+
+## Merging other maps
+
+Region files copied in from other worlds, vanilla, superflat or older versions, are detected when the world loads and fitted in: superflat maps are raised to normal ground height, missing ground below old maps is generated, and terrain generated around them afterwards blends toward their edges, with rivers ending in lakes before them. The original region files are backed up under `<world>/mtm_worldgen/backup/` before they are changed. Clear the chunks around a merged map to have them generate again with the blend.
 
 ## How it works
 
@@ -67,9 +76,10 @@ Height is built up in layers, each only depending on the ones before it:
 1. **Continents.** Jittered Voronoi plates are grouped into landmasses, and a value that rises away from plate borders gives the coastlines, warped by noise. The land threshold is a per-seed quantile, so the ocean share holds for every seed.
 2. **Climate.** A continuous temperature field is cut into zones in order, so tropical and cold zones can never touch. A separate field gives humidity.
 3. **Tiers.** One low-frequency field divides land into plains, hills and mountains by quantile. It is capped near coasts, which turns mountains into hills there.
-4. **Mountains.** Sites on a jittered grid link along a low-frequency direction field into winding ridge chains. A cross-section profile around each ridge gives the mountain body, with its shape and width derived from the slope limit, and a smooth maximum merges overlapping ridges. A ridged texture sampled in the frame of the ridge adds spurs and gullies that run down the flanks.
+4. **Mountains.** Sites on a jittered grid link along a low-frequency direction field into winding ridge chains. A cross-section profile around each ridge gives the mountain body, with its shape and width derived from the slope limit, and a smooth maximum merges overlapping ridges.
 5. **Drainage.** See below.
-6. **Surface and biomes.** Snow lines, bare rock, beaches and biomes follow from height, slope, climate and humidity.
+6. **Erosion.** Each region runs a stream power simulation on a 16 block grid: the land rises, water gathers downhill, cuts in where it runs strong, and slopes creep, until rise and cut balance in a branching drainage net. Rivers and lakes are held at their water level as base levels, so valleys grow down to the rivers that drain them. The result is scaled back to the designed heights, and the gullies that gather enough water become creeks.
+7. **Surface and biomes.** Snow lines, bare rock, beaches and biomes follow from height, slope, climate and humidity.
 
 ### Rivers and lakes
 
@@ -78,7 +88,7 @@ Rivers are routed on a sparse grid with 256 block cells, in a window reaching 32
 - **Routing.** A priority flood runs inland from the sea, always continuing from the lowest water level reached so far. Each cell drains to the cell that reached it, so depressions fill up to their spill point and every cell finds a way out. Filled cells become lakes.
 - **Size.** Catchment is counted along the routes, and tributaries are counted along each trunk to find major trunks. Water that never touched hills or mountains forms no river.
 - **Courses.** Each cell gets a jittered node, and each flow edge a smooth curve with meanders seeded by that edge alone, so any region that builds an edge gets the same curve. Big rivers average their nodes over a longer stretch, because they are wider than the node spacing.
-- **Shaping the land.** Ridge texture fades out near rivers, leaving them the same smooth ground they were routed on. Valley walls then bound the land from above and below, and low land nearby is flattened into a floodplain just above the water.
+- **Shaping the land.** Valley walls bound the land from above and below, and low land nearby is flattened into a floodplain just above the water. Water levels are lowered onto the eroded ground where it lies lower, except in lakes and in the pools above waterfalls. Fans, terraces and oxbow lakes are found where rivers are built, from the slope above and below each node, and laid on the shaped land.
 - **Water.** Water surfaces come from the routing grid and are written into chunks before surface rules run. Banks are built up or dug out around them where interpolated blocks land off the computed height. Lakes fill the real terrain, so their shores follow it.
 
 ### Performance
@@ -98,9 +108,13 @@ The file only applies to new worlds. Each world stores its settings when created
 | `continents` | Ocean share, continent size and coastline shape |
 | `plains`, `hills`, `mountains`, `plateaus` | Tier shares, heights, ridge shape and mountain styles |
 | `isolated` | Isolated peaks and dome hills |
-| `rivers` | Routing, river classes, widths, valleys, floodplains and lakes |
+| `seaStacks`, `overhangs`, `sinkholes` | Rock detail on coasts and cliffs, and sinkholes with their caves |
+| `erosion` | The erosion simulation and the creeks it leaves |
+| `rivers` | Routing, river classes, widths, valleys, floodplains, lakes, waterfalls, fans, terraces and oxbow lakes |
 | `surface`, `beaches`, `islands` | Snow lines, bare rock, coast types and islands |
-| `climate`, `biomes` | Climate zone shares and sizes, and the biomes of each zone |
+| `climate`, `biomes` | Climate zone shares and sizes, the biomes of each zone, the deep dark and badlands on mountains |
+| `scale` | Horizontal size of continents, terrain zones, mountains, plateaus, hills, climate and biome patches |
+| `foreign` | Blending around region files merged in from other worlds |
 | `spawn` | World spawn search |
 
 ## Commands
@@ -111,7 +125,7 @@ All commands need cheats enabled.
 |---|---|
 | `/mwg flyspeed <factor>` | Sets flying speed, 0.1 to 50 times the default. `reset` restores it, and no argument shows it |
 | `/mwg locate mountain` | Finds the nearest high mountain, with a coordinate you can click to teleport |
-| `/mwg debugmap [blocksPerPixel]` | Saves a map of the terrain and rivers around you to `<world>/mtm_worldgen/debug/` |
+| `/mwg debugmap [blocksPerPixel]` | Saves a map of the terrain and rivers around you to `<world>/mtm_worldgen/debug/`; above 16 blocks per pixel it leaves out rivers and erosion |
 | `/mwg precompute <radius>` | Computes the logic regions within this many regions of you (0 to 5) in the background, so exploring there later does not wait for them. `cancel` stops it |
 | `/mwg benchmark` | Compares chunk generation time with vanilla (biome and noise stages only) |
 
