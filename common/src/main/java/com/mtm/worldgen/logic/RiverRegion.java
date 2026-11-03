@@ -173,7 +173,11 @@ public final class RiverRegion {
             // Near a source the texture stays, so a stream begins in the slope's own gully instead of a pocket
             double fade = strength * Math.min(fadeBase + fadePerWidth * width, reach - config.valleyFloorFactor * half);
             texture = Math.min(texture, fade > 0.0 ? smooth(run / fade) : 1.0);
-            low = Math.max(low, level + config.bankHeight - wall);
+            // The pool above a waterfall only holds the land up around its own water, falling away from its banks as a
+            // valley wall would. Held across the whole valley floor, three times its width, a pool standing above the
+            // land beside it became a round plateau, walling off whatever ran into the river below the fall
+            double poolWall = (classes[segment] & POOL) != 0 ? wall(Math.max(0.0, distance - half)) : wall;
+            low = Math.max(low, level + config.bankHeight - poolWall);
             high = Math.min(high, level + config.bankHeight + wall);
             double inReach = smooth((reach - distance) / (REACH_FADE * reach));
             double closeness = 1.0 / (distance + BLEND_RADIUS);
