@@ -53,6 +53,11 @@ final class RiverLayer {
     private final int cellSize;
     private final int cells;
 
+    /** No deposition, at a lake or with bars switched off. */
+    private static final double[] NO_SILT = {0.0, 0.0};
+    /** A bend whose radius is this share of the river's width turns fully toward its bar. */
+    private static final double BEND_WIDTHS = 0.5;
+
     RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore, ForeignTest foreign) {
         this.settings = settings;
         this.config = settings.rivers;
@@ -110,9 +115,6 @@ final class RiverLayer {
         int nextLx = Math.floorMod(nextX, cells);
         int nextLz = Math.floorMod(nextZ, cells);
         if (isShortOutlet(around, regionX, regionZ, cellX, cellZ)) {
-            return;
-        }
-        if (flow.isLake(lx, lz) && nextFlow.isLake(nextLx, nextLz)) {
             return;
         }
         // A river running into foreign chunks ends in a lake just before it, with nothing of it left below that point
@@ -181,6 +183,10 @@ final class RiverLayer {
         // A steep edge drops in a few falls between level pools, instead of following the ground down: water only
         // stands in whole blocks, and a gently sloping surface turns into a long staircase of one-block steps
         int[] falls = config.waterfalls ? falls(startLevel - endLevel, length, hash) : new int[0];
+        double[] siltStart = config.bars ? sediment(around, regionX, regionZ, cellX, cellZ) : NO_SILT;
+        double[] siltEnd = !config.bars ? NO_SILT : nextClass == FlowRegion.RiverClass.NONE ? siltStart : sediment(around, regionX, regionZ, nextX, nextZ);
+        double headingX = startTangent[0];
+        double headingZ = startTangent[1];
         int passed = 0;
         boolean pool = false;
         for (int i = 1; i <= config.curveSegments; i++) {
@@ -210,10 +216,27 @@ final class RiverLayer {
             }
             double from = (double) (i - 1) / config.curveSegments;
             double strength = source ? smooth(t / config.sourceTaper) : 1.0;
+            // Curvature against the river's width: a bend as tight as a couple of widths turns fully
+            double stepX = x - previousX;
+            double stepZ = z - previousZ;
+            double stepLength = Math.hypot(stepX, stepZ);
+            double bend = 0.0;
+            if (stepLength > 0.0) {
+                stepX /= stepLength;
+                stepZ /= stepLength;
+                double turn = Math.asin(Math.max(-1.0, Math.min(1.0, headingX * stepZ - headingZ * stepX)));
+                double width = startSize[0] + (from + 0.5 / config.curveSegments) * (endSize[0] - startSize[0]);
+                bend = Math.max(-1.0, Math.min(1.0, turn / stepLength * width * BEND_WIDTHS));
+                headingX = stepX;
+                headingZ = stepZ;
+            }
+            double middle = from + 0.5 / config.curveSegments;
             curves.add(previousX, previousZ, x, z,
                     previousStrength * (startSize[0] + from * (endSize[0] - startSize[0])), strength * (startSize[0] + t * (endSize[0] - startSize[0])),
                     previousStrength * (startSize[1] + from * (endSize[1] - startSize[1])), strength * (startSize[1] + t * (endSize[1] - startSize[1])),
                     previousLevel, level, previousStrength, strength,
+                    siltStart[0] + from * (siltEnd[0] - siltStart[0]), siltStart[0] + t * (siltEnd[0] - siltStart[0]),
+                    siltStart[1] + middle * (siltEnd[1] - siltStart[1]), bend,
                     pool ? (byte) (riverClass | RiverRegion.POOL) : riverClass);
             previousStrength = strength;
             previousX = x;
@@ -223,6 +246,73 @@ final class RiverLayer {
         if (endsHere) {
             addEndLake(b, previousLevel, startSize, startTangent, riverClass, curves);
         }
+    }
+
+    /**
+     * Deposition at a river node, as {silt, coarse}: how much of its load the river drops there, from 0 to 1, and how
+     * much of what it drops is gravel rather than sand, by the grade of the reach above it.
+     * <p>
+     * A short sediment budget down the main stem, from siltReach nodes upstream to this one. Each node adds the load of
+     * the land that newly drains into it, more where the river above it runs steep, as steep ground sheds more. The
+     * river carries up to a capacity that grows with its catchment and its grade, and drops the rest. Silt is how far the
+     * load reaching the node exceeds what it can carry on: rivers that come out of steep ground onto gentle ground, and
+     * slow lower reaches, lay bars and beaches along their banks, while steep rivers carry everything on over bare
+     * channels. A lake traps everything that reaches it, so the river leaving it starts with no load. The budget only
+     * reaches back a bounded way, so every region computing an edge finds the same.
+     */
+    private double[] sediment(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
+        if (isLake(around, regionX, regionZ, new int[]{cellX, cellZ})) {
+            return NO_SILT;
+        }
+        int[][] path = new int[config.siltReach + 1][];
+        path[0] = new int[]{cellX, cellZ};
+        int count = 1;
+        double trappedArea = 0.0;
+        while (count <= config.siltReach) {
+            int[] up = step(around, regionX, regionZ, path[count - 1][0], path[count - 1][1], -1);
+            if (up == null || flowAt(around, regionX, regionZ, up[0], up[1]) == null || isDry(around, regionX, regionZ, up[0], up[1])) {
+                break;
+            }
+            if (isLake(around, regionX, regionZ, up)) {
+                trappedArea = catchment(around, regionX, regionZ, up);
+                break;
+            }
+            path[count++] = up;
+        }
+        double load = 0.0;
+        double ratio = 0.0;
+        double above = 0.0;
+        double drained = trappedArea;
+        for (int i = count - 1; i >= 0; i--) {
+            int[] cell = path[i];
+            int[] down = i > 0 ? path[i - 1] : step(around, regionX, regionZ, cell[0], cell[1], 1);
+            double grade = down == null || flowAt(around, regionX, regionZ, down[0], down[1]) == null ? 0.0 : grade(around, regionX, regionZ, cell, down);
+            above = i < count - 1 ? grade(around, regionX, regionZ, path[i + 1], cell) : grade;
+            double area = catchment(around, regionX, regionZ, cell);
+            double supply = Math.max(0.0, area - drained) * Math.min(1.0, above / config.siltSourceGrade);
+            drained = area;
+            double capacity = area * grade / config.siltCapacityGrade;
+            double carried = load + supply;
+            ratio = capacity > 0.0 ? carried / capacity : Double.POSITIVE_INFINITY;
+            load = Math.min(carried, capacity);
+        }
+        double silt = smooth((ratio - config.siltRatioLow) / (config.siltRatioHigh - config.siltRatioLow));
+        // What a river drops is as coarse as what the reach above it could still carry
+        double coarse = smooth((above - config.sandGrade) / (config.gravelGrade - config.sandGrade));
+        return new double[]{silt, coarse};
+    }
+
+    /** Grade of the water from one node down to the next, never negative. */
+    private double grade(FlowRegion[] around, int regionX, int regionZ, int[] from, int[] to) {
+        double drop = riverLevel(around, regionX, regionZ, from[0], from[1]) - riverLevel(around, regionX, regionZ, to[0], to[1]);
+        double[] a = node(from[0], from[1]);
+        double[] b = node(to[0], to[1]);
+        return Math.max(0.0, drop / Math.max(1.0, Math.hypot(b[0] - a[0], b[1] - a[1])));
+    }
+
+    private double catchment(FlowRegion[] around, int regionX, int regionZ, int[] cell) {
+        FlowRegion flow = flowAt(around, regionX, regionZ, cell[0], cell[1]);
+        return flow.catchment(Math.floorMod(cell[0], cells), Math.floorMod(cell[1], cells));
     }
 
     /**
@@ -712,8 +802,16 @@ final class RiverLayer {
     }
 
     /** Cells beyond a region whose edges can reach into it, deltas included. */
+    /**
+     * Routing cells around a region whose edges a query in it can reach. Only these need their sediment budget, which
+     * walks siltReach nodes upstream, to stay within the regions around.
+     */
+    static int queryMargin(WorldgenSettings.Rivers config) {
+        return Math.max(1, ceilDiv(config.queryReach, config.flowCellSize) + 3);
+    }
+
     static int margin(WorldgenSettings.Rivers config) {
-        return Math.max(1, ceilDiv(config.queryReach, config.flowCellSize) + 3) + config.deltaLength
+        return queryMargin(config) + config.deltaLength
                 + ceilDiv((int) Math.ceil(config.deltaSpread + config.deltaOverrun), config.flowCellSize);
     }
 
@@ -798,6 +896,11 @@ final class RiverLayer {
 
         void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1,
                  double s0, double s1, byte riverClass) {
+            add(x0, z0, x1, z1, w0, w1, d0, d1, l0, l1, s0, s1, 0.0, 0.0, 0.0, 0.0, riverClass);
+        }
+
+        void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1,
+                 double s0, double s1, double silt0, double silt1, double coarse, double bend, byte riverClass) {
             if (count == classes.length) {
                 values = Arrays.copyOf(values, values.length * 2);
                 classes = Arrays.copyOf(classes, classes.length * 2);
@@ -815,6 +918,10 @@ final class RiverLayer {
             values[s + 9] = l1;
             values[s + 10] = s0;
             values[s + 11] = s1;
+            values[s + 12] = silt0;
+            values[s + 13] = silt1;
+            values[s + 14] = coarse;
+            values[s + 15] = bend;
             classes[count++] = riverClass;
         }
 
@@ -832,7 +939,8 @@ final class RiverLayer {
                 int s = i * STRIDE;
                 add(other.values[s], other.values[s + 1], other.values[s + 2], other.values[s + 3], other.values[s + 4], other.values[s + 5],
                         other.values[s + 6], other.values[s + 7], other.values[s + 8], other.values[s + 9],
-                        other.values[s + 10], other.values[s + 11], other.classes[i]);
+                        other.values[s + 10], other.values[s + 11], other.values[s + 12], other.values[s + 13],
+                        other.values[s + 14], other.values[s + 15], other.classes[i]);
             }
         }
 

@@ -4,9 +4,14 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,12 +37,110 @@ public final class WorldgenSettings {
                 throw new IllegalArgumentException(e.getMessage(), e);
             }
         }
+
+        private static final Gson COMPACT = new Gson();
+        /** Width the comments wrap at, indentation included. */
+        private static final int WIDTH = 116;
+
+        static String commented(WorldgenSettings settings, String header, Map<String, String> docs) {
+            StringBuilder out = new StringBuilder();
+            for (String paragraph : header.split("\n\n")) {
+                if (out.length() > 0) {
+                    out.append("//\n");
+                }
+                comment(out, paragraph, 0);
+            }
+            write(out, GSON.toJsonTree(settings), WorldgenSettings.class, "", 0, docs);
+            return out.append('\n').toString();
+        }
+
+        private static void write(StringBuilder out, JsonElement element, Class<?> type, String path, int indent, Map<String, String> docs) {
+            if (element.isJsonObject()) {
+                JsonObject object = element.getAsJsonObject();
+                out.append("{\n");
+                Iterator<Map.Entry<String, JsonElement>> entries = object.entrySet().iterator();
+                boolean first = true;
+                while (entries.hasNext()) {
+                    Map.Entry<String, JsonElement> entry = entries.next();
+                    String name = entry.getKey();
+                    String key = path.isEmpty() ? name : path + "." + name;
+                    String doc = docs.get(key);
+                    if (doc == null && type != null) {
+                        doc = docs.get(type.getSimpleName() + "." + name);
+                    }
+                    if (doc != null) {
+                        if (!first) {
+                            out.append('\n');
+                        }
+                        comment(out, doc, indent + 1);
+                    }
+                    pad(out, indent + 1);
+                    out.append(COMPACT.toJson(name)).append(": ");
+                    write(out, entry.getValue(), fieldType(type, name), key, indent + 1, docs);
+                    out.append(entries.hasNext() ? ",\n" : "\n");
+                    first = false;
+                }
+                pad(out, indent);
+                out.append('}');
+            } else {
+                String compact = COMPACT.toJson(element);
+                if (!element.isJsonArray() || compact.length() + 2 * indent < WIDTH) {
+                    out.append(compact);
+                    return;
+                }
+                out.append("[\n");
+                Iterator<JsonElement> items = element.getAsJsonArray().iterator();
+                while (items.hasNext()) {
+                    pad(out, indent + 1);
+                    out.append(COMPACT.toJson(items.next())).append(items.hasNext() ? ",\n" : "\n");
+                }
+                pad(out, indent);
+                out.append(']');
+            }
+        }
+
+        /** Type of a nested settings object, to find the documentation of its fields; null for anything else. */
+        private static Class<?> fieldType(Class<?> type, String name) {
+            try {
+                return type == null ? null : type.getField(name).getType();
+            } catch (NoSuchFieldException e) {
+                return null;
+            }
+        }
+
+        private static void comment(StringBuilder out, String text, int indent) {
+            int width = WIDTH - 2 * indent - 3;
+            StringBuilder line = new StringBuilder();
+            for (String word : text.split(" ")) {
+                if (line.length() > 0 && line.length() + 1 + word.length() > width) {
+                    pad(out, indent);
+                    out.append("// ").append(line).append('\n');
+                    line.setLength(0);
+                }
+                if (line.length() > 0) {
+                    line.append(' ');
+                }
+                line.append(word);
+            }
+            if (line.length() > 0) {
+                pad(out, indent);
+                out.append("// ").append(line).append('\n');
+            }
+        }
+
+        private static void pad(StringBuilder out, int indent) {
+            out.append("  ".repeat(indent));
+        }
     }
     /** Bottom of MTM worlds, unchanged from vanilla. */
     private static final int MIN_Y = -64;
     /** Vanilla limits the top of the world to this. */
     private static final int MAX_BUILD_TOP = 2032;
     private static final double VANILLA_ORE_HEIGHT = 256.0;
+    /** Fewest logic regions kept in memory once general.logicRange makes them larger. */
+    private static final int MIN_RESOLVED_CACHE = 32;
+    /** Largest general.logicRange: beyond it a region takes too long and too much memory to compute. */
+    private static final double MAX_LOGIC_RANGE = 3.0;
     /** Empty space kept above the highest possible surface. */
     private static final int BUILD_HEADROOM = 40;
 
@@ -64,6 +167,7 @@ public final class WorldgenSettings {
     public final Rivers rivers = new Rivers();
     public final Biomes biomes = new Biomes();
 
+    /** General settings: the world's height, the logic region grid, how far the logic looks, and what the world holds. */
     public static final class General {
         /** Villages only start where the ground within villageRadius blocks varies by at most villageMaxRelief. */
         public int villageRadius = 48;
@@ -80,6 +184,20 @@ public final class WorldgenSettings {
         public int lookAhead = 4096;
         /** Logic regions kept in memory. */
         public int regionCacheSize = 64;
+        /**
+         * How far the terrain logic looks around each place, as a multiple of the ranges below, from 1 to 3. Higher
+         * values take in more of the land around when routing rivers, eroding mountains and shaping valleys, which gives
+         * longer and bigger rivers, wider and flatter river plains, and smoother joins between logic regions. The
+         * terrain keeps its proportions: features have the same size and the same share of plains, hills and mountains,
+         * only worked out over a wider area. It scales general.regionSize, general.lookAhead, rivers.flowLookAhead,
+         * rivers.queryReach, rivers.siltReach, erosion.margin and erosion.blend together, so their limits on each other
+         * still hold; each of those can also be raised on its own. The cost is speed and memory. Logic regions grow with
+         * the range, and each new one is computed before the chunks in it appear: at 2 a region is twice as wide and
+         * takes about 10 seconds instead of 1.5 (about twice the time for the same area), and the first one of a new
+         * world about 30 seconds instead of 5, as measured on a fast desktop. Fewer regions are kept in memory, but each
+         * is larger, so expect a few hundred MB more at 2 and more at 3. Terrain at 1 is unchanged.
+         */
+        public double logicRange = 1.0;
         /** The top fraction of the height range is compressed so peaks approach but never exceed the maximum. */
         public double softCapFraction = 0.13;
         /** Skeleton fades in while the continent base rises this many blocks above the sea. */
@@ -106,12 +224,14 @@ public final class WorldgenSettings {
 
     /** Maximum grades in percent (height difference / horizontal distance * 100). */
     public static final class Slopes {
+        /** Plains, hills, plateaus and mountains, in turn. */
         public double plains = 5.0;
         public double hills = 25.0;
         public double plateau = 40.0;
         public double mountain = 150.0;
     }
 
+    /** Continents and oceans: where land lies, how its coastline wanders and how deep the sea gets. Sizes are in blocks. */
     public static final class Continents {
         /** Target fraction of the surface covered by ocean. */
         public double oceanRatio = 0.30;
@@ -136,6 +256,10 @@ public final class WorldgenSettings {
         public double oceanDepth = 36.0;
     }
 
+    /**
+     * Mountain ranges, the highest of the three tiers: where they lie, their ridges and width, the steep igneous and the
+     * rounded eroded style of rock, and their cliff bands. Heights are on the 300 block scale, other sizes in blocks.
+     */
     public static final class Mountains {
         /** Wavelength of the tier field that divides land into plains, hills and mountains. */
         public double zoneWavelength = 11264.0;
@@ -238,6 +362,7 @@ public final class WorldgenSettings {
      * heights above the sea on the 300 block scale; the zone noise decides where they lie and how wide their edges are.
      */
     public static final class Plateaus {
+        /** Size in blocks of the noise that places plateaus, and the share of the land they cover. */
         public double zoneWavelength = 12288.0;
         public double coverage = 0.12;
         /**
@@ -276,7 +401,6 @@ public final class WorldgenSettings {
         public double domeSpread = 6.0;
     }
 
-    /** The hill tier, between plains and mountains. */
     /** Sea stacks. Heights are on the 300 block scale, other sizes in blocks. */
     public static final class SeaStacks {
         /** One candidate per square of this size, standing this far off rocky coasts. */
@@ -301,6 +425,11 @@ public final class WorldgenSettings {
      * land starts with, and max depth caps the cut as a share of the height above the sea.
      */
     public static final class Erosion {
+        /**
+         * Whether erosion runs; off, mountains and hills keep the ridge texture of the skeleton instead. The simulation
+         * runs on a grid of cellSize blocks, over a window reaching margin blocks past each region, for the given number
+         * of rounds; neighboring regions mix their solutions in a band of blend blocks along their border.
+         */
         public boolean enabled = true;
         public int cellSize = 16;
         public int margin = 1024;
@@ -512,11 +641,14 @@ public final class WorldgenSettings {
         public double sharpness = 2.5;
     }
 
+    /** The hill tier, between plains and mountains. */
     public static final class Hills {
+        /** Relief of the hills on the 300 block scale, and their wavelength in blocks. */
         public double height = 44.0;
         public double wavelength = 640.0;
     }
 
+    /** Shores: how wide beaches are, the share of each kind of coast, and how sea cliffs rise. Sizes are in blocks. */
     public static final class Beaches {
         /** Beach depth inland varies along the coast between these; negative leaves coast without a beach. */
         public double minWidth = -8.0;
@@ -596,20 +728,25 @@ public final class WorldgenSettings {
 
     /** Biome ids of one climate zone, by landform. Several ids in a list form large patches of each. */
     public static final class BiomeZone {
+        /** Sea, deep sea and sandy coasts. */
         public String[] ocean = {"minecraft:ocean"};
         public String[] deepOcean = {"minecraft:deep_ocean"};
         public String[] beach = {"minecraft:beach"};
         /** Rocky coasts and rocky islands. */
         public String[] rockyShore = {"minecraft:stony_shore"};
+        /** River channels. */
         public String[] river = {"minecraft:river"};
+        /** Lowland, from dry through medium to wet humidity. */
         public String[] dry = {"minecraft:plains"};
         public String[] medium = {"minecraft:forest"};
         public String[] wet = {"minecraft:forest"};
         /** Optional: wet lowland just above the sea. */
         public String[] swamp = {};
+        /** Highland: the band between the lowland and the tree line. */
         public String[] highland = {"minecraft:forest"};
         /** Optional: dry highland away from zone borders. */
         public String[] dryHighland = {};
+        /** Above the tree line, and above the snow line. */
         public String[] alpine = {"minecraft:meadow"};
         public String[] snowPeak = {"minecraft:frozen_peaks"};
 
@@ -643,6 +780,10 @@ public final class WorldgenSettings {
         }
     }
 
+    /**
+     * Biomes: which vanilla biomes go where, by climate zone and humidity, by height band below the snow line, and along
+     * water. Ids are vanilla biome names.
+     */
     public static final class Biomes {
         /** Size of the patches when a list holds several biomes. */
         public double patchWavelength = 1536.0;
@@ -693,22 +834,26 @@ public final class WorldgenSettings {
         public String[] unrealisticBiomes = ids("badlands", "wooded_badlands", "eroded_badlands");
         public double mountainShare = 0.1;
 
+        /** Biomes of the tropical zone, by landform and humidity. */
         public BiomeZone tropical = new BiomeZone().with(
                 ids("warm_ocean"), ids("lukewarm_ocean", "deep_lukewarm_ocean"), ids("beach"),
                 ids("desert", "badlands", "savanna"), ids("savanna", "sparse_jungle"), ids("jungle", "bamboo_jungle"),
                 ids("swamp", "mangrove_swamp"), ids("savanna_plateau", "windswept_savanna"),
                 ids("meadow", "stony_peaks"), ids("jagged_peaks")).withDryHighland(ids("wooded_badlands", "eroded_badlands"));
+        /** Biomes of the temperate zone. */
         public BiomeZone temperate = new BiomeZone().with(
                 ids("ocean", "lukewarm_ocean"), ids("deep_ocean"), ids("beach"),
                 ids("plains", "sunflower_plains"), ids("forest", "birch_forest", "flower_forest"),
                 ids("dark_forest", "old_growth_birch_forest"), ids("swamp"),
                 ids("windswept_forest", "windswept_hills", "forest", "cherry_grove"),
                 ids("meadow"), ids("frozen_peaks", "jagged_peaks"));
+        /** Biomes of the cold zone. */
         public BiomeZone cold = new BiomeZone().with(
                 ids("cold_ocean"), ids("deep_cold_ocean"), ids("beach"),
                 ids("taiga", "snowy_taiga"), ids("taiga", "old_growth_spruce_taiga"),
                 ids("old_growth_pine_taiga", "old_growth_spruce_taiga"), new String[0],
                 ids("grove", "windswept_hills", "windswept_gravelly_hills"), ids("snowy_slopes"), ids("frozen_peaks", "snowy_slopes")).withRiver(ids("frozen_river"));
+        /** Biomes of the polar zone. */
         public BiomeZone polar = new BiomeZone().with(
                 ids("frozen_ocean"), ids("deep_frozen_ocean"), ids("snowy_beach"),
                 ids("snowy_plains", "ice_spikes"), ids("snowy_plains", "snowy_taiga"), ids("snowy_taiga", "grove"),
@@ -737,6 +882,7 @@ public final class WorldgenSettings {
         }
     }
 
+    /** Where new players start: the search near the origin for dry ground at a moderate height. */
     public static final class Spawn {
         /** Rings searched outward from the world center, and the distance between them in coarse cells. */
         public int searchRings = 128;
@@ -761,6 +907,42 @@ public final class WorldgenSettings {
         public double routeWavelength = 512.0;
         /** Water at least this deep over the ground of a filled depression is a lake. */
         public double lakeMinDepth = 2.0;
+        /** Spacing in blocks of the ground a lake's shore is found on; must divide flowCellSize. */
+        public int lakeShoreStep = 16;
+        /**
+         * Sediment bars and beaches along rivers, from a short sediment budget down each river: barely any on steep
+         * rivers, which carry their load on, most where rivers leave steep ground and on slow lower reaches. Each node
+         * adds the load of the land newly draining into it, in full where the river above runs at siltSourceGrade or
+         * steeper; the river carries its catchment times its grade over siltCapacityGrade and drops the rest. Silt
+         * rises from 0 to 1 as the load reaching a node goes from siltRatioLow to siltRatioHigh times what it can carry.
+         * The budget reaches siltReach nodes upstream.
+         */
+        public boolean bars = true;
+        public int siltReach = 8;
+        public double siltSourceGrade = 0.03;
+        public double siltCapacityGrade = 0.02;
+        public double siltRatioLow = 0.6;
+        public double siltRatioHigh = 1.6;
+        /**
+         * A bar reaches barBase plus barPerWidth per block of river width out from the water at full silt, and
+         * barShallow blocks into it, at barHeight above the water. It reaches barBend times further on the inside of
+         * bends and as much less on the outside. Bars come in stretches along the river, by noise of barWavelength,
+         * more of the river covered as barCoverage rises from -1 to 1. Bars are gravel where the river runs at
+         * gravelGrade or steeper above the bar and sand at sandGrade or gentler. They grow in with the river up to barFullWidth
+         * wide, so they line the lower reaches rather than every stream.
+         */
+        public double barBase = 6.0;
+        public double barPerWidth = 0.4;
+        public double barShallow = 3.0;
+        public double barHeight = 1.0;
+        /** Most a bar lowers the land onto its beach; land higher above it than twice this is left alone. */
+        public double barRelief = 4.0;
+        public double barBend = 0.8;
+        public double barWavelength = 220.0;
+        public double barCoverage = 0.45;
+        public double sandGrade = 0.0015;
+        public double gravelGrade = 0.006;
+        public double barFullWidth = 60.0;
         /** Inland sinks in deserts: one candidate per square of this many routing cells, far from the sea. */
         public int sinkSpacing = 5;
         public double sinkMinCoastDistance = 500.0;
@@ -949,7 +1131,9 @@ public final class WorldgenSettings {
         public double bankHeight = 1.0;
     }
 
+    /** Temperature zones and humidity. */
     public static final class Climate {
+        /** Size in blocks of the temperature noise, which sets how large the climate zones are. */
         public double temperatureWavelength = 16384.0;
         /** Area shares of the zones; polar takes the remainder. */
         public double tropicalShare = 0.30;
@@ -976,13 +1160,57 @@ public final class WorldgenSettings {
     }
 
     /** Bottom of the world. */
+    /**
+     * These settings as the terrain logic works with them: with general.logicRange applied to the ranges it scales,
+     * and left at 1 itself, so resolving twice changes nothing. At a range of 1 this is the same instance.
+     */
+    public WorldgenSettings resolved() {
+        double range = general.logicRange;
+        if (range == 1.0) {
+            return this;
+        }
+        WorldgenSettings copy = Json.read(toJson());
+        copy.general.logicRange = 1.0;
+        // Regions stay whole multiples of every grid that tiles them
+        int tile = lcm(lcm(general.cellSize, rivers.flowCellSize), erosion.cellSize);
+        copy.general.regionSize = roundTo(general.regionSize * range, tile);
+        copy.general.lookAhead = roundTo(general.lookAhead * range, general.cellSize);
+        copy.general.regionCacheSize = Math.max(MIN_RESOLVED_CACHE, (int) Math.ceil(general.regionCacheSize / (range * range)));
+        copy.rivers.flowLookAhead = roundTo(rivers.flowLookAhead * range, rivers.flowCellSize);
+        copy.rivers.queryReach = (int) Math.round(rivers.queryReach * range);
+        copy.rivers.siltReach = (int) Math.round(rivers.siltReach * range);
+        copy.erosion.margin = roundTo(erosion.margin * range, erosion.cellSize);
+        copy.erosion.blend = erosion.blend * range;
+        copy.validate();
+        return copy;
+    }
+
+    private static int roundTo(double value, int step) {
+        return Math.max(step, (int) Math.round(value / step) * step);
+    }
+
+    private static int lcm(int a, int b) {
+        int x = a;
+        int y = b;
+        while (y != 0) {
+            int t = x % y;
+            x = y;
+            y = t;
+        }
+        return a / x * b;
+    }
+
     public int minBuildY() {
         return MIN_Y;
     }
 
-    /** Total build height: from the bottom to a multiple of 16 above the highest possible surface. */
+    /**
+     * Total build height: from the bottom to a multiple of 16 above the highest possible surface, with some headroom,
+     * but never past vanilla's build limit. Surfaces as high as the limit itself still fit, as the soft cap keeps the
+     * land below the maximum surface height; what grows on the highest peaks is cut off by the limit.
+     */
     public int buildHeight() {
-        int top = (general.maxSurfaceHeight + BUILD_HEADROOM + 15) / 16 * 16;
+        int top = Math.min(MAX_BUILD_TOP, (general.maxSurfaceHeight + BUILD_HEADROOM + 15) / 16 * 16);
         return top - MIN_Y;
     }
 
@@ -1010,12 +1238,20 @@ public final class WorldgenSettings {
         require(general.cellSize > 0 && general.regionSize > 0 && general.regionSize % general.cellSize == 0,
                 "general.regionSize must be a positive multiple of general.cellSize");
         require(general.maxSurfaceHeight > general.seaLevel, "general.maxSurfaceHeight must be above general.seaLevel");
-        require(general.maxSurfaceHeight + BUILD_HEADROOM + 15 <= MAX_BUILD_TOP,
+        require(general.logicRange >= 1.0 && general.logicRange <= MAX_LOGIC_RANGE,
+                "general.logicRange must lie between 1 and " + MAX_LOGIC_RANGE);
+        require(general.maxSurfaceHeight <= MAX_BUILD_TOP,
                 "general.maxSurfaceHeight is too large for Minecraft's build limit of " + MAX_BUILD_TOP);
         require(general.regionCacheSize > 0, "general.regionCacheSize must be positive");
         require(rivers.flowCellSize > 0 && rivers.flowCellSize % general.cellSize == 0 && general.regionSize % rivers.flowCellSize == 0,
                 "rivers.flowCellSize must be a multiple of general.cellSize and divide general.regionSize");
         require(rivers.flowLookAhead > 0, "rivers.flowLookAhead must be positive");
+        require(rivers.lakeShoreStep > 0 && rivers.flowCellSize % rivers.lakeShoreStep == 0, "rivers.lakeShoreStep must divide rivers.flowCellSize");
+        require(rivers.siltReach >= 0 && RiverLayer.queryMargin(rivers) + rivers.siltReach + 1 <= general.regionSize / rivers.flowCellSize
+                        && rivers.siltSourceGrade > 0.0 && rivers.siltCapacityGrade > 0.0 && rivers.siltRatioHigh > rivers.siltRatioLow
+                        && rivers.barBase >= 0.0 && rivers.barPerWidth >= 0.0 && rivers.barShallow >= 0.0 && rivers.barHeight >= 0.5
+                        && rivers.barBend >= 0.0 && rivers.barRelief > 0.0 && rivers.barWavelength > 0.0 && rivers.gravelGrade > rivers.sandGrade && rivers.barFullWidth > 0.0,
+                "rivers bars need siltReach >= 0 and within the neighboring regions, positive siltSourceGrade and siltCapacityGrade, siltRatioHigh > siltRatioLow, non-negative bar sizes, barHeight >= 0.5, positive barWavelength and barFullWidth, and gravelGrade > sandGrade");
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
@@ -1111,9 +1347,21 @@ public final class WorldgenSettings {
         return Json.GSON.toJson(this);
     }
 
+    /**
+     * The settings as the config file shows them: JSON with a header and, above each group and setting, its
+     * documentation by key, a group name or group.setting (or the class of a nested object and its setting). The
+     * comments are // lines, which the lenient parsing of {@link #fromJson} skips.
+     */
+    public String toCommentedJson(String header, Map<String, String> docs) {
+        return Json.commented(this, header, docs);
+    }
+
     /** Parses and validates; fields missing from the JSON keep their defaults. */
     public static WorldgenSettings fromJson(String json) {
-        WorldgenSettings settings = Json.read(json);
-        return (settings != null ? settings : new WorldgenSettings()).validate();
+        WorldgenSettings read = Json.read(json);
+        WorldgenSettings settings = (read != null ? read : new WorldgenSettings()).validate();
+        // The ranges general.logicRange scales have limits on each other, which the scaled values must meet too
+        settings.resolved();
+        return settings;
     }
 }

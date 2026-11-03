@@ -1,5 +1,24 @@
 # Release notes
 
+## Unreleased
+
+Lakes take their shape from the ground, and rivers lay sediment bars. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- The shore of a lake follows the terrain around it. Lakes used to fill the rounded outline of the routing cells they lie in and stand above the ground at its edge, held in by a raised rim: a square lake walled in on flat land. Each lake now floods the ground around it on a finer grid, which gives the level it really spills at and where its water reaches (`rivers.lakeShoreStep`)
+- Rivers run on through the routing cells of a lake, which can now be smaller than its cells, instead of ending at its outline
+
+### Settings
+
+- New `general.logicRange`, from 1 to 3: how far the terrain logic looks around each place. Higher values route rivers, erode mountains and shape valleys over a wider area, for bigger rivers, wider and flatter river plains and smoother joins between logic regions, with the same landform sizes and the same share of plains, hills and mountains. New terrain takes longer to appear: at 2, about 10 seconds per logic region instead of 1.5
+- The config file now explains every setting in comments. An existing file without comments is written again with them when the game starts, keeping its values
+- `general.maxSurfaceHeight` can be set as high as Minecraft's build limit of 2032, as in JJThunder's worlds; creating a world with it used to crash. Near the limit the world simply ends at 2032, with no headroom above the highest peaks
+
+### River landforms
+
+- Rivers carry sediment: a short budget down each river adds what the land draining into it sheds, more below steep ground, and drops what the river cannot carry on. Where it drops its load, bars build along the banks, as gravel below steep reaches and as sand beaches on slow lower reaches, widest on the inside of bends. Steep rivers carry everything on and keep bare banks, and lakes trap all of it (`rivers.bars` and the `silt*`, `bar*` settings)
+
 ## v0.4.2
 
 Fixes for lake outlets and creeks. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.

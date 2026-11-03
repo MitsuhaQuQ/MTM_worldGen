@@ -17,19 +17,23 @@ public final class RiverRegion {
      * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1. Sand run is the distance
      * from the water of a river mouth or delta that leaves sand along its banks, infinite if there is none in reach.
      * Strength is that of the river the position is deepest in: below 1 close to its source, where it is still growing.
+     * Bar is how strongly a sediment bar along a river claims the position, from 0 to 1, and coarse how much of that bar
+     * is gravel rather than sand.
      */
     public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain, double sandRun,
-                      double strength) {
+                      double strength, double bar, double coarse) {
         public double halfWidth(double minimumWidth) {
             return 0.5 * Math.max(width, minimumWidth);
         }
     }
 
     /**
-     * Values per segment: x0, z0, x1, z1, width0, width1, depth0, depth1, level0, level1, strength0, strength1.
-     * Strength grows from 0 to 1 over the first edge of a river, which starts as nothing instead of a full channel.
+     * Values per segment: x0, z0, x1, z1, width0, width1, depth0, depth1, level0, level1, strength0, strength1, silt0,
+     * silt1, coarse, bend. Strength grows from 0 to 1 over the first edge of a river, which starts as nothing instead of
+     * a full channel. Silt is how much the river is dropping its load, from 0 to 1, coarse how much of that is gravel,
+     * and bend which way and how sharply the course turns, from -1 to 1, positive to the left.
      */
-    static final int STRIDE = 12;
+    static final int STRIDE = 16;
     /** Values per alluvial fan: apex x, apex z, direction x, direction z, radius, height. */
     static final int FAN_STRIDE = 6;
     /** Values per oxbow lake: center x, center z, direction x, direction z, radius, width, water level. */
@@ -134,6 +138,7 @@ public final class RiverRegion {
         double bestDepth = 0.0;
         double bestStrength = 1.0;
         double bestLevel = 0.0;
+        double bestHalf = 0.0;
         double nearestRun = Double.MAX_VALUE;
         double levelSum = 0.0;
         double weightSum = 0.0;
@@ -142,6 +147,8 @@ public final class RiverRegion {
         double texture = 1.0;
         double floodplain = 0.0;
         double sandRun = Double.POSITIVE_INFINITY;
+        double bar = 0.0;
+        double coarse = 0.0;
         for (int segment : index[bucketZ * buckets + bucketX]) {
             int s = segment * STRIDE;
             double dx = segments[s + 2] - segments[s];
@@ -169,6 +176,23 @@ public final class RiverRegion {
             if ((classes[segment] & SANDY) != 0) {
                 sandRun = Math.min(sandRun, Math.max(0.0, distance - half));
             }
+            double silt = strength * smooth(width / config.barFullWidth) * (segments[s + 12] + t * (segments[s + 13] - segments[s + 12]));
+            if (silt > 0.0) {
+                // Bars build on the inside of bends, where the water slows, and wear away on the outside
+                double side = dx * offsetZ - dz * offsetX;
+                double bend = segments[s + 15];
+                double turning = Math.max(0.0, 1.0 + config.barBend * (side * bend > 0.0 ? Math.abs(bend) : -Math.abs(bend)));
+                double barWidth = Math.min(silt * turning * (config.barBase + config.barPerWidth * width),
+                        reach - distance + Math.max(0.0, distance - half) - REACH_FADE * reach);
+                double edge = distance - half;
+                if (barWidth > 0.0 && edge > -config.barShallow && edge < barWidth) {
+                    double claim = silt * (1.0 - smooth(Math.max(0.0, edge) / barWidth));
+                    if (claim > bar) {
+                        bar = claim;
+                        coarse = segments[s + 14];
+                    }
+                }
+            }
             // The fade has to end inside the reach, or the texture would jump where a river drops out of the query
             // Near a source the texture stays, so a stream begins in the slope's own gully instead of a pocket
             double fade = strength * Math.min(fadeBase + fadePerWidth * width, reach - config.valleyFloorFactor * half);
@@ -193,9 +217,15 @@ public final class RiverRegion {
                 bestDepth = segments[s + 6] + t * (segments[s + 7] - segments[s + 6]);
                 bestStrength = strength;
                 bestLevel = level;
+                bestHalf = half;
             }
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength);
+        // A bar only reaches the shallows along the bank of the channel a position lies in, not across the water of a
+        // wider river beside a narrow one
+        if (bestDistance - bestHalf <= -config.barShallow) {
+            bar = 0.0;
+        }
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength, bar, coarse);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */

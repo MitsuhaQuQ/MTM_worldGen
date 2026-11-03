@@ -223,6 +223,12 @@ public final class MtmGenerators {
                         SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.DIRT.defaultBlockState())))),
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.GRAVEL_SHORE), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
                         SurfaceRules.state(Blocks.GRAVEL.defaultBlockState()))),
+                // Sediment bars along rivers, sand over sandstone like a beach, or gravel where the river runs steeper
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.RIVER_GRAVEL), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
+                        SurfaceRules.state(Blocks.GRAVEL.defaultBlockState()))),
+                SurfaceRules.ifTrue(condition(TerrainCondition.Kind.RIVER_SAND), SurfaceRules.sequence(
+                        SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR, SurfaceRules.state(Blocks.SAND.defaultBlockState())),
+                        SurfaceRules.ifTrue(SurfaceRules.DEEP_UNDER_FLOOR, SurfaceRules.state(Blocks.SANDSTONE.defaultBlockState())))),
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_SHORE), SurfaceRules.ifTrue(SurfaceRules.UNDER_FLOOR,
                         SurfaceRules.sequence(SurfaceRules.ifTrue(condition(TerrainCondition.Kind.ROCK_PATCH), patchStone), stone))),
                 SurfaceRules.ifTrue(condition(TerrainCondition.Kind.BEACH), SurfaceRules.sequence(

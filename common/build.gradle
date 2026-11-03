@@ -22,3 +22,17 @@ test {
     systemProperty "junit.jupiter.execution.parallel.enabled", "true"
     systemProperty "junit.jupiter.execution.parallel.mode.default", "concurrent"
 }
+
+// The config file shows the documentation of WorldgenSettings as comments, from a resource generated off its source.
+// SettingsDocsTest fails when the resource is out of date
+tasks.register("updateSettingsDocs", JavaExec) {
+    group = "mtm"
+    description = "Writes the config file comments from the documentation in WorldgenSettings.java"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "com.mtm.worldgen.logic.SettingsDocs"
+    args file("src/main/java/com/mtm/worldgen/logic/WorldgenSettings.java").absolutePath,
+            file("src/main/resources/mtm_worldgen/settings_docs.properties").absolutePath
+    doFirst {
+        file("src/main/resources/mtm_worldgen").mkdirs()
+    }
+}

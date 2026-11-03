@@ -858,6 +858,16 @@ class TerrainLogicTest {
     }
 
     @Test
+    void surfacesUpToTheBuildLimitAreAccepted() {
+        // As high as JJThunder's worlds go: the build top stops at vanilla's limit instead of rejecting the setting
+        WorldgenSettings tall = WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 2032}}");
+        assertEquals(2032, tall.minBuildY() + tall.buildHeight());
+        assertTrue(WorldgenSettings.possibleBuildHeights().contains(tall.buildHeight()), "no dimension type for the build height");
+        assertThrows(IllegalArgumentException.class,
+                () -> WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 2033}}"));
+    }
+
+    @Test
     void invalidSettingsAreRejected() {
         assertThrows(IllegalArgumentException.class,
                 () -> WorldgenSettings.fromJson("{\"general\": {\"cellSize\": 63}}"));

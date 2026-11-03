@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 7;
+    public static final int ALGORITHM_VERSION = 8;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -50,6 +50,8 @@ public final class TerrainLogic {
     private static final double CREEK_GROWTH = 1.0;
     /** Share of the desert's climate by which creeks have given way, when dunes are a few tenths of a block high. */
     private static final double DESERT_CREEK_FADE = 0.05;
+    /** Spread of the noise that mixes gravel and sand where a bar changes from one to the other. */
+    private static final double GRAIN_PATCHES = 0.6;
     /** Blocks from a creek's course over which cliff bands come back. */
     private static final double CREEK_CLIFF_FADE = 48.0;
     /** Spread of the noise over which a stretch of river terraces fades in and out. */
@@ -74,6 +76,8 @@ public final class TerrainLogic {
     private final long worldId;
     private final Fbm sinkShore;
     private final Fbm mouthSandNoise;
+    private final Fbm barNoise;
+    private final Fbm grainNoise;
     private final Fbm duneNoise;
     private final Fbm mouthClayNoise;
     private final Fbm beachWidth;
@@ -87,6 +91,7 @@ public final class TerrainLogic {
     private final long strataSeed;
     private final RegionCache<LogicRegion> regions;
     private final RegionCache<FlowRegion> flowRegions;
+    private final RegionCache<LakeLayer.LakeRegion> lakeRegions;
     private final RegionCache<RiverRegion> riverRegions;
     /** Rivers as the seed lays them out, without what foreign chunks do to them, for erosion to drain into. */
     private final RegionCache<RiverRegion> naturalRiverRegions;
@@ -95,12 +100,18 @@ public final class TerrainLogic {
     private final ErosionLayer erosion;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<FlowRegion> lastFlow = new ThreadLocal<>();
+    private final ThreadLocal<LakeLayer.LakeRegion> lastLakes = new ThreadLocal<>();
     private final ThreadLocal<RiverRegion> lastRivers = new ThreadLocal<>();
     private final ThreadLocal<RiverMemo> riverMemo = ThreadLocal.withInitial(RiverMemo::new);
     private final ThreadLocal<RiverMemo> naturalMemo = ThreadLocal.withInitial(RiverMemo::new);
     private final ThreadLocal<ColumnCache> columns = ThreadLocal.withInitial(ColumnCache::new);
 
+    /** Terrain logic of a world, working with its settings as general.logicRange resolves them. */
     public TerrainLogic(long seed, WorldgenSettings settings) {
+        this(settings.resolved(), seed);
+    }
+
+    private TerrainLogic(WorldgenSettings settings, long seed) {
         this.settings = settings;
         this.seed = seed;
         this.continents = new ContinentLayer(seed, settings);
@@ -114,6 +125,8 @@ public final class TerrainLogic {
         this.deserts = new DesertLayer(seed, settings, this);
         this.sinkShore = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 1), 3, settings.rivers.sinkWavelength);
         this.mouthSandNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 1), 3, settings.rivers.mouthSandWavelength);
+        this.barNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 4), 2, settings.rivers.barWavelength);
+        this.grainNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 5), 2, 0.25 * settings.rivers.barWavelength);
         this.mouthClayNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 3), 2, settings.rivers.mouthClayWavelength);
         this.duneNoise = new Fbm(Hashing.derive(seed, BEACH_SALT + 2), 2, settings.rivers.duneWavelength);
         this.beachWidth = new Fbm(Hashing.derive(seed, BEACH_SALT), 2, settings.beaches.widthWavelength);
@@ -129,6 +142,8 @@ public final class TerrainLogic {
         this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland, this::canSink);
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
+        LakeLayer lakes = new LakeLayer(settings, this::flowRegion, this::sampleSmoothLand);
+        this.lakeRegions = new RegionCache<>(lakes::compute, settings.general.regionCacheSize);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.covers(x, z));
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
         RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false);
@@ -167,6 +182,7 @@ public final class TerrainLogic {
                     for (int regionZ = fromZ - 1; regionZ <= toZ + 1; regionZ++) {
                         regions.hold(regionX, regionZ);
                         flowRegions.hold(regionX, regionZ);
+                        lakeRegions.hold(regionX, regionZ);
                     }
                 }
                 for (int regionX = fromX; regionX <= toX; regionX++) {
@@ -179,6 +195,7 @@ public final class TerrainLogic {
                         for (int regionZ = fromZ - 1; regionZ <= toZ + 1; regionZ++) {
                             regions.release(regionX, regionZ);
                             flowRegions.release(regionX, regionZ);
+                            lakeRegions.release(regionX, regionZ);
                         }
                     }
                     for (int regionX = fromX; regionX <= toX; regionX++) {
@@ -928,7 +945,7 @@ public final class TerrainLogic {
         // its valleys down to them, and bringing back the smooth land there would raise each river above the slopes
         // beside it, worst at its source
         double ground = cliff + (river == null || settings.erosion.enabled ? textured : smooth + (textured - smooth) * river.texture());
-        double land = river == null ? ground : duned(x, z, river, carveValley(x, z, river, ground));
+        double land = river == null ? ground : barred(x, z, river, duned(x, z, river, carveValley(x, z, river, ground)));
         land = fanned(x, z, river, land);
         double[] oxbow = oxbowAt(x, z, river);
         if (oxbow != null) {
@@ -1073,6 +1090,52 @@ public final class TerrainLogic {
         }
         RiverRegion.Hit river = sampleRiver(x, z);
         return river != null && isMouthSand(x, z, river);
+    }
+
+    /**
+     * How strongly a sediment bar claims a position, from 0 to 1: the bar the river lays there, in the stretches the
+     * noise leaves it. Bars come and go along a river instead of lining it as an even band.
+     */
+    private double barShare(double x, double z, RiverRegion.Hit river) {
+        WorldgenSettings.Rivers rivers = settings.rivers;
+        if (!rivers.bars || river.bar() <= 0.0) {
+            return 0.0;
+        }
+        return river.bar() * smooth(0.5 + 1.5 * (barNoise.sample(x, z) + rivers.barCoverage));
+    }
+
+    /**
+     * Land laid flat by a sediment bar: a beach just above the water, between the channel and the rising bank. It only
+     * lowers land, by at most barRelief, and lets land higher than that above the beach be, so valley sides and high
+     * banks stay as they are.
+     */
+    private double barred(double x, double z, RiverRegion.Hit river, double land) {
+        double share = barShare(x, z, river);
+        double beach = river.level() + settings.rivers.barHeight;
+        double above = land - beach;
+        double relief = settings.rivers.barRelief;
+        if (share <= 0.0 || above <= 0.0 || above >= 2.0 * relief) {
+            return land;
+        }
+        return land - Math.min(above, relief) * share * (1.0 - smooth((above - relief) / relief));
+    }
+
+    /**
+     * The sediment bar on a block column: 0 for none, 1 for sand, 2 for gravel. Only where the bar is the ground, on its
+     * flat just above the water and under the shallows, not up the bank behind it.
+     */
+    public int riverBar(int x, int z) {
+        return columns.get().column(this, x, z).bar();
+    }
+
+    private int sampleRiverBar(double x, double z) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        if (river == null || barShare(x, z, river) < 0.5
+                || sampleSurfaceHeight(x, z) > river.level() + settings.rivers.barHeight + 1.0) {
+            return 0;
+        }
+        // Gravel gives way to sand in patches, not along a line across the river
+        return river.coarse() > 0.5 + GRAIN_PATCHES * grainNoise.sample(x, z) ? 2 : 1;
     }
 
     /** Land with low dunes where it lies on the sand of a river mouth, rising from the water's edge. */
@@ -1277,10 +1340,45 @@ public final class TerrainLogic {
     }
 
     /**
-     * Lake influence at a position, as {share of lake among the four nearest routing cells, blended smoothly, and
-     * the lake's water level}, or null away from lakes.
+     * Lake influence at a position, as {share of lake, blended smoothly, the lake's water level, and the share of it
+     * that is an inland sink}, or null away from lakes. Lakes take their shape from the ground ({@link LakeLayer});
+     * inland sinks, which dig their own basin, from their routing cells.
      */
     private double[] sampleLake(double x, double z) {
+        double[] lake = naturalLake(x, z);
+        double[] sink = sinkLake(x, z);
+        return sink == null || lake != null && lake[0] >= sink[0] ? lake : sink;
+    }
+
+    private double[] naturalLake(double x, double z) {
+        int size = settings.rivers.flowCellSize;
+        int cells = settings.general.regionSize / size;
+        int cellX = (int) Math.floor(x / size);
+        int cellZ = (int) Math.floor(z / size);
+        LakeLayer.LakeRegion region = lakeRegionAt(Math.floorDiv(cellX, cells), Math.floorDiv(cellZ, cells));
+        double best = 0.0;
+        double level = Double.NaN;
+        for (LakeLayer.Shape shape : region.at(Math.floorMod(cellX, cells), Math.floorMod(cellZ, cells))) {
+            double share = shape.share(x, z);
+            if (share > best) {
+                best = share;
+                level = shape.level;
+            }
+        }
+        return best > 0.0 ? new double[]{best, level, 0.0} : null;
+    }
+
+    private LakeLayer.LakeRegion lakeRegionAt(int regionX, int regionZ) {
+        LakeLayer.LakeRegion region = lastLakes.get();
+        if (region == null || region.regionX() != regionX || region.regionZ() != regionZ) {
+            region = lakeRegions.get(regionX, regionZ);
+            lastLakes.set(region);
+        }
+        return region;
+    }
+
+    /** Inland sink influence at a position, from the routing cells around it, in the form of {@link #sampleLake}. */
+    private double[] sinkLake(double x, double z) {
         int size = settings.rivers.flowCellSize;
         double u = x / size - 0.5;
         double v = z / size - 0.5;
@@ -1297,11 +1395,11 @@ public final class TerrainLogic {
                 FlowRegion flow = flowRegionAt(Math.floorDiv(cellX + dx, cells), Math.floorDiv(cellZ + dz, cells));
                 int lx = Math.floorMod(cellX + dx, cells);
                 int lz = Math.floorMod(cellZ + dz, cells);
-                if (flow.isLake(lx, lz)) {
+                if (flow.isSink(lx, lz)) {
                     double weight = (dx == 0 ? 1.0 - tx : tx) * (dz == 0 ? 1.0 - tz : tz);
                     share += weight;
                     levelSum += weight * flow.lakeLevel(lx, lz);
-                    sink += flow.isSink(lx, lz) ? weight : 0.0;
+                    sink += weight;
                 }
             }
         }
@@ -1700,6 +1798,7 @@ public final class TerrainLogic {
         final double shaped;
         private double coastDistance = Double.NaN;
         private int beach = -1;
+        private int bar = -1;
         private double grade = Double.NaN;
         private int snow = -1;
         private int rock = -1;
@@ -1819,6 +1918,13 @@ public final class TerrainLogic {
                 beach = owner.sampleBeach(x, z) ? 1 : 0;
             }
             return beach == 1;
+        }
+
+        int bar() {
+            if (bar < 0) {
+                bar = owner.sampleRiverBar(x, z);
+            }
+            return bar;
         }
     }
 }

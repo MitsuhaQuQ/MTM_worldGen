@@ -32,7 +32,7 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 - **Plateaus and great plains.** Plateaus are zones of their own with table tops at a common height and steep or gentle edges. Wide great plains join up into areas over ten thousand blocks across.
 - **Rock detail.** Cliff bands with exposed rock strata on steep faces, overhangs on high cliffs, sea stacks off rocky coasts, and sinkholes in dry uplands that open into caves.
 - **Water.** Rivers start only in hills and mountains, grow from streams through tributaries to major trunks, and widen on gentle ground. They run through valleys and floodplains, feed lakes that fill real depressions, and settle to sea level before reaching the coast, some through deltas. Steep rivers fall through level pools and waterfalls.
-- **River landforms.** Creeks run down the eroded gullies in small valleys of their own. Streams leaving steep ground spread alluvial fans, larger rivers in the hills leave terraces on their valley sides, and rivers winding over plains leave oxbow lakes.
+- **River landforms.** Creeks run down the eroded gullies in small valleys of their own. Streams leaving steep ground spread alluvial fans, larger rivers in the hills leave terraces on their valley sides, and rivers winding over plains leave oxbow lakes. A sediment budget down each river decides where it drops its load: gravel bars below steep reaches, and sand beaches along the inside of bends on slow lower reaches.
 - **Deserts.** Hills in the desert flatten into low ground covered by fields of dune ridges, which run across one wind direction with a gentle windward side and a steeper lee. Here and there a small pond lies in a hollow between the dunes, ringed by grass, a few trees and sugar cane.
 - **Climate.** Tropical, temperate, cold and polar zones, with snow lines by zone and biomes assigned from terrain, climate and humidity. Vegetation follows altitude bands from lowland forest to alpine meadow and snow, and the deep dark spreads deep underground.
 - **Coasts and islands.** Sand, gravel, rock and sea cliff coasts follow each other along the shore, and sand, rock and mushroom islands dot the open sea.
@@ -86,7 +86,7 @@ Height is built up in layers, each only depending on the ones before it:
 
 Rivers are routed on a sparse grid with 256 block cells, in a window reaching 32768 blocks around each region:
 
-- **Routing.** A priority flood runs inland from the sea, always continuing from the lowest water level reached so far. Each cell drains to the cell that reached it, so depressions fill up to their spill point and every cell finds a way out. Filled cells become lakes.
+- **Routing.** A priority flood runs inland from the sea, always continuing from the lowest water level reached so far. Each cell drains to the cell that reached it, so depressions fill up to their spill point and every cell finds a way out. Filled cells become lakes, and a finer flood of the ground around each lake sets its shore and the level it actually spills at, so lakes follow the terrain rather than the outline of their cells.
 - **Size.** Catchment is counted along the routes, and tributaries are counted along each trunk to find major trunks. Water that never touched hills or mountains forms no river.
 - **Courses.** Each cell gets a jittered node, and each flow edge a smooth curve with meanders seeded by that edge alone, so any region that builds an edge gets the same curve. Big rivers average their nodes over a longer stretch, because they are wider than the node spacing.
 - **Shaping the land.** Valley walls bound the land from above and below, and low land nearby is flattened into a floodplain just above the water. Water levels are lowered onto the eroded ground where it lies lower, except in lakes and in the pools above waterfalls. Fans, terraces and oxbow lakes are found where rivers are built, from the slope above and below each node, and laid on the shaped land.
@@ -98,13 +98,13 @@ Terrain is a height map rather than vanilla's 3D noise, so density is simple to 
 
 ## Configuration
 
-Settings live in `config/mtm_worldgen.json`, created with default values on first use. Missing fields use their defaults, and invalid values are reported when a world is created.
+Settings live in `config/mtm_worldgen.json`, created with default values on first use, with a comment explaining each group and setting. Missing fields use their defaults, and invalid values are reported when a world is created.
 
 The file only applies to new worlds. Each world stores its settings when created, so later edits cannot cause seams in it.
 
 | Group | Controls |
 |---|---|
-| `general` | Maximum surface height, sea level, logic region and grid sizes, cave and village limits |
+| `general` | Maximum surface height, sea level, logic region and grid sizes, how far the logic looks (`logicRange`), cave and village limits |
 | `slopes` | Grade limits by landform |
 | `continents` | Ocean share, continent size and coastline shape |
 | `plains`, `hills`, `mountains`, `plateaus` | Tier shares, heights, ridge shape and mountain styles |
