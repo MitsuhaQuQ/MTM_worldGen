@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Water
+
+- Creeks cut small V-shaped valleys into the slopes instead of lying on them (`erosion.creekIncision`, `erosion.creekValleyGrade`)
+- Alluvial fans: where a stream leaves steep ground for gentle ground it spreads a low fan of sediment, with the stream running in a trench across it (`rivers.fans`)
+
 ### Tools and settings
 
 - Releases carry Amidst for MTM worlds: `AMIDST-MTM-<version>-windows.zip` runs on Windows without Java or Minecraft, and `amidst-mtm-<version>.jar` runs anywhere with Java 25. It draws the biome map, world spawn and villages of a seed or a save

@@ -777,6 +777,24 @@ public final class WorldgenSettings {
         public double fallMinDrop = 3.0;
         public double fallHeight = 10.0;
         /**
+         * Alluvial fans: where a stream or tributary leaves a stretch steeper than fanSteepGrade for one gentler than
+         * fanGentleGrade, with this chance, it spreads a low cone of what it carried downstream from the break in slope.
+         * Radius and height at the apex vary by fanVariation either way; tributaries build them fanTributaryScale times
+         * larger. The cone opens fanSpread degrees to each side of the river.
+         */
+        public boolean fans = true;
+        public double fanSteepGrade = 0.03;
+        public double fanGentleGrade = 0.015;
+        public double fanChance = 1.0;
+        public double fanRadius = 220.0;
+        public double fanHeight = 10.0;
+        public double fanVariation = 0.3;
+        public double fanTributaryScale = 1.5;
+        public double fanSpread = 70.0;
+        public double fanMinAboveSea = 4.0;
+        /** Blocks from the channel's edge over which a fan rises to its full height, the trench its stream runs in. */
+        public double fanTrench = 16.0;
+        /**
          * Share of its first edge over which a river grows from nothing to its channel: width, depth, valley and the
          * texture it smooths out all start at zero at the source.
          */
@@ -892,6 +910,12 @@ public final class WorldgenSettings {
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
+        require(rivers.fanSteepGrade > rivers.fanGentleGrade && rivers.fanGentleGrade >= 0.0 && rivers.fanRadius > 0.0
+                        && rivers.fanHeight >= 0.0 && rivers.fanVariation >= 0.0 && rivers.fanVariation < 1.0 && rivers.fanTributaryScale > 0.0
+                        && rivers.fanSpread > 0.0 && rivers.fanSpread < 180.0 && rivers.fanTrench > 0.0,
+                "rivers fans need fanSteepGrade > fanGentleGrade >= 0, fanRadius > 0, fanHeight >= 0, 0 <= fanVariation < 1, fanTributaryScale > 0, 0 < fanSpread < 180 and fanTrench > 0");
+        require(rivers.fanRadius * rivers.fanTributaryScale * (1.0 + rivers.fanVariation) < RiverLayer.margin(rivers) * rivers.flowCellSize,
+                "alluvial fans must stay within the cells around a region that its rivers are built from: lower rivers.fanRadius");
         require(biomes.unrealisticBiomes != null && biomes.mountainShare >= 0.0 && biomes.mountainShare < 1.0,
                 "biomes.unrealisticBiomes must be a list, and biomes.mountainShare must be at least 0 and below 1");
         require(erosion.cellSize > 0 && general.regionSize % erosion.cellSize == 0 && erosion.margin % erosion.cellSize == 0

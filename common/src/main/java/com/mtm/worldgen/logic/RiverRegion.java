@@ -30,6 +30,8 @@ public final class RiverRegion {
      * Strength grows from 0 to 1 over the first edge of a river, which starts as nothing instead of a full channel.
      */
     static final int STRIDE = 12;
+    /** Values per alluvial fan: apex x, apex z, direction x, direction z, radius, height. */
+    static final int FAN_STRIDE = 6;
     /** Flag on a segment's class: the river leaves sand along its banks here. */
     static final byte SANDY = 0x40;
     /** Flag on a segment's class: a pool above a waterfall, whose level stays as it is when rivers are fitted. */
@@ -41,6 +43,12 @@ public final class RiverRegion {
     /** Strength a river counts with at its very source, where dividing by zero would otherwise loom. */
     private static final double MIN_STRENGTH = 1e-6;
     private static final long NAN_BITS = Double.doubleToRawLongBits(Double.NaN);
+    /** Share of a fan's radius around its apex that counts as downstream whatever the direction. */
+    private static final double APEX_ROUND = 0.1;
+    /** Share of a fan's radius its rim wanders in by, and how the apex position sets where its lobes lie. */
+    private static final double LOBES = 0.3;
+    private static final double PHASE_X = 0.0137;
+    private static final double PHASE_Z = 0.0291;
 
     private static final FlowRegion.RiverClass[] CLASSES = FlowRegion.RiverClass.values();
 
@@ -55,6 +63,8 @@ public final class RiverRegion {
     private final double[] segments;
     private final byte[] classes;
     private final int[][] index;
+    /** Alluvial fans: apex x and z, downstream direction x and z, radius and height at the apex. */
+    private final double[] fans;
     /** Ground water levels are lowered onto, or null when they stay as routed. */
     private final DoubleBinaryOperator ground;
     /** Lowered levels per segment end, as raw long bits, NaN until first needed. */
@@ -70,14 +80,16 @@ public final class RiverRegion {
      * @param segments   segment values, {@link #STRIDE} per segment
      * @param classes    river class of each segment
      * @param index      segment numbers per bucket
+     * @param fans       alluvial fans that reach into the region, {@link #FAN_STRIDE} values each
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                double[] segments, byte[] classes, int[][] index) {
-        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, null);
+                double[] segments, byte[] classes, int[][] index, double[] fans) {
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, null);
     }
 
     private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                        double[] segments, byte[] classes, int[][] index, DoubleBinaryOperator ground) {
+                        double[] segments, byte[] classes, int[][] index, double[] fans, DoubleBinaryOperator ground) {
+        this.fans = fans;
         this.ground = ground;
         this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
         if (lowered != null) {
@@ -221,8 +233,45 @@ public final class RiverRegion {
      * which rise above the ground by design. A segment never rises downstream from its start.
      */
     RiverRegion lowered(DoubleBinaryOperator ground) {
-        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, ground);
+        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, ground);
     }
+
+    /**
+     * Height the alluvial fans in reach add to the land at a position: most at a fan's apex, where its river leaves the
+     * steep ground, thinning out to nothing at its rim, within a sector opening downstream. Where fans overlap, the
+     * thickest counts.
+     */
+    double fanDeposit(double x, double z, double spread) {
+        double cosine = Math.cos(Math.toRadians(spread));
+        double deposit = 0.0;
+        for (int f = 0; f < fans.length; f += FAN_STRIDE) {
+            double radius = fans[f + 4];
+            double dx = x - fans[f];
+            double dz = z - fans[f + 1];
+            if (Math.abs(dx) >= radius || Math.abs(dz) >= radius) {
+                continue;
+            }
+            double distance = Math.sqrt(dx * dx + dz * dz);
+            if (distance >= radius) {
+                continue;
+            }
+            // Close to the apex every direction counts as downstream, or the sector would come to a sharp point there
+            double round = APEX_ROUND * radius;
+            double along = (dx * fans[f + 2] + dz * fans[f + 3] + round) / (distance + round);
+            double sector = smooth((along - cosine) / (1.0 - cosine));
+            // The rim wanders in and out with the direction, in lobes, rather than running round as a circle
+            double angle = Math.atan2(dx * fans[f + 3] - dz * fans[f + 2], dx * fans[f + 2] + dz * fans[f + 3]);
+            double phase = fans[f] * PHASE_X + fans[f + 1] * PHASE_Z;
+            double reach = radius * (1.0 - LOBES * (0.5 + 0.35 * Math.sin(3.0 * angle + phase) + 0.15 * Math.sin(7.0 * angle + 2.0 * phase)));
+            if (distance >= reach) {
+                continue;
+            }
+            double left = 1.0 - distance / reach;
+            deposit = Math.max(deposit, fans[f + 5] * left * left * sector);
+        }
+        return deposit;
+    }
+
 
     /**
      * Water level at one end of a segment, lowered onto the ground the first time it is needed: most segments of a
@@ -250,6 +299,6 @@ public final class RiverRegion {
     /** Whether this region holds exactly the same segments as another. */
     public boolean contentEquals(RiverRegion other) {
         return originX == other.originX && originZ == other.originZ && Arrays.equals(segments, other.segments)
-                && Arrays.equals(classes, other.classes) && Arrays.deepEquals(index, other.index);
+                && Arrays.equals(classes, other.classes) && Arrays.deepEquals(index, other.index) && Arrays.equals(fans, other.fans);
     }
 }

@@ -258,6 +258,11 @@ public final class TerrainLogic {
 
     /** Nearest river within rivers.queryReach of a position, or null. */
     public RiverRegion.Hit sampleRiver(double x, double z) {
+        return riverMemo.get().nearest(riversAt(x, z), x, z);
+    }
+
+    /** Rivers of the region a position lies in, as {@link #sampleRiver} queries them. */
+    private RiverRegion riversAt(double x, double z) {
         int size = settings.general.regionSize;
         int regionX = (int) Math.floorDiv((long) Math.floor(x), size);
         int regionZ = (int) Math.floorDiv((long) Math.floor(z), size);
@@ -266,7 +271,7 @@ public final class TerrainLogic {
             rivers = settings.erosion.enabled ? fittedRiverRegions.get(regionX, regionZ) : riverRegion(regionX, regionZ);
             lastRivers.set(rivers);
         }
-        return riverMemo.get().nearest(rivers, x, z);
+        return rivers;
     }
 
     /**
@@ -781,6 +786,7 @@ public final class TerrainLogic {
         // beside it, worst at its source
         double ground = cliff + (river == null || settings.erosion.enabled ? textured : smooth + (textured - smooth) * river.texture());
         double land = river == null ? ground : duned(x, z, river, carveValley(x, z, river, ground));
+        land = fanned(x, z, river, land);
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -796,6 +802,24 @@ public final class TerrainLogic {
         double rim = channel ? 0.0 : smooth(lake[0] / LAKE_EDGE) * (1.0 - inside);
         double bank = lake[1] + settings.rivers.bankHeight;
         return sinkBasin(x, z, lake, shaped < bank ? shaped + (bank - shaped) * rim : shaped);
+    }
+
+    /**
+     * Land with alluvial fans on it. They go on after the valleys are shaped, which would otherwise flatten them into
+     * the floodplain or cut them back to the valley walls, and stay off the channel: the stream runs in a trench through
+     * its own fan, and the sea floor stays as it is.
+     */
+    private double fanned(double x, double z, RiverRegion.Hit river, double land) {
+        WorldgenSettings.Rivers config = settings.rivers;
+        if (!config.fans || land < seaSurface()) {
+            return land;
+        }
+        double deposit = riversAt(x, z).fanDeposit(x, z, config.fanSpread);
+        if (deposit <= 0.0) {
+            return land;
+        }
+        double trench = river == null ? 1.0 : smooth((river.distance() - river.halfWidth(config.minChannelWidth)) / config.fanTrench);
+        return land + deposit * trench;
     }
 
     /** Land dug out for an inland lake, which unlike other lakes has no hollow of its own to fill. */

@@ -19,6 +19,9 @@ final class RiverLayer {
     private static final long MEANDER_SALT = 0x4D45414EL;
     private static final long SIZE_SALT = 0x53495A45L;
     private static final long DELTA_SALT = 0x44454C5441L;
+    private static final long FAN_SALT = 0x46414EL;
+    /** Routing cells up and down a river over which the slopes on either side of an alluvial fan are measured. */
+    private static final int FAN_STEPS = 2;
 
     interface FlowSource {
         FlowRegion flowRegion(int regionX, int regionZ);
@@ -133,6 +136,9 @@ final class RiverLayer {
 
         double startLevel = riverLevel(around, regionX, regionZ, cellX, cellZ);
         double endLevel = riverLevel(around, regionX, regionZ, nextX, nextZ);
+        if (config.fans) {
+            addFan(around, regionX, regionZ, cellX, cellZ, flow.riverClass(lx, lz), a, b, startLevel, curves);
+        }
 
         long hash = Hashing.derive(Hashing.hash(meanderSeed, cellX, cellZ), Hashing.hash(meanderSeed, nextX, nextZ));
         double phase1 = 2.0 * Math.PI * Hashing.unit(hash);
@@ -210,6 +216,42 @@ final class RiverLayer {
         if (endsHere) {
             addEndLake(b, previousLevel, startSize, startTangent, riverClass, curves);
         }
+    }
+
+    /**
+     * An alluvial fan where a small river leaves steep ground for gentle ground: the water slows down and drops what it
+     * carried, in a low cone that spreads downstream from the break in slope. Only streams and tributaries build them;
+     * larger rivers carry their load on.
+     */
+    private void addFan(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, FlowRegion.RiverClass riverClass,
+                        double[] apex, double[] next, double level, Curves curves) {
+        if (riverClass != FlowRegion.RiverClass.STREAM && riverClass != FlowRegion.RiverClass.TRIBUTARY
+                || level < settings.general.seaLevel + config.fanMinAboveSea || isLake(around, regionX, regionZ, new int[]{cellX, cellZ})) {
+            return;
+        }
+        int[] up = {cellX, cellZ};
+        int[] down = {cellX, cellZ};
+        for (int i = 0; i < FAN_STEPS; i++) {
+            int[] above = step(around, regionX, regionZ, up[0], up[1], -1);
+            int[] below = step(around, regionX, regionZ, down[0], down[1], 1);
+            // Upstream has to be river too: a source on a hillside is steep above only because the slope is
+            if (above == null || below == null || isDry(around, regionX, regionZ, above[0], above[1]) || isLake(around, regionX, regionZ, below)) {
+                return;
+            }
+            up = above;
+            down = below;
+        }
+        double upSlope = (riverLevel(around, regionX, regionZ, up[0], up[1]) - level) / (Math.hypot(up[0] - cellX, up[1] - cellZ) * cellSize);
+        double downSlope = (level - riverLevel(around, regionX, regionZ, down[0], down[1])) / (Math.hypot(down[0] - cellX, down[1] - cellZ) * cellSize);
+        long hash = Hashing.hash(Hashing.derive(sizeSeed, FAN_SALT), cellX, cellZ);
+        if (upSlope < config.fanSteepGrade || downSlope > config.fanGentleGrade || Hashing.unit(hash) >= config.fanChance) {
+            return;
+        }
+        double scale = riverClass == FlowRegion.RiverClass.TRIBUTARY ? config.fanTributaryScale : 1.0;
+        double radius = scale * config.fanRadius * (1.0 - config.fanVariation + 2.0 * config.fanVariation * Hashing.unit(Hashing.mix(hash)));
+        double height = scale * config.fanHeight * (1.0 - config.fanVariation + 2.0 * config.fanVariation * Hashing.unit(Hashing.derive(hash, 2)));
+        double[] direction = unit(next[0] - apex[0], next[1] - apex[1]);
+        curves.addFan(apex[0], apex[1], direction[0], direction[1], radius, height);
     }
 
     /**
@@ -648,6 +690,22 @@ final class RiverLayer {
         private double[] values = new double[STRIDE * 1024];
         private byte[] classes = new byte[1024];
         private int count;
+        private double[] fans = new double[0];
+        private int fanCount;
+
+        void addFan(double x, double z, double directionX, double directionZ, double radius, double height) {
+            int f = fanCount * RiverRegion.FAN_STRIDE;
+            if (f == fans.length) {
+                fans = Arrays.copyOf(fans, Math.max(RiverRegion.FAN_STRIDE * 8, fans.length * 2));
+            }
+            fans[f] = x;
+            fans[f + 1] = z;
+            fans[f + 2] = directionX;
+            fans[f + 3] = directionZ;
+            fans[f + 4] = radius;
+            fans[f + 5] = height;
+            fanCount++;
+        }
 
         void add(double x0, double z0, double x1, double z1, double w0, double w1, double d0, double d1, double l0, double l1, byte riverClass) {
             add(x0, z0, x1, z1, w0, w1, d0, d1, l0, l1, 1.0, 1.0, riverClass);
@@ -676,6 +734,10 @@ final class RiverLayer {
         }
 
         void addAll(Curves other) {
+            for (int i = 0; i < other.fanCount; i++) {
+                int f = i * RiverRegion.FAN_STRIDE;
+                addFan(other.fans[f], other.fans[f + 1], other.fans[f + 2], other.fans[f + 3], other.fans[f + 4], other.fans[f + 5]);
+            }
             for (int i = 0; i < other.count; i++) {
                 int s = i * STRIDE;
                 add(other.values[s], other.values[s + 1], other.values[s + 2], other.values[s + 3], other.values[s + 4], other.values[s + 5],
@@ -712,7 +774,7 @@ final class RiverLayer {
             return new RiverRegion(originX, originZ, bucketSize, buckets, config,
                     eroded ? config.erodedTextureFadeBase : config.textureFadeBase, eroded ? config.erodedTextureFadePerWidth : config.textureFadePerWidth,
                     Arrays.copyOf(values, count * STRIDE),
-                    Arrays.copyOf(classes, count), index);
+                    Arrays.copyOf(classes, count), index, Arrays.copyOf(fans, fanCount * RiverRegion.FAN_STRIDE));
         }
 
         private int bucket(double offset, int bucketSize) {
