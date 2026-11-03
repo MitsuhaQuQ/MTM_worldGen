@@ -48,6 +48,10 @@ public final class TerrainLogic {
     private static final double CREEK_SHARE = 0.3;
     private static final double CREEK_BANK = 2.0;
     private static final double CREEK_GROWTH = 1.0;
+    /** Spread of the noise over which a stretch of river terraces fades in and out. */
+    private static final double TERRACE_EDGE = 0.3;
+    /** Share of upland at which river terraces reach their full height. */
+    private static final double TERRACE_UPLAND = 0.5;
 
     private static final Map<WorldKey, TerrainLogic> WORLDS = new ConcurrentHashMap<>();
 
@@ -71,6 +75,8 @@ public final class TerrainLogic {
     private final Fbm snowLineNoise;
     private final Fbm rockNoise;
     private final Fbm valleyWallNoise;
+    private final Fbm terraceNoise;
+    private final Fbm terraceHeightNoise;
     private final Fbm rockPatchNoise;
     private final Fbm strataNoise;
     private final long strataSeed;
@@ -109,6 +115,8 @@ public final class TerrainLogic {
         this.stacks = new SeaStackLayer(seed, settings, this);
         this.rockNoise = new Fbm(Hashing.derive(seed, ROCK_SALT), 3, settings.surface.rockNoiseWavelength);
         this.valleyWallNoise = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT), 3, settings.rivers.valleyWallWavelength);
+        this.terraceNoise = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 2), 2, settings.rivers.terraceWavelength);
+        this.terraceHeightNoise = new Fbm(Hashing.derive(seed, VALLEY_WALL_SALT + 3), 2, settings.rivers.terraceWavelength);
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
         this.strataNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT + 1), 2, settings.surface.strataWavelength);
         this.strataSeed = Hashing.derive(seed, ROCK_PATCH_SALT + 2);
@@ -787,6 +795,10 @@ public final class TerrainLogic {
         double ground = cliff + (river == null || settings.erosion.enabled ? textured : smooth + (textured - smooth) * river.texture());
         double land = river == null ? ground : duned(x, z, river, carveValley(x, z, river, ground));
         land = fanned(x, z, river, land);
+        double[] oxbow = oxbowAt(x, z, river);
+        if (oxbow != null) {
+            land = Math.min(land, oxbow[0] - settings.rivers.oxbowDepth * oxbow[1]);
+        }
         double[] lake = sampleLake(x, z);
         if (lake == null) {
             return land;
@@ -820,6 +832,18 @@ public final class TerrainLogic {
         }
         double trench = river == null ? 1.0 : smooth((river.distance() - river.halfWidth(config.minChannelWidth)) / config.fanTrench);
         return land + deposit * trench;
+    }
+
+    /**
+     * The oxbow lake at a position, as {@link RiverRegion#oxbow} gives it, or null. Oxbows keep clear of the channel of
+     * any river where it bends closer than they were laid out for: a crescent running into the river would drain it.
+     */
+    private double[] oxbowAt(double x, double z, RiverRegion.Hit river) {
+        WorldgenSettings.Rivers config = settings.rivers;
+        if (!config.oxbows || river != null && river.distance() < river.halfWidth(config.minChannelWidth) + 0.5 * config.oxbowGap) {
+            return null;
+        }
+        return riversAt(x, z).oxbow(x, z);
     }
 
     /** Land dug out for an inland lake, which unlike other lakes has no hollow of its own to fill. */
@@ -939,6 +963,7 @@ public final class TerrainLogic {
             walled = river.low();
         } else {
             walled = ground > river.high() ? valleyWall(x, z, river, ground) : Math.max(ground, river.low());
+            walled = terraced(x, z, river, walled);
         }
         // Walls of a much higher or lower river nearby may disagree, but a river's banks always meet its own water
         double bank = river.level() + settings.rivers.bankHeight;
@@ -961,6 +986,38 @@ public final class TerrainLogic {
         }
         double soft = rivers.valleyWallSoftness;
         return Math.max(wall + soft * (1.0 - Math.exp((wall - ground) / soft)), river.low());
+    }
+
+    /**
+     * Land on the sides of a valley stepped into river terraces: flat benches at fixed heights above the water, each
+     * the floor of an older valley the river has since cut below, with steep risers between them. A bench runs along
+     * the river at one height above it, so it follows the valley. Terraces come in stretches, on one bank or both, in
+     * hills and mountains beside the larger rivers, and only ever take land away.
+     */
+    private double terraced(double x, double z, RiverRegion.Hit river, double land) {
+        WorldgenSettings.Rivers config = settings.rivers;
+        if (!config.terraces || river.width() < config.terraceMinWidth || river.strength() < 1.0) {
+            return land;
+        }
+        double step = config.terraceStep;
+        // The heights of the benches wander a little along the valley, so neighboring valleys do not share them
+        double rise = land - river.level() - config.bankHeight + config.terraceHeightWander * step * terraceHeightNoise.sample(x, z);
+        double top = step * config.terraceCount;
+        if (rise <= 0.0 || rise >= top + step || river.run() >= config.terraceReach) {
+            return land;
+        }
+        double share = smooth((terraceNoise.sample(x, z) - (1.0 - 2.0 * config.terraceCoverage)) / TERRACE_EDGE)
+                * (1.0 - smooth(river.run() / config.terraceReach)) * (1.0 - smooth((rise - top) / step));
+        if (share <= 0.0) {
+            return land;
+        }
+        double base = interpolate(FIELD_HEIGHT, x, z);
+        // Valleys reach into the plains, where their sides are low and terraces would only trace contour lines
+        share *= smooth(skeleton.uplandShare(x, z, base - seaSurface()) / TERRACE_UPLAND);
+        double steps = rise / step;
+        double floor = Math.floor(steps);
+        double stepped = (floor + Math.pow(steps - floor, config.terraceSharpness)) * step;
+        return land - (rise - stepped) * share;
     }
 
     /**
@@ -1047,6 +1104,10 @@ public final class TerrainLogic {
         RiverRegion.Hit river = sampleRiver(x, z);
         if (river != null && river.strength() >= SOURCE_WATER && river.distance() < river.halfWidth(settings.rivers.minChannelWidth)) {
             return river.level();
+        }
+        double[] oxbow = oxbowAt(x, z, river);
+        if (oxbow != null) {
+            return oxbow[0];
         }
         // Water two blocks wide does not hold, so a creek only fills once it has grown half way
         Creek creek = creekAt(x, z);

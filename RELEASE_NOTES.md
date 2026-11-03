@@ -6,6 +6,8 @@
 
 - Creeks cut small V-shaped valleys into the slopes instead of lying on them (`erosion.creekIncision`, `erosion.creekValleyGrade`)
 - Alluvial fans: where a stream leaves steep ground for gentle ground it spreads a low fan of sediment, with the stream running in a trench across it (`rivers.fans`)
+- River terraces: the sides of hill and mountain valleys step down to flat benches along the larger rivers (`rivers.terraces`)
+- Oxbow lakes: crescent lakes left by cut-off meanders lie beside rivers winding over plains (`rivers.oxbows`)
 
 ### Tools and settings
 

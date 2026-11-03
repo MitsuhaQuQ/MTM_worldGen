@@ -819,6 +819,39 @@ public final class WorldgenSettings {
         public double floodplainRise = 5.0;
         /** Land this far above the river is no plain and stays as it is, however close. */
         public double floodplainRelief = 40.0;
+        /**
+         * River terraces in hill and mountain valleys of rivers at least terraceMinWidth wide: terraceCount flat benches
+         * terraceStep blocks apart in height above the water, up to terraceReach blocks from the valley floor. Risers are
+         * steeper the higher terraceSharpness is. Stretches of terraces cover about terraceCoverage of such valleys and
+         * last about terraceWavelength blocks; bench heights wander by terraceHeightWander steps.
+         */
+        /**
+         * Oxbow lakes: beside tributaries and trunk rivers falling no more than oxbowMaxGrade, with this chance per routing
+         * edge, a crescent lake on the floodplain oxbowDepth deep. Its radius is oxbowRadiusMin to oxbowRadiusMax river
+         * widths, its width oxbowWidth river widths (at least oxbowMinWidth), its arc reaches oxbowSpan degrees to each side,
+         * and it keeps oxbowGap blocks from the channel. The plain around it may rise at most oxbowMaxRelief above the river.
+         */
+        public boolean oxbows = true;
+        public double oxbowChance = 0.3;
+        public double oxbowMaxGrade = 0.006;
+        public double oxbowRadiusMin = 1.2;
+        public double oxbowRadiusMax = 2.2;
+        public double oxbowWidth = 0.5;
+        public double oxbowMinWidth = 8.0;
+        public double oxbowSpan = 120.0;
+        public double oxbowGap = 12.0;
+        public double oxbowMaxRelief = 15.0;
+        public double oxbowDepth = 3.0;
+        public double oxbowMinAboveSea = 2.0;
+        public boolean terraces = true;
+        public double terraceStep = 12.0;
+        public int terraceCount = 3;
+        public double terraceSharpness = 6.0;
+        public double terraceReach = 300.0;
+        public double terraceMinWidth = 12.0;
+        public double terraceCoverage = 0.5;
+        public double terraceWavelength = 600.0;
+        public double terraceHeightWander = 0.3;
         /** River banks fade out over this many blocks of land height above the sea. */
         public double coastBlend = 6.0;
         /** Ridge texture fades in over this many blocks from a valley floor, plus this many per block of river width. */
@@ -910,6 +943,15 @@ public final class WorldgenSettings {
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
+        require(rivers.oxbowChance >= 0.0 && rivers.oxbowChance <= 1.0 && rivers.oxbowMaxGrade >= 0.0 && rivers.oxbowRadiusMin > 0.0
+                        && rivers.oxbowRadiusMax >= rivers.oxbowRadiusMin && rivers.oxbowWidth > 0.0 && rivers.oxbowMinWidth >= 2.0
+                        && rivers.oxbowSpan > 0.0 && rivers.oxbowSpan < 180.0 && rivers.oxbowGap >= 0.0 && rivers.oxbowMaxRelief >= 0.0
+                        && rivers.oxbowDepth >= 0.0,
+                "oxbow lakes need 0 <= oxbowChance <= 1, oxbowMaxGrade >= 0, 0 < oxbowRadiusMin <= oxbowRadiusMax, oxbowWidth > 0, oxbowMinWidth >= 2, 0 < oxbowSpan < 180, and oxbowGap, oxbowMaxRelief and oxbowDepth >= 0");
+        require(rivers.terraceStep > 0.0 && rivers.terraceCount > 0 && rivers.terraceSharpness >= 1.0 && rivers.terraceReach > 0.0
+                        && rivers.terraceMinWidth >= 0.0 && rivers.terraceCoverage >= 0.0 && rivers.terraceCoverage <= 1.0
+                        && rivers.terraceWavelength > 0.0 && rivers.terraceHeightWander >= 0.0,
+                "river terraces need terraceStep > 0, terraceCount > 0, terraceSharpness >= 1, terraceReach > 0, terraceMinWidth >= 0, 0 <= terraceCoverage <= 1, terraceWavelength > 0 and terraceHeightWander >= 0");
         require(rivers.fanSteepGrade > rivers.fanGentleGrade && rivers.fanGentleGrade >= 0.0 && rivers.fanRadius > 0.0
                         && rivers.fanHeight >= 0.0 && rivers.fanVariation >= 0.0 && rivers.fanVariation < 1.0 && rivers.fanTributaryScale > 0.0
                         && rivers.fanSpread > 0.0 && rivers.fanSpread < 180.0 && rivers.fanTrench > 0.0,

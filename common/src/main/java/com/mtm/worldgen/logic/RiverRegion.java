@@ -32,6 +32,8 @@ public final class RiverRegion {
     static final int STRIDE = 12;
     /** Values per alluvial fan: apex x, apex z, direction x, direction z, radius, height. */
     static final int FAN_STRIDE = 6;
+    /** Values per oxbow lake: center x, center z, direction x, direction z, radius, width, water level. */
+    static final int OXBOW_STRIDE = 7;
     /** Flag on a segment's class: the river leaves sand along its banks here. */
     static final byte SANDY = 0x40;
     /** Flag on a segment's class: a pool above a waterfall, whose level stays as it is when rivers are fitted. */
@@ -49,6 +51,11 @@ public final class RiverRegion {
     private static final double LOBES = 0.3;
     private static final double PHASE_X = 0.0137;
     private static final double PHASE_Z = 0.0291;
+    /** Share of an oxbow's arc at each end over which it narrows to a point. */
+    private static final double OXBOW_TAPER = 0.35;
+    /** How much shorter one arm of an oxbow can be than the other, and how far its course swings in and out. */
+    private static final double OXBOW_SKEW = 0.4;
+    private static final double OXBOW_WOBBLE = 0.12;
 
     private static final FlowRegion.RiverClass[] CLASSES = FlowRegion.RiverClass.values();
 
@@ -65,6 +72,9 @@ public final class RiverRegion {
     private final int[][] index;
     /** Alluvial fans: apex x and z, downstream direction x and z, radius and height at the apex. */
     private final double[] fans;
+    /** Oxbow lakes: center x and z, direction away from the river x and z, radius, width, water level. */
+    private final double[] oxbows;
+    private final double oxbowSpan;
     /** Ground water levels are lowered onto, or null when they stay as routed. */
     private final DoubleBinaryOperator ground;
     /** Lowered levels per segment end, as raw long bits, NaN until first needed. */
@@ -81,15 +91,19 @@ public final class RiverRegion {
      * @param classes    river class of each segment
      * @param index      segment numbers per bucket
      * @param fans       alluvial fans that reach into the region, {@link #FAN_STRIDE} values each
+     * @param oxbows     oxbow lakes that reach into the region, {@link #OXBOW_STRIDE} values each
+     * @param oxbowSpan  degrees an oxbow's arc reaches to each side of its middle
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                double[] segments, byte[] classes, int[][] index, double[] fans) {
-        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, null);
+                double[] segments, byte[] classes, int[][] index, double[] fans, double[] oxbows, double oxbowSpan) {
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, oxbows, oxbowSpan, null);
     }
 
     private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                        double[] segments, byte[] classes, int[][] index, double[] fans, DoubleBinaryOperator ground) {
+                        double[] segments, byte[] classes, int[][] index, double[] fans, double[] oxbows, double oxbowSpan, DoubleBinaryOperator ground) {
         this.fans = fans;
+        this.oxbows = oxbows;
+        this.oxbowSpan = oxbowSpan;
         this.ground = ground;
         this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
         if (lowered != null) {
@@ -233,7 +247,40 @@ public final class RiverRegion {
      * which rise above the ground by design. A segment never rises downstream from its start.
      */
     RiverRegion lowered(DoubleBinaryOperator ground) {
-        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, ground);
+        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, oxbows, oxbowSpan, ground);
+    }
+
+    /**
+     * The oxbow lake at a position, as {its water level, how deep into it the position lies from 0 at its shore to 1 in
+     * the middle of the crescent}, or null outside every one. The crescent narrows toward both ends.
+     */
+    double[] oxbow(double x, double z) {
+        double span = Math.toRadians(oxbowSpan);
+        for (int o = 0; o < oxbows.length; o += OXBOW_STRIDE) {
+            double half = 0.5 * oxbows[o + 5];
+            double radius = oxbows[o + 4];
+            double dx = x - oxbows[o];
+            double dz = z - oxbows[o + 1];
+            double reach = radius + half;
+            if (Math.abs(dx) >= reach || Math.abs(dz) >= reach) {
+                continue;
+            }
+            double signed = Math.atan2(dx * oxbows[o + 3] - dz * oxbows[o + 2], dx * oxbows[o + 2] + dz * oxbows[o + 3]);
+            // An old meander is no circle: its arms differ in length, and its course swings in and out along the way
+            double phase = oxbows[o] * PHASE_X + oxbows[o + 1] * PHASE_Z;
+            double arm = signed < 0.0 ? span * (1.0 - OXBOW_SKEW * (0.5 + 0.5 * Math.sin(3.0 * phase))) : span;
+            double angle = Math.abs(signed);
+            if (angle >= arm) {
+                continue;
+            }
+            double taper = Math.sqrt(Math.min(1.0, (arm - angle) / (OXBOW_TAPER * arm)));
+            double bent = radius * (1.0 + OXBOW_WOBBLE * Math.sin(2.0 * signed + phase) + 0.5 * OXBOW_WOBBLE * Math.sin(5.0 * signed + 2.0 * phase));
+            double across = Math.abs(Math.sqrt(dx * dx + dz * dz) - bent) / (half * taper);
+            if (across < 1.0) {
+                return new double[]{oxbows[o + 6], 1.0 - across * across};
+            }
+        }
+        return null;
     }
 
     /**
@@ -299,6 +346,7 @@ public final class RiverRegion {
     /** Whether this region holds exactly the same segments as another. */
     public boolean contentEquals(RiverRegion other) {
         return originX == other.originX && originZ == other.originZ && Arrays.equals(segments, other.segments)
-                && Arrays.equals(classes, other.classes) && Arrays.deepEquals(index, other.index) && Arrays.equals(fans, other.fans);
+                && Arrays.equals(classes, other.classes) && Arrays.deepEquals(index, other.index) && Arrays.equals(fans, other.fans)
+                && Arrays.equals(oxbows, other.oxbows);
     }
 }

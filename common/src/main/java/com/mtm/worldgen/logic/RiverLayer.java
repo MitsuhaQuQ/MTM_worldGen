@@ -20,6 +20,9 @@ final class RiverLayer {
     private static final long SIZE_SALT = 0x53495A45L;
     private static final long DELTA_SALT = 0x44454C5441L;
     private static final long FAN_SALT = 0x46414EL;
+    private static final long OXBOW_SALT = 0x4F58424FL;
+    /** Largest oxbow radius, as a share of the margin of cells around a region. */
+    private static final double OXBOW_REACH = 0.3;
     /** Routing cells up and down a river over which the slopes on either side of an alluvial fan are measured. */
     private static final int FAN_STEPS = 2;
 
@@ -139,6 +142,10 @@ final class RiverLayer {
         if (config.fans) {
             addFan(around, regionX, regionZ, cellX, cellZ, flow.riverClass(lx, lz), a, b, startLevel, curves);
         }
+        if (config.oxbows) {
+            addOxbow(around, regionX, regionZ, cellX, cellZ, flow.riverClass(lx, lz), a, b, startLevel, endLevel,
+                    0.5 * (startSize[0] + endSize[0]), curves);
+        }
 
         long hash = Hashing.derive(Hashing.hash(meanderSeed, cellX, cellZ), Hashing.hash(meanderSeed, nextX, nextZ));
         double phase1 = 2.0 * Math.PI * Hashing.unit(hash);
@@ -252,6 +259,60 @@ final class RiverLayer {
         double height = scale * config.fanHeight * (1.0 - config.fanVariation + 2.0 * config.fanVariation * Hashing.unit(Hashing.derive(hash, 2)));
         double[] direction = unit(next[0] - apex[0], next[1] - apex[1]);
         curves.addFan(apex[0], apex[1], direction[0], direction[1], radius, height);
+    }
+
+    /**
+     * An oxbow lake beside a river winding over a plain: a meander loop the river has cut off, left as a crescent of still
+     * water on its floodplain. Its outer curve lies away from the river, and its ends taper off toward it. The lake is
+     * only kept where the plain is flat enough around it to hold its water.
+     */
+    private void addOxbow(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ, FlowRegion.RiverClass riverClass,
+                          double[] a, double[] b, double startLevel, double endLevel, double width, Curves curves) {
+        if (riverClass != FlowRegion.RiverClass.TRIBUTARY && riverClass != FlowRegion.RiverClass.TRUNK
+                || startLevel < settings.general.seaLevel + config.oxbowMinAboveSea || isLake(around, regionX, regionZ, new int[]{cellX, cellZ})) {
+            return;
+        }
+        double length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (length <= 0.0 || (startLevel - endLevel) / length > config.oxbowMaxGrade) {
+            return;
+        }
+        long hash = Hashing.hash(Hashing.derive(sizeSeed, OXBOW_SALT), cellX, cellZ);
+        if (Hashing.unit(hash) >= config.oxbowChance) {
+            return;
+        }
+        // Of two edges in a row, only the lower one leaves an oxbow, or two would lie one inside the other
+        int[] below = step(around, regionX, regionZ, cellX, cellZ, 1);
+        if (below != null && Hashing.unit(Hashing.hash(Hashing.derive(sizeSeed, OXBOW_SALT), below[0], below[1])) < config.oxbowChance) {
+            return;
+        }
+        double side = Hashing.unit(Hashing.mix(hash)) < 0.5 ? -1.0 : 1.0;
+        double normalX = -(b[1] - a[1]) / length * side;
+        double normalZ = (b[0] - a[0]) / length * side;
+        double radius = width * (config.oxbowRadiusMin + (config.oxbowRadiusMax - config.oxbowRadiusMin) * Hashing.unit(Hashing.derive(hash, 2)));
+        // It has to stay within the cells around a region that its rivers are built from, or regions would disagree
+        radius = Math.min(radius, OXBOW_REACH * margin(config) * cellSize);
+        double thickness = Math.max(config.oxbowMinWidth, config.oxbowWidth * width);
+        // Far enough out that even the tapered ends, which bend back toward the river, stay clear of its channel
+        double span = Math.toRadians(config.oxbowSpan);
+        double offset = 0.5 * width + config.oxbowGap + 0.5 * thickness - radius * Math.cos(span);
+        double t = 0.3 + 0.4 * Hashing.unit(Hashing.derive(hash, 3));
+        double centerX = a[0] + t * (b[0] - a[0]) + normalX * offset;
+        double centerZ = a[1] + t * (b[1] - a[1]) + normalZ * offset;
+        double level = startLevel + t * (endLevel - startLevel);
+        // The plain all around the crescent has to lie low beside the river, where its floodplain lays the land out flat
+        // around the lake; land below the river is raised to the plain anyway
+        for (int k = -2; k <= 2; k++) {
+            double angle = 0.5 * k * span;
+            double cos = Math.cos(angle);
+            double sin = Math.sin(angle);
+            double x = centerX + radius * (cos * normalX - sin * normalZ);
+            double z = centerZ + radius * (cos * normalZ + sin * normalX);
+            double ground = landform.height(x, z);
+            if (ground > level + config.oxbowMaxRelief) {
+                return;
+            }
+        }
+        curves.addOxbow(centerX, centerZ, normalX, normalZ, radius, thickness, level);
     }
 
     /**
@@ -692,6 +753,23 @@ final class RiverLayer {
         private int count;
         private double[] fans = new double[0];
         private int fanCount;
+        private double[] oxbows = new double[0];
+        private int oxbowCount;
+
+        void addOxbow(double x, double z, double directionX, double directionZ, double radius, double thickness, double level) {
+            int o = oxbowCount * RiverRegion.OXBOW_STRIDE;
+            if (o == oxbows.length) {
+                oxbows = Arrays.copyOf(oxbows, Math.max(RiverRegion.OXBOW_STRIDE * 8, oxbows.length * 2));
+            }
+            oxbows[o] = x;
+            oxbows[o + 1] = z;
+            oxbows[o + 2] = directionX;
+            oxbows[o + 3] = directionZ;
+            oxbows[o + 4] = radius;
+            oxbows[o + 5] = thickness;
+            oxbows[o + 6] = level;
+            oxbowCount++;
+        }
 
         void addFan(double x, double z, double directionX, double directionZ, double radius, double height) {
             int f = fanCount * RiverRegion.FAN_STRIDE;
@@ -734,6 +812,11 @@ final class RiverLayer {
         }
 
         void addAll(Curves other) {
+            for (int i = 0; i < other.oxbowCount; i++) {
+                int o = i * RiverRegion.OXBOW_STRIDE;
+                addOxbow(other.oxbows[o], other.oxbows[o + 1], other.oxbows[o + 2], other.oxbows[o + 3], other.oxbows[o + 4],
+                        other.oxbows[o + 5], other.oxbows[o + 6]);
+            }
             for (int i = 0; i < other.fanCount; i++) {
                 int f = i * RiverRegion.FAN_STRIDE;
                 addFan(other.fans[f], other.fans[f + 1], other.fans[f + 2], other.fans[f + 3], other.fans[f + 4], other.fans[f + 5]);
@@ -774,7 +857,8 @@ final class RiverLayer {
             return new RiverRegion(originX, originZ, bucketSize, buckets, config,
                     eroded ? config.erodedTextureFadeBase : config.textureFadeBase, eroded ? config.erodedTextureFadePerWidth : config.textureFadePerWidth,
                     Arrays.copyOf(values, count * STRIDE),
-                    Arrays.copyOf(classes, count), index, Arrays.copyOf(fans, fanCount * RiverRegion.FAN_STRIDE));
+                    Arrays.copyOf(classes, count), index, Arrays.copyOf(fans, fanCount * RiverRegion.FAN_STRIDE),
+                    Arrays.copyOf(oxbows, oxbowCount * RiverRegion.OXBOW_STRIDE), settings.rivers.oxbowSpan);
         }
 
         private int bucket(double offset, int bucketSize) {
