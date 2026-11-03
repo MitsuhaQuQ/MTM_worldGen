@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Tools and settings
+
+- Releases carry Amidst for MTM worlds: `AMIDST-MTM-<version>-windows.zip` runs on Windows without Java or Minecraft, and `amidst-mtm-<version>.jar` runs anywhere with Java 25. It draws the biome map, world spawn and villages of a seed or a save
+
 ## v0.2.0
 
 Terrain has changed throughout since v0.1.0, so create a new world to see it. Chunks already saved by v0.1.0 count as an older version: terrain generated around them blends toward their edges. If you keep a `config/mtm_worldgen.json` from v0.1.0, delete it to get the new settings written with their defaults.

@@ -12,3 +12,5 @@ rootProject.name = "mtm_worldgen"
 include "common"
 include "fabric"
 include "forge"
+// Amidst map viewer for MTM worlds, released with the mod
+include "amidst"

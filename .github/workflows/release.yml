@@ -1,6 +1,7 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the mod and publishes a GitHub release with the Fabric and Forge jars.
+# Pushing a tag such as v0.1.0 builds the mod and publishes a GitHub release with the Fabric and Forge jars, and Amidst
+# for MTM worlds: a jar that runs on Java 25, and a Windows zip that ships its own Java and the Fabric jar.
 # The tag has to match mod_version in gradle.properties, so a release never ships jars named for another version.
 on:
   push:
@@ -10,11 +11,10 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  check-tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup
       - name: Check the tag against the mod version
         run: |
           version=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
@@ -22,9 +22,36 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match mod_version $version"
             exit 1
           fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+  # jpackage only makes Windows apps on Windows
+  amidst-windows:
+    needs: check-tag
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: ./gradlew :amidst:windowsZip
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amidst-windows
+          path: amidst/build/distributions/*.zip
+
+  release:
+    needs: [check-tag, amidst-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Read the versions
+        run: |
+          echo "VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_ENV"
           echo "MINECRAFT=$(grep '^minecraft_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_ENV"
-      - run: ./gradlew :common:test assemble
+      - run: ./gradlew :common:test :amidst:test assemble
+      - uses: actions/download-artifact@v4
+        with:
+          name: amidst-windows
+          path: amidst/build/distributions
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,6 +60,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "fabric/build/libs/mtm_worldgen-fabric-$VERSION-$MINECRAFT.jar" \
             "forge/build/libs/mtm_worldgen-forge-$VERSION-$MINECRAFT.jar" \
+            "amidst/build/libs/amidst-mtm-$VERSION.jar" \
+            "amidst/build/distributions/AMIDST-MTM-$VERSION-windows.zip" \
             --title "MTM-Worldgen $VERSION" \
             --notes "$notes" \
             --prerelease
