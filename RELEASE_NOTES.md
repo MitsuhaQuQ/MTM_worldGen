@@ -1,9 +1,39 @@
 # Release notes
 
-## Unreleased
+## v0.2.0
+
+Terrain has changed throughout since v0.1.0, so create a new world to see it. Chunks already saved by v0.1.0 count as an older version: terrain generated around them blends toward their edges. If you keep a `config/mtm_worldgen.json` from v0.1.0, delete it to get the new settings written with their defaults.
+
+### Terrain
+
+- Mountains and hills are carved by a water erosion simulation, with branching gullies, ravines and spurs (`erosion` settings; turn it off to get the previous ridge texture back)
+- Rivers are the base level of erosion, so mountain valleys run down to the rivers that drain them
+- Plateaus are their own zones with table tops at a common height, and wide great plains join up for large cities
+- Horizontal scale settings (`scale`) make continents, mountain ranges, plateaus, hills, climate zones and biome patches larger or smaller
+- Badlands no longer form on mountainsides, where their banded terracotta wrapped peaks in rings (`biomes.unrealisticOnMountains`)
+- The deep dark spreads in patches deep underground (`biomes.deepDark`)
+
+### Water
+
+- Steep rivers fall through level pools and short waterfalls instead of long one-block steps (`rivers.waterfalls`)
+- Creeks run down the eroded gullies and into the rivers (`erosion.creeks`)
+- River sources no longer sit raised above the slope around them
+- Rivers through mountain lakes keep the lake's level: lakes no longer drain into stepped bowls, and rivers are no longer blocked by mounds at the shore
+- Rivers leaving mountain lakes are about half as wide as before
+
+### Tools and settings
 
 - Terrain preview: run `java -jar` on the mod jar to browse the terrain of a seed in a window, or `java -jar <mod jar> <seed> [x z blocksPerPixel picture.png]` to write a map picture
+- Debug commands now start with `/mwg`; `/mwg precompute <radius>` works out the regions around you ahead of time
+- Eroded regions are cached under `mtm_worldgen/erosion` in the world folder, so they are not computed again after a restart
 - Config switches `general.caves`, `general.ores` and `general.undergroundFallingBlocks`
+
+### Performance
+
+- New worlds no longer hang at 0% while the spawn and strongholds are placed
+- Regions next to the one you are in are computed in the background, so new terrain appears with less delay
+- The zoomed-out preview, coarse debug maps and `/mwg locate mountain` no longer compute erosion over wide areas
+- The first visit to a new 4096-block region still takes 0.5–1.5 s of computing before its chunks appear
 
 ## v0.1.0
 
