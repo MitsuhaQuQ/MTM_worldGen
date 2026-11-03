@@ -3,6 +3,8 @@ package com.mtm.worldgen.world;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.WorldgenSettings;
+import com.mojang.datafixers.util.Pair;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.QuartPos;
@@ -10,12 +12,14 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -74,6 +78,48 @@ public final class MtmBiomeSource extends BiomeSource {
     @Override
     protected Stream<Holder<Biome>> collectPossibleBiomes() {
         return holders.values().stream();
+    }
+
+    /**
+     * Vanilla's horizontal biome search, on estimated biomes. It finds where strongholds go, thousands of samples each
+     * over tens of thousands of blocks, and exact biomes there would erode every region on the way; the estimate
+     * differs only in detail, such as along rivers and in eroded valleys. The search itself is vanilla's, so the
+     * random choices among matches stay the same.
+     */
+    @Override
+    public Pair<BlockPos, Holder<Biome>> findBiomeHorizontal(int x, int y, int z, int radius, int increment,
+                                                            Predicate<Holder<Biome>> predicate, RandomSource random,
+                                                            boolean findClosest, Climate.Sampler sampler) {
+        var logic = MtmGenerators.terrainLogic(sampler);
+        int centerX = QuartPos.fromBlock(x);
+        int centerZ = QuartPos.fromBlock(z);
+        int reach = QuartPos.fromBlock(radius);
+        Pair<BlockPos, Holder<Biome>> found = null;
+        int matches = 0;
+        for (int ring = findClosest ? 0 : reach; ring <= reach; ring += increment) {
+            for (int dz = -ring; dz <= ring; dz += increment) {
+                boolean edgeZ = Math.abs(dz) == ring;
+                for (int dx = -ring; dx <= ring; dx += increment) {
+                    if (findClosest && Math.abs(dx) != ring && !edgeZ) {
+                        continue;
+                    }
+                    int quartX = centerX + dx;
+                    int quartZ = centerZ + dz;
+                    Holder<Biome> biome = holders.get(logic.estimateBiome(QuartPos.toBlock(quartX), QuartPos.toBlock(quartZ)));
+                    if (predicate.test(biome)) {
+                        if (found == null || random.nextInt(matches + 1) == 0) {
+                            BlockPos position = new BlockPos(QuartPos.toBlock(quartX), y, QuartPos.toBlock(quartZ));
+                            if (findClosest) {
+                                return Pair.of(position, biome);
+                            }
+                            found = Pair.of(position, biome);
+                        }
+                        matches++;
+                    }
+                }
+            }
+        }
+        return found;
     }
 
     @Override

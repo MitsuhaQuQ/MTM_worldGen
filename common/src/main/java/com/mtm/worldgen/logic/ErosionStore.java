@@ -30,7 +30,7 @@ import java.util.zip.InflaterInputStream;
 final class ErosionStore {
     private static final int MAGIC = 0x4D544D45;
     /** Bump when the file layout or the erosion algorithm changes. */
-    private static final int FORMAT = 2;
+    private static final int FORMAT = 3;
 
     private final Path directory;
     private final long key;
@@ -42,7 +42,7 @@ final class ErosionStore {
     }
 
     /** The stored erosion of a region, or null when there is none for this terrain. */
-    float[] read(int regionX, int regionZ, double[] checks, int length) {
+    ErosionLayer.Eroded read(int regionX, int regionZ, double[] checks, int length) {
         Path file = file(regionX, regionZ);
         try (InputStream raw = Files.newInputStream(file);
              DataInputStream in = new DataInputStream(new InflaterInputStream(raw, new Inflater(), 1 << 16))) {
@@ -56,13 +56,10 @@ final class ErosionStore {
                     return null;
                 }
             }
-            byte[] bytes = in.readNBytes(length * Float.BYTES);
-            if (bytes.length != length * Float.BYTES) {
-                return null;
-            }
-            float[] values = new float[length];
-            ByteBuffer.wrap(bytes).asFloatBuffer().get(values);
-            return values;
+            float[] change = readFloats(in, length);
+            float[] creek = change == null ? null : readFloats(in, length);
+            byte[] down = creek == null ? null : in.readNBytes(length);
+            return down == null || down.length != length ? null : new ErosionLayer.Eroded(change, creek, down);
         } catch (NoSuchFileException e) {
             return null;
         } catch (IOException | RuntimeException e) {
@@ -72,7 +69,8 @@ final class ErosionStore {
     }
 
     /** Stores the erosion of a region. Failures are ignored: the region is then computed again next time. */
-    void write(int regionX, int regionZ, double[] checks, float[] values) {
+    void write(int regionX, int regionZ, double[] checks, ErosionLayer.Eroded eroded) {
+        float[] values = eroded.change();
         Path file = file(regionX, regionZ);
         Path temporary = file.resolveSibling(file.getFileName() + "." + Thread.currentThread().getId() + ".tmp");
         try {
@@ -87,9 +85,9 @@ final class ErosionStore {
                 for (double check : checks) {
                     out.writeDouble(check);
                 }
-                ByteBuffer bytes = ByteBuffer.allocate(values.length * Float.BYTES);
-                bytes.asFloatBuffer().put(values);
-                out.write(bytes.array());
+                writeFloats(out, values);
+                writeFloats(out, eroded.creek());
+                out.write(eroded.down());
             }
             try (OutputStream out = Files.newOutputStream(temporary)) {
                 buffer.writeTo(out);
@@ -107,6 +105,22 @@ final class ErosionStore {
                 // Nothing more to do; a stray temporary file is harmless
             }
         }
+    }
+
+    private static float[] readFloats(DataInputStream in, int length) throws IOException {
+        byte[] bytes = in.readNBytes(length * Float.BYTES);
+        if (bytes.length != length * Float.BYTES) {
+            return null;
+        }
+        float[] values = new float[length];
+        ByteBuffer.wrap(bytes).asFloatBuffer().get(values);
+        return values;
+    }
+
+    private static void writeFloats(DataOutputStream out, float[] values) throws IOException {
+        ByteBuffer bytes = ByteBuffer.allocate(values.length * Float.BYTES);
+        bytes.asFloatBuffer().put(values);
+        out.write(bytes.array());
     }
 
     private Path file(int regionX, int regionZ) {

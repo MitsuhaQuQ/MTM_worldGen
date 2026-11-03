@@ -38,6 +38,8 @@ public final class MtmCommands {
     private static final float MIN_MULTIPLIER = 0.1F;
     private static final float MAX_MULTIPLIER = 50.0F;
     private static final int DEBUG_MAP_SIZE_PX = 1024;
+    /** Coarser maps leave out rivers and erosion, which would have to be computed for every region they cover. */
+    private static final int DEBUG_MAP_DETAILED_SCALE = 16;
     private static final int DEFAULT_BLOCKS_PER_PIXEL = 8;
     private static final int MAX_BLOCKS_PER_PIXEL = 64;
     private static final int LOCATE_STEP = 64;
@@ -171,7 +173,7 @@ public final class MtmCommands {
                 DEBUG_MAP_SIZE_PX * blocksPerPixel), false);
         CompletableFuture.runAsync(() -> {
             BufferedImage image = HeightMapRenderer.render(logic, centerX, centerZ,
-                    DEBUG_MAP_SIZE_PX, blocksPerPixel);
+                    DEBUG_MAP_SIZE_PX, blocksPerPixel, blocksPerPixel <= DEBUG_MAP_DETAILED_SCALE);
             try {
                 Files.createDirectories(file.getParent());
                 ImageIO.write(image, "png", file.toFile());

@@ -1,6 +1,8 @@
 package com.mtm.worldgen.logic;
 
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.DoubleBinaryOperator;
 
 /**
  * Refined river courses around one logic region, as straight segments with a spatial index. Holds every segment
@@ -15,11 +17,9 @@ public final class RiverRegion {
      * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1. Sand run is the distance
      * from the water of a river mouth or delta that leaves sand along its banks, infinite if there is none in reach.
      * Strength is that of the river the position is deepest in: below 1 close to its source, where it is still growing.
-     * Wide plain is how strongly a river at least rivers.floodplainMinWidth wide claims the land with its floodplain,
-     * from 0 to 1, rising smoothly with width and falling with distance, so it never jumps between rivers.
      */
     public record Hit(double distance, double width, double depth, double level, double low, double high, double texture, double run, double floodplain, double sandRun,
-                      double strength, double widePlain) {
+                      double strength) {
         public double halfWidth(double minimumWidth) {
             return 0.5 * Math.max(width, minimumWidth);
         }
@@ -32,12 +32,15 @@ public final class RiverRegion {
     static final int STRIDE = 12;
     /** Flag on a segment's class: the river leaves sand along its banks here. */
     static final byte SANDY = 0x40;
+    /** Flag on a segment's class: a pool above a waterfall, whose level stays as it is when rivers are fitted. */
+    static final byte POOL = 0x20;
     /** Below this distance in blocks the closest river no longer gains on the others in the water level blend. */
     private static final double BLEND_RADIUS = 4.0;
     /** Share of the reach over which a river's say in blended values fades out, so nothing jumps where it leaves the query. */
     private static final double REACH_FADE = 0.25;
     /** Strength a river counts with at its very source, where dividing by zero would otherwise loom. */
     private static final double MIN_STRENGTH = 1e-6;
+    private static final long NAN_BITS = Double.doubleToRawLongBits(Double.NaN);
 
     private static final FlowRegion.RiverClass[] CLASSES = FlowRegion.RiverClass.values();
 
@@ -52,6 +55,10 @@ public final class RiverRegion {
     private final double[] segments;
     private final byte[] classes;
     private final int[][] index;
+    /** Ground water levels are lowered onto, or null when they stay as routed. */
+    private final DoubleBinaryOperator ground;
+    /** Lowered levels per segment end, as raw long bits, NaN until first needed. */
+    private final AtomicLongArray lowered;
 
     /**
      * @param originX    block X of the region's corner
@@ -66,6 +73,18 @@ public final class RiverRegion {
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
                 double[] segments, byte[] classes, int[][] index) {
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, null);
+    }
+
+    private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
+                        double[] segments, byte[] classes, int[][] index, DoubleBinaryOperator ground) {
+        this.ground = ground;
+        this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
+        if (lowered != null) {
+            for (int i = 0; i < lowered.length(); i++) {
+                lowered.set(i, NAN_BITS);
+            }
+        }
         this.reach = config.queryReach;
         this.config = config;
         this.fadeBase = fadeBase;
@@ -96,7 +115,6 @@ public final class RiverRegion {
         double high = Double.MAX_VALUE;
         double texture = 1.0;
         double floodplain = 0.0;
-        double widePlain = 0.0;
         double sandRun = Double.POSITIVE_INFINITY;
         for (int segment : index[bucketZ * buckets + bucketX]) {
             int s = segment * STRIDE;
@@ -111,7 +129,8 @@ public final class RiverRegion {
             }
             double distance = Math.sqrt(squared);
             double width = segments[s + 4] + t * (segments[s + 5] - segments[s + 4]);
-            double level = segments[s + 8] + t * (segments[s + 9] - segments[s + 8]);
+            double start = level(segment, 0);
+            double level = start + t * (level(segment, 1) - start);
             // Everything a river does grows with it from its source, so nothing jumps where it begins
             double strength = Math.max(MIN_STRENGTH, segments[s + 10] + t * (segments[s + 11] - segments[s + 10]));
             double half = 0.5 * Math.max(width, strength * config.minChannelWidth);
@@ -120,7 +139,6 @@ public final class RiverRegion {
             double plainWidth = Math.min(config.floodplainBase + config.floodplainPerWidth * width, reach - config.valleyFloorFactor * half);
             double plain = strength * (1.0 - smooth(run / plainWidth));
             floodplain = Math.max(floodplain, plain);
-            widePlain = Math.max(widePlain, plain * smooth((width - config.floodplainMinWidth) / config.floodplainMinWidth));
             nearestRun = Math.min(nearestRun, run);
             if ((classes[segment] & SANDY) != 0) {
                 sandRun = Math.min(sandRun, Math.max(0.0, distance - half));
@@ -147,7 +165,7 @@ public final class RiverRegion {
                 bestLevel = level;
             }
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength, widePlain);
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */
@@ -195,7 +213,38 @@ public final class RiverRegion {
     }
 
     public FlowRegion.RiverClass riverClass(int segment) {
-        return CLASSES[classes[segment] & ~SANDY];
+        return CLASSES[classes[segment] & ~(SANDY | POOL)];
+    }
+
+    /**
+     * The same rivers with water no higher than the ground at each segment end, except in pools above waterfalls,
+     * which rise above the ground by design. A segment never rises downstream from its start.
+     */
+    RiverRegion lowered(DoubleBinaryOperator ground) {
+        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, ground);
+    }
+
+    /**
+     * Water level at one end of a segment, lowered onto the ground the first time it is needed: most segments of a
+     * region are never queried, and the ground under each one can take erosion of a region of its own. The value only
+     * depends on the segment, so threads racing to fill it in store the same thing.
+     */
+    private double level(int segment, int end) {
+        int s = segment * STRIDE;
+        if (ground == null || (classes[segment] & POOL) != 0) {
+            return segments[s + 8 + end];
+        }
+        int slot = 2 * segment + end;
+        long bits = lowered.get(slot);
+        if (bits != NAN_BITS) {
+            return Double.longBitsToDouble(bits);
+        }
+        double level = Math.min(segments[s + 8 + end], ground.applyAsDouble(segments[s + 2 * end], segments[s + 1 + 2 * end]));
+        if (end == 1) {
+            level = Math.min(level, level(segment, 0));
+        }
+        lowered.set(slot, Double.doubleToRawLongBits(level));
+        return level;
     }
 
     /** Whether this region holds exactly the same segments as another. */

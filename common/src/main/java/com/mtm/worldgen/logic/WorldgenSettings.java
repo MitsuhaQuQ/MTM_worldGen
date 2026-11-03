@@ -330,6 +330,17 @@ public final class WorldgenSettings {
         public double roughness = 12.0;
         public double roughnessWavelength = 96.0;
         public double maxDepth = 0.6;
+        /**
+         * Creeks along the gullies erosion carved: a narrow channel with water down the middle of every gully that
+         * drains at least creekArea square blocks, up to creekMaxWidth wide where it drains creekWideArea. They stay off
+         * plains, as erosion does, and end where they reach a river or lake.
+         */
+        public boolean creeks = true;
+        public double creekArea = 15000.0;
+        public double creekWideArea = 300000.0;
+        public double creekMinWidth = 3.0;
+        public double creekMaxWidth = 6.0;
+        public double creekDepth = 1.5;
     }
 
     /**
@@ -752,6 +763,14 @@ public final class WorldgenSettings {
         /** Narrower rivers still cut a channel this wide, or noise cells would lose them. */
         public double minChannelWidth = 6.0;
         /**
+         * Edges falling at least fallGrade over their length, and at least fallMinDrop blocks, drop in waterfalls of
+         * at most fallHeight blocks between level pools.
+         */
+        public boolean waterfalls = true;
+        public double fallGrade = 0.03;
+        public double fallMinDrop = 3.0;
+        public double fallHeight = 10.0;
+        /**
          * Share of its first edge over which a river grows from nothing to its channel: width, depth, valley and the
          * texture it smooths out all start at zero at the source.
          */
@@ -772,12 +791,6 @@ public final class WorldgenSettings {
         /** Floodplains flatten low land beside rivers: this many blocks wide, plus this many per block of river width. */
         public double floodplainBase = 64.0;
         public double floodplainPerWidth = 5.0;
-        /**
-         * With erosion, rivers in the hills narrower than this have no valley or floodplain of their own, only their
-         * channel in the valleys erosion cut; from there to twice as wide they take on their floodplain, which reaches
-         * as far as it does on the plains. Mountains have none at all.
-         */
-        public double floodplainMinWidth = 50.0;
         /** Plains stay within this many blocks above the river. */
         public double floodplainRise = 5.0;
         /** Land this far above the river is no plain and stays as it is, however close. */
@@ -879,6 +892,9 @@ public final class WorldgenSettings {
                         && erosion.blend >= 0.0 && erosion.warp >= 0.0 && erosion.blend + erosion.warp + erosion.cellSize <= erosion.margin
                         && erosion.rounds >= 0 && erosion.warpWavelength > 0.0 && erosion.diffusion >= 0.0 && erosion.diffusion < 0.25,
                 "erosion.cellSize must divide the region size and margin, the blend and warp must fit in the margin, and erosion.diffusion must stay below 0.25");
+        require(erosion.creekArea > 0.0 && erosion.creekWideArea > erosion.creekArea && erosion.creekMinWidth >= 2.0
+                        && erosion.creekMaxWidth >= erosion.creekMinWidth && erosion.creekDepth >= 0.0,
+                "erosion creeks need 0 < creekArea < creekWideArea, creekMinWidth at least 2 (water one block wide does not hold), creekMaxWidth >= creekMinWidth and creekDepth >= 0");
         for (double value : scale.all()) {
             require(value >= 0.25 && value <= 8.0, "every scale must lie between 0.25 and 8");
         }

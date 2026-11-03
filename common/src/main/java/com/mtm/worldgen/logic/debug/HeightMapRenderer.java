@@ -52,7 +52,7 @@ public final class HeightMapRenderer {
             for (int px = 0; px <= sizePx; px++) {
                 int x = originX + px * blocksPerPixel;
                 int z = originZ + py * blocksPerPixel;
-                heights[py * (sizePx + 1) + px] = detailed ? logic.sampleSurfaceHeight(x, z) : logic.sampleLandform(x, z);
+                heights[py * (sizePx + 1) + px] = detailed ? logic.sampleSurfaceHeight(x, z) : logic.sampleOverviewHeight(x, z);
             }
         }
 

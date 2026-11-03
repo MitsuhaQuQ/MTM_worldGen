@@ -283,7 +283,7 @@ public final class TerrainPreview {
                     return;
                 }
                 // Far out, only what the overview shows: anything else would compute drainage the map leaves out
-                double height = detailed ? current.sampleSurfaceHeight(x, z) : current.sampleLandform(x, z);
+                double height = detailed ? current.sampleSurfaceHeight(x, z) : current.sampleOverviewHeight(x, z);
                 double water = detailed ? current.sampleWaterLevel(x, z) : Double.NaN;
                 String biome = detailed ? current.sampleBiome(x, z).replace("minecraft:", "") : "overview, zoom in for rivers and biomes";
                 String text = String.format("x %d  z %d   height %.0f%s   %s   (%d blocks per pixel)", x, z, height,

@@ -21,13 +21,20 @@ class ErosionStoreTest {
     void storedRegionsReadBackOnlyForTheSameTerrain(@TempDir Path directory) throws IOException {
         Random random = new Random(1);
         float[] values = new float[1000];
+        float[] creek = new float[values.length];
+        byte[] down = new byte[values.length];
         for (int i = 0; i < values.length; i++) {
             values[i] = random.nextFloat() * -100.0F;
+            creek[i] = random.nextInt(4) == 0 ? random.nextFloat() * 1e6F : 0.0F;
+            down[i] = (byte) (random.nextInt(9) - 1);
         }
         double[] checks = {1.5, 200.25, 63.0};
         ErosionStore store = new ErosionStore(directory, SEED, "{}", 1);
-        store.write(2, -3, checks, values);
-        assertArrayEquals(values, store.read(2, -3, checks, values.length));
+        store.write(2, -3, checks, new ErosionLayer.Eroded(values, creek, down));
+        ErosionLayer.Eroded read = store.read(2, -3, checks, values.length);
+        assertArrayEquals(values, read.change());
+        assertArrayEquals(creek, read.creek());
+        assertArrayEquals(down, read.down());
         assertNull(store.read(2, -2, checks, values.length), "another region");
         assertNull(store.read(2, -3, new double[]{1.5, 200.25, 63.000001}, values.length), "other land");
         assertNull(store.read(2, -3, checks, values.length + 1), "another grid");

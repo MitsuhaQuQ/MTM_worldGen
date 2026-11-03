@@ -165,6 +165,11 @@ final class RiverLayer {
         if (toSea >= 0 && toSea <= config.sandyMouthNodes && Hashing.unit(Hashing.derive(hash, 3)) < config.sandyMouthChance) {
             riverClass |= RiverRegion.SANDY;
         }
+        // A steep edge drops in a few falls between level pools, instead of following the ground down: water only
+        // stands in whole blocks, and a gently sloping surface turns into a long staircase of one-block steps
+        int[] falls = config.waterfalls ? falls(startLevel - endLevel, length, hash) : new int[0];
+        int passed = 0;
+        boolean pool = false;
         for (int i = 1; i <= config.curveSegments; i++) {
             double t = (double) i / config.curveSegments;
             double u = 1.0 - t;
@@ -175,17 +180,28 @@ final class RiverLayer {
                     * (swing + Math.sin(2.0 * Math.PI * t + phase1) + 0.5 * Math.sin(4.0 * Math.PI * t + phase2));
             x += normalX * meander;
             z += normalZ * meander;
-            // Water follows the ground down between the nodes, but never below where this edge has to end up
-            double chord = startLevel + t * (endLevel - startLevel);
-            double level = i == config.curveSegments ? endLevel
-                    : Math.max(endLevel, Math.min(previousLevel, Math.min(chord, landform.height(x, z))));
+            double level;
+            if (falls.length > 0) {
+                // Each fall lies on the start of a segment: the pool above ends with the segment before it
+                while (passed < falls.length && falls[passed] == i - 1) {
+                    passed++;
+                }
+                previousLevel = startLevel - (startLevel - endLevel) * passed / falls.length;
+                level = i == config.curveSegments ? endLevel : previousLevel;
+                pool = level > endLevel;
+            } else {
+                // Water follows the ground down between the nodes, but never below where this edge has to end up
+                double chord = startLevel + t * (endLevel - startLevel);
+                level = i == config.curveSegments ? endLevel
+                        : Math.max(endLevel, Math.min(previousLevel, Math.min(chord, landform.height(x, z))));
+            }
             double from = (double) (i - 1) / config.curveSegments;
             double strength = source ? smooth(t / config.sourceTaper) : 1.0;
             curves.add(previousX, previousZ, x, z,
                     previousStrength * (startSize[0] + from * (endSize[0] - startSize[0])), strength * (startSize[0] + t * (endSize[0] - startSize[0])),
                     previousStrength * (startSize[1] + from * (endSize[1] - startSize[1])), strength * (startSize[1] + t * (endSize[1] - startSize[1])),
                     previousLevel, level, previousStrength, strength,
-                    riverClass);
+                    pool ? (byte) (riverClass | RiverRegion.POOL) : riverClass);
             previousStrength = strength;
             previousX = x;
             previousZ = z;
@@ -586,6 +602,26 @@ final class RiverLayer {
     }
 
     /** Collects segments and sorts them into the buckets within reach of them. */
+    /**
+     * Segment boundaries an edge falls at, in order, or none for an edge gentle enough to slope. Falls are spread
+     * evenly with some wander, at most rivers.fallHeight each, and the last one comes before the edge ends, which
+     * lies at the level of the next edge.
+     */
+    private int[] falls(double drop, double length, long hash) {
+        if (drop < config.fallMinDrop || drop < config.fallGrade * length) {
+            return new int[0];
+        }
+        int count = Math.min(config.curveSegments - 1, (int) Math.ceil(drop / config.fallHeight));
+        int[] falls = new int[count];
+        for (int k = 0; k < count; k++) {
+            double jitter = Hashing.unit(Hashing.derive(hash, 16 + k)) - 0.5;
+            double position = (k + 0.5 + 0.6 * jitter) / count;
+            falls[k] = Math.max(1, Math.min(config.curveSegments - 1, (int) Math.round(position * config.curveSegments)));
+        }
+        Arrays.sort(falls);
+        return falls;
+    }
+
     /** Whether a cell carries no river: water flows through it, but too little of it to make one. */
     private boolean isDry(FlowRegion[] around, int regionX, int regionZ, int cellX, int cellZ) {
         FlowRegion flow = flowAt(around, regionX, regionZ, cellX, cellZ);

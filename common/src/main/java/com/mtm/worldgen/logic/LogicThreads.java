@@ -2,6 +2,7 @@ package com.mtm.worldgen.logic;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
 
@@ -28,6 +29,15 @@ public final class LogicThreads {
      * tasks while it waits, and one of those may need the very region the caller is computing.
      */
     public static void forEach(int count, IntConsumer task) {
+        // On one of these threads already, the task runs right here. Waiting on the pool from inside it would let this
+        // thread pick up other queued work while it waits, and that work can need the very region this thread is
+        // computing: it then waits on itself, and the pool spawns thread after thread to make up for it
+        if (Thread.currentThread() instanceof ForkJoinWorkerThread worker && worker.getPool() == POOL) {
+            for (int i = 0; i < count; i++) {
+                task.accept(i);
+            }
+            return;
+        }
         CompletableFuture.runAsync(() -> IntStream.range(0, count).parallel().forEach(task), POOL).join();
     }
 }

@@ -648,9 +648,10 @@ class TerrainLogicTest {
         TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
         Random random = new Random(13);
         List<Double> rises = new ArrayList<>();
+        // River queries erode every region they reach, so the area stays within what the region cache holds
         for (int i = 0; i < 400000 && rises.size() < 1000; i++) {
-            int x = random.nextInt(32000) - 16000;
-            int z = random.nextInt(32000) - 16000;
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
             RiverRegion.Hit river = logic.sampleRiver(x, z);
             // Ground near the coast stays low by design, so that nothing closes off river mouths. Mountains have no
             // floodplains: their rivers run in the valleys erosion cut
