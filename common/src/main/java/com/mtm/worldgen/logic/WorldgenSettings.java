@@ -320,8 +320,8 @@ public final class WorldgenSettings {
         public double cliffStrength = 0.92;
         public double cliffWidth = 0.05;
         /** Noise levels over which cliff patches fade in. */
-        public double cliffLow = 0.12;
-        public double cliffHigh = 0.26;
+        public double cliffLow = 0.5;
+        public double cliffHigh = 0.66;
         /** Steepest slope of wind-worn ranges, as a share of the mountain slope limit. */
         public double erodedGrade = 0.6;
         /** Width in blocks of the gentle band along the crest, centered on the ridge line. */
@@ -964,6 +964,12 @@ public final class WorldgenSettings {
         public int curveSegments = 12;
         /** Rivers are found up to this many blocks away, which also bounds how far later steps can see them. */
         public int queryReach = 768;
+        /**
+         * With erosion, river water is lowered onto the ground it runs over, and never stands higher than it did up to
+         * this many nodes upstream: a river leaving a lake lower than its routing cells, or crossing a rise in the
+         * eroded ground, cuts through at the level it already reached instead of climbing back up.
+         */
+        public int fitReach = 4;
         /** Rivers vary by this fraction of their width. */
         /** Nodes before the sea over which rivers settle down to sea level, so that they do not fall into it. */
         public int estuaryLength = 5;
@@ -1255,6 +1261,7 @@ public final class WorldgenSettings {
         require(beaches.sandShare + beaches.gravelShare + beaches.rockShare <= 1.0, "coast type shares must not exceed 1");
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
+        require(rivers.fitReach >= 0, "rivers.fitReach must not be negative");
         require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
         require(rivers.oxbowChance >= 0.0 && rivers.oxbowChance <= 1.0 && rivers.oxbowMaxGrade >= 0.0 && rivers.oxbowRadiusMin > 0.0
                         && rivers.oxbowRadiusMax >= rivers.oxbowRadiusMin && rivers.oxbowWidth > 0.0 && rivers.oxbowMinWidth >= 2.0
