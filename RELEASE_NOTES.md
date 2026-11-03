@@ -1,5 +1,20 @@
 # Release notes
 
+## v0.4.0
+
+Dunes and oases in the desert. Terrain in and around deserts has changed since v0.3.2: chunks already saved by v0.3.2 count as an older version, and terrain generated around them blends toward their edges. New settings take their defaults when an existing `config/mtm_worldgen.json` lacks them; delete the file to have them all written out.
+
+### Terrain
+
+- Hills in the desert flatten into low, gentle ground, which keeps its height instead of sinking into basins that would fill with lakes (`deserts.hillRelief`)
+- Fields of dune ridges cover much of the desert: they run across one wind direction per world, with a gentle windward side and a steeper lee, and break into separate dunes along their crests. They keep back from rivers and lakes and fade out before the edge of the desert (`deserts.dunes`)
+- Oases: here and there a small pond lies in a flat hollow between the dunes, ringed by grass and a few trees, with sugar cane along the water (`deserts.oases`, `biomes.oasis`)
+- Creeks no longer run through deserts
+
+### Settings
+
+- New `deserts` group for dunes and oases; both can be switched off
+
 ## v0.3.2
 
 A fix for rivers below waterfalls. Chunks already saved by v0.3.1 count as an older version, and terrain generated around them blends toward their edges.
