@@ -1,5 +1,15 @@
 # Release notes
 
+## Unreleased
+
+Fixes for raised land along steep streams. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- The pools of a steep stream no longer stand tens of blocks above the slope, holding the land up around them in round snowy domes hundreds of blocks across with the stream in a deep slot through them. Pools now stay level at the ground half way along them
+- The banks of a river only hold up the land as far as its own water needs, falling away steeply from the channel. A steep stream beside a lower river raised the land where they meet into a round mound
+- Round plateaus beside mountain streams, a known issue, are mostly gone with it
+
 ## v0.5.0
 
 Lakes take their shape from the ground, and rivers lay sediment bars. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.

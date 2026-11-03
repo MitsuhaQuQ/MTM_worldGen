@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 8;
+    public static final int ALGORITHM_VERSION = 9;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -308,8 +308,8 @@ public final class TerrainLogic {
     /**
      * Rivers of a region with their water no higher than the land erosion left beside them. Rivers are routed on the
      * smooth land, and erosion is held to them, but between its cells and near sources the ground can lie lower; the
-     * water then follows it down rather than standing on banks raised out of the slope. Pools above waterfalls keep
-     * their level. Each point's level depends on that point alone, so neighboring regions agree.
+     * water then follows it down rather than standing on banks raised out of the slope. Pools above waterfalls stay
+     * level, at the lowest ground under either end. Each point's level depends on that point alone, so neighboring regions agree.
      */
     private RiverRegion fitRivers(int regionX, int regionZ) {
         // Lakes keep the rivers through them at their own level: their beds lie below it, and a river lowered onto the

@@ -40,12 +40,14 @@ public final class RiverRegion {
     static final int OXBOW_STRIDE = 7;
     /** Flag on a segment's class: the river leaves sand along its banks here. */
     static final byte SANDY = 0x40;
-    /** Flag on a segment's class: a pool above a waterfall, whose level stays as it is when rivers are fitted. */
+    /** Flag on a segment's class: a pool above a waterfall, which stays level end to end when rivers are fitted. */
     static final byte POOL = 0x20;
     /** Below this distance in blocks the closest river no longer gains on the others in the water level blend. */
     private static final double BLEND_RADIUS = 4.0;
     /** Share of the reach over which a river's say in blended values fades out, so nothing jumps where it leaves the query. */
     private static final double REACH_FADE = 0.25;
+    /** How steeply the land a pool holds up drops away past the ends of its segment, as a grade. */
+    private static final double POOL_END_GRADE = 4.0;
     /** Strength a river counts with at its very source, where dividing by zero would otherwise loom. */
     private static final double MIN_STRENGTH = 1e-6;
     private static final long NAN_BITS = Double.doubleToRawLongBits(Double.NaN);
@@ -153,7 +155,8 @@ public final class RiverRegion {
             int s = segment * STRIDE;
             double dx = segments[s + 2] - segments[s];
             double dz = segments[s + 3] - segments[s + 1];
-            double t = Math.max(0.0, Math.min(1.0, ((x - segments[s]) * dx + (z - segments[s + 1]) * dz) / (dx * dx + dz * dz)));
+            double along = ((x - segments[s]) * dx + (z - segments[s + 1]) * dz) / (dx * dx + dz * dz);
+            double t = Math.max(0.0, Math.min(1.0, along));
             double offsetX = x - segments[s] - t * dx;
             double offsetZ = z - segments[s + 1] - t * dz;
             double squared = offsetX * offsetX + offsetZ * offsetZ;
@@ -197,11 +200,14 @@ public final class RiverRegion {
             // Near a source the texture stays, so a stream begins in the slope's own gully instead of a pocket
             double fade = strength * Math.min(fadeBase + fadePerWidth * width, reach - config.valleyFloorFactor * half);
             texture = Math.min(texture, fade > 0.0 ? smooth(run / fade) : 1.0);
-            // The pool above a waterfall only holds the land up around its own water, falling away from its banks as a
-            // valley wall would. Held across the whole valley floor, three times its width, a pool standing above the
-            // land beside it became a round plateau, walling off whatever ran into the river below the fall
-            double poolWall = (classes[segment] & POOL) != 0 ? wall(Math.max(0.0, distance - half)) : wall;
-            low = Math.max(low, level + config.bankHeight - poolWall);
+            // Water only needs its own banks held up: the land below a river's banks falls away from the edge of its
+            // channel at the steepest a valley wall gets. Held as far as the gentle floor of the valley wall reaches, a
+            // steep stream beside a lower river raised the land around their meeting into a round mound, and the pools
+            // of a steep stream held up a dome tens of blocks above the slope beside them. Past its ends a pool holds
+            // nothing up: the pools before and after it hold their own stretch, and below its end the stream falls
+            double past = (classes[segment] & POOL) != 0 ? Math.max(0.0, Math.max(-along, along - 1.0)) * Math.sqrt(dx * dx + dz * dz) : 0.0;
+            double bankWall = Math.max(0.0, distance - half) * config.valleyWallMaxGrade + past * POOL_END_GRADE;
+            low = Math.max(low, level + config.bankHeight - bankWall);
             high = Math.min(high, level + config.bankHeight + wall);
             double inReach = smooth((reach - distance) / (REACH_FADE * reach));
             double closeness = 1.0 / (distance + BLEND_RADIUS);
@@ -389,13 +395,24 @@ public final class RiverRegion {
      */
     private double level(int segment, int end) {
         int s = segment * STRIDE;
-        if (ground == null || (classes[segment] & POOL) != 0) {
+        if (ground == null) {
             return segments[s + 8 + end];
         }
         int slot = 2 * segment + end;
         long bits = lowered.get(slot);
         if (bits != NAN_BITS) {
             return Double.longBitsToDouble(bits);
+        }
+        if ((classes[segment] & POOL) != 0) {
+            // A pool stays level from end to end, but no higher than the ground half way along it. Kept at the level it
+            // was routed at, a pool on a steep stream stood thirty blocks and more above the eroded slope, and its banks
+            // held the land up around it in a round dome hundreds of blocks across, with the stream in a slot cut through
+            // it. Lowered to the ground at its lower end instead, it sank its upper half into a trench as deep
+            double pool = Math.min(Math.max(segments[s + 8], segments[s + 9]),
+                    ground.applyAsDouble(0.5 * (segments[s] + segments[s + 2]), 0.5 * (segments[s + 1] + segments[s + 3])));
+            lowered.set(2 * segment, Double.doubleToRawLongBits(pool));
+            lowered.set(2 * segment + 1, Double.doubleToRawLongBits(pool));
+            return pool;
         }
         double level = Math.min(segments[s + 8 + end], ground.applyAsDouble(segments[s + 2 * end], segments[s + 1 + 2 * end]));
         if (end == 1) {
