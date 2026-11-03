@@ -12,7 +12,8 @@ allprojects {
     version = rootProject.mod_version
 }
 
-subprojects {
+// The mod's modules; Amidst builds on its own (amidst/build.gradle)
+configure(subprojects.findAll { it.name != "amidst" }) {
     apply plugin: "java"
     apply plugin: "architectury-plugin"
     apply plugin: "dev.architectury.loom"

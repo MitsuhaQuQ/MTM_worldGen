@@ -58,13 +58,13 @@ Amidst **cannot**:
 
 ## MTM Worldgen
 
-This fork also shows worlds of the MTM Worldgen mod. It runs the terrain logic straight from the mod jar, so it needs no Minecraft installation:
+This copy of Amidst is built and released with the MTM Worldgen mod (`gradlew :amidst:jar`, and `gradlew :amidst:windowsZip` on Windows). It also shows worlds of the mod, running the terrain logic straight from the mod jar, so it needs no Minecraft installation:
 
 ```
-java -jar amidst.jar -mtmgamedir <game directory> [-mtmjar <mtm_worldgen jar>]
+java -jar amidst-mtm.jar -mtmgamedir <game directory> [-mtmjar <mtm_worldgen jar>]
 ```
 
-On Windows, the release zip `AMIDST-MTM-<version>-mtm<mod version>-windows.zip` needs no Java or Minecraft: unpack it and run `AMIDST-MTM.exe`. It ships its own Java runtime and a jar of MTM Worldgen, which it uses unless `-mtmjar`, `-profile` or `-mcjar` is given. `scripts/package-mtm-windows.ps1 -MtmJar <mtm_worldgen jar>` builds it after `mvn package`.
+On Windows, the release zip `AMIDST-MTM-<version>-windows.zip` needs no Java or Minecraft: unpack it and run `AMIDST-MTM.exe`. It ships its own Java runtime and the Fabric jar of the mod, which it uses unless `-mtmjar`, `-profile` or `-mcjar` is given.
 
 * The game directory provides `saves/`, `config/mtm_worldgen.json` and, unless `-mtmjar` is given, the jar in `mods/`.
 * Opened saves use the settings locked in their `level.dat`. Worlds from a seed use the config file, or the defaults of the mod.

@@ -115,9 +115,18 @@ All commands need cheats enabled.
 | `/mwg precompute <radius>` | Computes the logic regions within this many regions of you (0 to 5) in the background, so exploring there later does not wait for them. `cancel` stops it |
 | `/mwg benchmark` | Compares chunk generation time with vanilla (biome and noise stages only) |
 
+## Map viewer
+
+Each release also carries Amidst for MTM worlds, which draws the biome map, world spawn and villages of an MTM world from its seed or from a save, without starting the game:
+
+- `AMIDST-MTM-<version>-windows.zip`: unpack it and run `AMIDST-MTM.exe`. It ships its own Java and the Fabric jar of the mod.
+- `amidst-mtm-<version>.jar`: on any system with Java 25, run `java -jar amidst-mtm-<version>.jar -mtmjar <mod jar> [-mtmgamedir <game directory>]`.
+
+Saves use the settings locked in their `level.dat`; worlds from a seed use `config/mtm_worldgen.json` of the game directory, or the defaults. Structures other than villages follow vanilla rules and are approximate. The source is in `amidst/`, a copy of [Amidst](https://github.com/toolbox4minecraft/amidst) with Minecraft 26.1 support from [MitsuhaQuQ/amidst](https://github.com/MitsuhaQuQ/amidst); plain Amidst for vanilla worlds is released there.
+
 ## Development
 
-Building needs a JDK 17 toolchain. Gradle itself can run on JDK 21, and toolchains are not downloaded automatically. If Gradle cannot find JDK 17, set `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`.
+Building needs a JDK 17 toolchain, and a JDK 25 toolchain for Amidst. Gradle itself can run on JDK 21, and toolchains are not downloaded automatically. If Gradle cannot find JDK 17, set `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`.
 
 ```
 gradlew build                     Build all modules; jars are in fabric/build/libs and forge/build/libs
@@ -126,6 +135,8 @@ gradlew :forge:runClient
 gradlew :common:test              Unit tests of the terrain logic
 gradlew :fabric:runGametest       In-game tests
 gradlew :forge:runGameTestServer
+gradlew :amidst:test              Tests of Amidst
+gradlew :amidst:windowsZip        Amidst with Java and the Fabric jar for Windows (on Windows only)
 ```
 
 All terrain logic lives in the `common` module, and the loader modules only register it and hook it up:
@@ -142,4 +153,4 @@ Both loaders are tested against the same terrain hash. After an intentional terr
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), except Amidst in `amidst/`, which is [GPLv3](amidst/LICENSE.txt).

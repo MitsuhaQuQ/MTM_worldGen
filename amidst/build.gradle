@@ -1,0 +1,109 @@
+// Amidst with the MTM Worldgen interface, released with the mod. It is no Minecraft module: Loom stays off, and it
+// builds and runs on a newer Java than the mod. Licensed GPLv3 (LICENSE.txt), unlike the rest of the repository.
+apply plugin: "java"
+
+repositories {
+    mavenCentral()
+    maven { url = "https://jitpack.io" }
+}
+
+def amidstJava = rootProject.amidst_java_version as int
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(amidstJava)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release = amidstJava
+}
+
+dependencies {
+    implementation "com.google.code.gson:gson:2.13.1"
+    implementation "com.miglayout:miglayout-swing:4.2"
+    implementation "args4j:args4j:2.37"
+    implementation "com.github.Querz:NBT:6.1"
+    testImplementation "junit:junit:4.13.1"
+}
+
+base {
+    archivesName = "amidst-mtm"
+}
+
+// The test sources also hold test worlds, JSON fixtures and helpers named Test*, which JUnit rejects as tests
+test {
+    include "**/*Test.class", "**/TestWorldEntryEquality.class"
+}
+
+// One runnable jar with its libraries, like the shaded jar of upstream's Maven build
+jar {
+    manifest {
+        attributes "Main-Class": "amidst.Amidst"
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    exclude "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "**/module-info.class"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Java modules the packaged runtime keeps: those Amidst needs, and those Minecraft needs for -profile
+def runtimeModules = [
+        "java.base", "java.desktop", "java.prefs", "java.sql", "java.logging", "java.naming", "java.management",
+        "java.net.http", "java.scripting", "jdk.management", "jdk.unsupported", "jdk.charsets", "jdk.localedata",
+        "jdk.crypto.cryptoki", "jdk.zipfs", "jdk.accessibility"
+].join(",")
+
+// The Fabric jar of the mod, looked up late: forcing :fabric to configure first breaks :common's Loom setup
+def modJar = provider { project(":fabric").tasks.named("remapJar").get().archiveFile.get() }
+def appImage = layout.buildDirectory.dir("app-image")
+
+// AMIDST-MTM.exe with its own Java runtime and the Fabric jar of the mod, which it shows unless told otherwise
+def windowsAppImage = tasks.register("windowsAppImage") {
+    group = "distribution"
+    description = "Packages Amidst, a Java runtime and the mod as a portable Windows app."
+    dependsOn jar, ":fabric:remapJar"
+    inputs.file modJar
+    inputs.file jar.archiveFile
+    outputs.dir appImage
+    def launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(amidstJava) }
+    doLast {
+        if (!System.getProperty("os.name").startsWith("Windows")) {
+            throw new GradleException("jpackage makes Windows apps only on Windows")
+        }
+        def out = appImage.get().asFile
+        def stage = new File(temporaryDir, "input")
+        project.delete(out, stage)
+        project.copy {
+            from jar.archiveFile
+            into stage
+        }
+        def mod = modJar.get().asFile
+        // jpackage takes digits only, so 0.3.0-beta packages as 0.3.0
+        def appVersion = (project.version =~ /^[0-9.]+/)[0].replaceAll(/\.$/, "")
+        project.exec {
+            commandLine launcher.get().metadata.installationPath.file("bin/jpackage.exe").asFile,
+                    "--type", "app-image", "--name", "AMIDST-MTM", "--app-version", appVersion,
+                    "--input", stage, "--main-jar", jar.archiveFileName.get(),
+                    "--icon", file("src/main/resources/amidst/icon/amidst.ico"),
+                    "--add-modules", runtimeModules,
+                    "--java-options", "-Damidst.mtmjar=\$APPDIR\\mods\\${mod.name}",
+                    "--dest", out
+        }
+        // Added after jpackage, which would put it on the class path: Amidst loads it on its own class loader
+        project.copy {
+            from mod
+            into new File(out, "AMIDST-MTM/app/mods")
+        }
+    }
+}
+
+tasks.register("windowsZip", Zip) {
+    group = "distribution"
+    description = "Zips the portable Windows app for the release."
+    from windowsAppImage
+    archiveFileName = "AMIDST-MTM-${project.version}-windows.zip"
+    destinationDirectory = layout.buildDirectory.dir("distributions")
+}

@@ -332,6 +332,12 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 许可证：MIT
 - 构建工具：Architectury Loom（仅为构建插件，不引入运行时依赖）
 - 模块结构：`common`（全部共享逻辑）+ `forge` + `fabric`；支持 1.20.1 以上版本时加入 NeoForge 模块
+- 地图查看器 `amidst`：MTM 版 Amidst 的源码副本（来自 MitsuhaQuQ/amidst 的 `mtm-on-latest` 分支，原版 Amidst 及其最新 Minecraft 支持在那个仓库单独发布），随 mod 一起构建和发布
+  - 许可证为 GPLv3（`amidst/LICENSE.txt`），其余仍是 MIT；不要把 Amidst 的代码搬进 mod 模块
+  - 普通 Java 子项目，不套 Loom（根 `build.gradle` 的 `configure` 排除了它），用 JDK 25 工具链（`amidst_java_version`），本机已在 `~/.gradle/gradle.properties` 里登记 JDK 25
+  - 通过反射调用 mod jar 里的 `TerrainLogic.sampleBiome`、`findSpawn`、`isVillageGround` 和 `WorldgenSettings.fromJson`、`DEFAULT`，改这些方法的名字或签名会让 Amidst 失效；群系 id 用 Amidst 的 `ModernBiomes` 表，新增原版群系时看那里有没有
+  - `gradlew :amidst:jar` 出可运行 jar；`gradlew :amidst:windowsZip` 只能在 Windows 上跑，用 jpackage 打出带 Java 运行时和 Fabric jar 的 `AMIDST-MTM.exe`（mod jar 放在 `app/mods`，不进类路径，由系统属性 `amidst.mtmjar` 指过去）
+  - 测试只跑 `*Test` 和 `TestWorldEntryEquality`：测试目录里还有很多以 `Test` 开头的测试世界和辅助类，JUnit 会把它们当成无效测试
 - 构建环境：Gradle 8.10.2（wrapper）、Architectury Loom 1.7、Mojang 官方映射；版本号集中在根目录 `gradle.properties`
 - JDK：Gradle 本身可用 JDK 21 运行；编译与运行 1.20.1 需要 JDK 17 工具链，已关闭工具链自动下载
   - 若 Gradle 找不到 JDK 17，在 `~/.gradle/gradle.properties` 中设置 `org.gradle.java.installations.paths=<JDK 17 路径>`，或在命令行加 `-Porg.gradle.java.installations.paths=...`（本机已在用户配置中设置好）
@@ -349,7 +355,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
 - 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行，不要在测试间共享状态；河流查询会算出所到之处的侵蚀，大范围随机取样的测试要把范围控制在区域缓存放得下的大小（曾用 ±16000，单个测试 9 分钟）；每个测试各自计算侵蚀区域，测试堆设为 3 GB（默认 512 MB 会 OOM），全部约 3 分钟
 - CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行
-- 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`，标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
+- 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`（Windows 任务打 Amidst 的 zip，Ubuntu 任务连同两个 mod jar 和 Amidst jar 一起发布），标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
 - 平台服务：common 中的 `com.mtm.worldgen.platform.Platform` 接口，各加载器通过 `META-INF/services` 注册实现
 - 已知问题（Claude Code 沙箱环境）：Gradle 启动报 `Unable to establish loopback connection` 时，需在沙箱外运行，并设置环境变量 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=F:\MC\MTM_worldgen\.gradle\uds`（该目录需事先存在）
 
