@@ -190,8 +190,10 @@ final class SkeletonLayer {
      * @param baseAboveSea continent base height above the sea surface in blocks
      * @param texture      receives the ridge texture in its first element, or null if it is not needed
      * @param ridged       whether the texture holds the ridged spurs and gullies, or only the cliffs
+     * @param carved       height erosion has taken off here, which cliffs are stepped from along with the land
+     * @param cliffKeep    share of cliff bands kept here, from 0 to 1
      */
-    double height(double x, double z, double baseAboveSea, double[] texture, boolean ridged) {
+    double height(double x, double z, double baseAboveSea, double[] texture, boolean ridged, double carved, double cliffKeep) {
         double land = smoothstep(0.0, settings.general.coastFadeHeight, baseAboveSea);
         if (land <= 0.0) {
             if (texture != null) {
@@ -221,9 +223,12 @@ final class SkeletonLayer {
             rugged = mix(m.erodedTexture, m.igneousTexture, style(wx, wz)) * summitCalm * m.textureShare * textured * (2.0 * relief - 1.0);
         }
         if (texture != null) {
-            double cliffs = cliffMask(x, z, mountainZone);
+            double cliffs = cliffKeep * cliffMask(x, z, mountainZone);
             if (cliffs > 0.0) {
-                rugged += cliffs * summitCalm * cliffOffset(x, z, massif + peaks + rugged);
+                // Stepped from the land as erosion left it: from the land before, a ledge would flatten a slope that
+                // erosion had already made gentler, and tilt back against the cliff above it, with any creek on it
+                // running uphill
+                rugged += cliffs * summitCalm * cliffOffset(x, z, massif + peaks + rugged + carved);
             }
         }
         double foothill = scale * m.foothillHeight * mountain[1] * (0.5 + 0.5 * foothills.sample(x, z));

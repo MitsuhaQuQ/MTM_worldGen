@@ -48,6 +48,8 @@ public final class TerrainLogic {
     private static final double CREEK_SHARE = 0.3;
     private static final double CREEK_BANK = 2.0;
     private static final double CREEK_GROWTH = 1.0;
+    /** Blocks from a creek's course over which cliff bands come back. */
+    private static final double CREEK_CLIFF_FADE = 48.0;
     /** Spread of the noise over which a stretch of river terraces fades in and out. */
     private static final double TERRACE_EDGE = 0.3;
     /** Share of upland at which river terraces reach their full height. */
@@ -732,14 +734,28 @@ public final class TerrainLogic {
         // With erosion, water cuts the texture into the mountains in place of the skeleton's ridged texture; cliffs stay.
         // Dome hills keep their round tops, which water would cut into a star of spurs
         boolean eroded = erode && texture != null;
-        double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture, !eroded);
+        // Plains lie just above their rivers by design, and erosion there would only dig below them
+        double change = eroded ? erosion.change(x, z, erosionWarpShare(x, z)) * (1.0 - skeleton.domeShare(x, z))
+                * skeleton.uplandShare(x, z, base - (settings.general.seaLevel - 1)) : 0.0;
+        double height = clearance * skeleton.height(x, z, base - (settings.general.seaLevel - 1), texture, !eroded, change,
+                eroded ? creekCliffKeep(x, z) : 1.0);
         if (texture != null) {
-            // Plains lie just above their rivers by design, and erosion there would only dig below them
-            double change = eroded ? erosion.change(x, z, erosionWarpShare(x, z)) * (1.0 - skeleton.domeShare(x, z))
-                    * skeleton.uplandShare(x, z, base - (settings.general.seaLevel - 1)) : 0.0;
             texture[0] = clearance * (texture[0] + change);
         }
         return height;
+    }
+
+    /**
+     * Share of cliff bands kept at a position: they give way along creeks, which cut a notch through a band of cliffs
+     * instead of running over its ledges. The ledges tilt a little against the cliff above them, wherever the levels the
+     * bands step to shift faster than a gentle gully falls, and a creek on one would run uphill.
+     */
+    private double creekCliffKeep(double x, double z) {
+        if (!settings.erosion.creeks) {
+            return 1.0;
+        }
+        ErosionLayer.Creek creek = erosion.creek(x, z, erosionWarpShare(x, z));
+        return creek == null ? 1.0 : smooth(creek.distance() / CREEK_CLIFF_FADE);
     }
 
     /** Surface height before water has shaped it. */
