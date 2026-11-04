@@ -37,9 +37,9 @@ Not done yet: harbors, rias and tidal flats, sandbars, glacial landforms, rock d
 
 ## Performance
 
-Most terrain mods build on vanilla's generator as it is, with data packs that retune or extend its noise. Vanilla computes 3D noise for every block of every column, so a taller world costs more in proportion to its height, and richer terrain costs more per block.
+Most terrain mods build on vanilla's generator as it is, with data packs that retune or extend its noise. Vanilla's terrain is a 3D density, so it cannot know where the ground is without evaluating noise through the whole column, from the bottom of the world to the build limit, and running aquifer and ore vein rules on every block, air included. The work per chunk grows in proportion to the build height: a world raised to Minecraft's maximum of 2032 does more than five times the work of vanilla in every chunk, even where the ground is at sea level. Richer terrain makes every one of those points more expensive too.
 
-Realistic Landforms computes terrain as a height map instead. Only the surface needs computing, and chunks are only filled up to the highest ground in them, so the air above is skipped. A world twice as tall hardly costs more.
+Realistic Landforms computes terrain as a height map instead. It knows the highest ground in a chunk before filling it, and stops just above it, so the air is never visited. The cost of a chunk follows the height of its ground, not the build limit: a world twice as tall hardly costs more. [How it works](docs/how-it-works.md#why-a-taller-world-costs-vanilla-more) explains this in detail.
 
 | Minecraft | Vanilla, -64 to 320 | Realistic Landforms, -64 to 800 |
 |---|---|---|

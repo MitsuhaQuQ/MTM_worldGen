@@ -44,4 +44,31 @@ Rivers are routed on a sparse grid with 256 block cells, in a window reaching 32
 
 ## Performance
 
+### Why a taller world costs vanilla more
+
+Vanilla does not know where the ground is before it generates a chunk. Its terrain is a 3D density: every point is solid or air depending on noise at that point, so ground, overhangs and floating land can be anywhere in the column. The only way to find the surface is to evaluate the density everywhere.
+
+So vanilla fills every chunk through the whole build height, from the bottom of the world to the top:
+
+- **Density at noise points.** The density is evaluated on a grid of points 4 blocks apart horizontally and 8 apart vertically, 5 × 5 per chunk at each level. Each evaluation runs the whole density tree: continents, erosion, ridges, jaggedness and the cave noises.
+- **Every block.** Between those points the density is interpolated for every block, and the aquifer and ore vein rules run on every block, including the air far above the ground.
+
+Both grow in proportion to the build height, while the ground mostly stays in the lower part of it:
+
+| Build height | Noise point levels | Noise points per chunk | Blocks per chunk |
+|---|---|---|---|
+| -64 to 320 (vanilla) | 49 | 1,225 | 98,304 |
+| -64 to 800 (this mod's default) | 109 | 2,725 | 221,184 |
+| -64 to 2032 (Minecraft's maximum) | 263 | 6,575 | 536,576 |
+
+Raising the build limit with a data pack keeps this approach, so a world as tall as Minecraft allows does more than five times the work of vanilla for every chunk, even where the ground is at sea level. Richer density functions, with more noise layers for taller mountains, add to the cost of every one of those points.
+
+### How this mod avoids it
+
+The terrain here is a height map: the logic gives the surface height of every column directly, and the density only compares a block's height with it. Before a chunk is filled, the logic knows the highest solid block in it, overhangs included, so filling stops 32 blocks above that, leaving room for structure foundations. The air above is never visited: no density, interpolation, aquifer or ore vein work.
+
+The cost of a chunk therefore follows the height of its ground, not the build limit. A chunk on plains near sea level fills about 170 blocks of its column whether the world ends at 320, 800 or 2032; only mountain chunks fill higher, and only as high as their peaks. This is why the mod can run a world more than twice as tall as vanilla in less time per chunk.
+
+### Other measures
+
 Terrain is a height map rather than vanilla's 3D noise, so density is simple to compute. Chunks are only filled up to their highest surface, which skips interpolation, aquifers and ore veins for the air above it, and this is where most of the time is saved. Logic that many columns share is cached by region, and the erosion of each region, the most expensive part, is also kept in `<world>/mtm_worldgen/erosion/` so it is not computed again after a restart. Deleting that folder is safe: the same results are computed again. Expensive steps run on a small fork-join pool, which is safe because they are pure functions of the seed and coordinates, so the number of threads cannot change the result.
