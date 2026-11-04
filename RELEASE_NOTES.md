@@ -10,6 +10,7 @@ The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so e
 - Belt mountains are young and steep, in the igneous style; ranges away from plate borders are older and worn down
 - Plateaus no longer end in a wall a hundred blocks high where they come near a wide river valley
 - Dunes fade out more gently around oases
+- Trunk rivers widen with their catchment, from 100 blocks up to the 200 of major trunks, instead of keeping one width until they become a major trunk
 - Rivers no longer meet a lake a step below its surface. Where eroded ground near the shore lies below the lake, the river used to be fitted onto it, and the lake stood up to four blocks above the river at its mouth. Rivers are now held at the lake's level for the last nodes before it (`rivers.lakeBackwater`, 5 by default)
 - A river passing through a lake takes the lake's level, instead of staying above it on higher ground and dropping into the lake and out again
 - Terrain changes near lakes, so chunks generated after the update can meet older ones with a seam there

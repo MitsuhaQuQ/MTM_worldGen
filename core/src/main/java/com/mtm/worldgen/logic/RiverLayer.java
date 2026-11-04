@@ -650,7 +650,8 @@ final class RiverLayer {
                 depth = config.tributaryDepth;
             }
             case TRUNK -> {
-                width = config.trunkWidth;
+                double grown = config.trunkWidth * Math.pow(Math.max(1.0, (double) catchment / config.trunkCells), config.trunkWidthExponent);
+                width = Math.min(config.majorTrunkWidth, grown);
                 depth = config.trunkDepthMin + roll * (config.trunkDepthMax - config.trunkDepthMin);
             }
             default -> {

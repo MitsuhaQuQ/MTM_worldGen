@@ -1075,6 +1075,12 @@ public final class WorldgenSettings {
         public double majorTrunkWidth = 200.0;
         public double majorTrunkDepthMin = 15.0;
         public double majorTrunkDepthMax = 20.0;
+        /**
+         * Trunks widen with their catchment, by (catchment / trunkCells) to this power, from trunkWidth up to
+         * majorTrunkWidth, instead of keeping one width until they turn into a major trunk. No wider: the valley floor
+         * of the widest rivers already takes up most of queryReach, which the margins around a region keep at 768.
+         */
+        public double trunkWidthExponent = 0.3;
         /** Narrower rivers still cut a channel this wide, or noise cells would lose them. */
         public double minChannelWidth = 6.0;
         /**
@@ -1307,6 +1313,7 @@ public final class WorldgenSettings {
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.fitReach >= 0, "rivers.fitReach must not be negative");
         require(rivers.lakeBackwater >= 0, "rivers.lakeBackwater must not be negative");
+        require(rivers.trunkWidthExponent >= 0.0, "rivers.trunkWidthExponent must not be negative");
         require(mountains.beltStrength >= 0.0 && mountains.riftStrength >= 0.0 && mountains.beltIgneous >= 0.0,
                 "mountains.beltStrength, riftStrength and beltIgneous must not be negative");
         require(mountains.beltWidth > 0.0, "mountains.beltWidth must be positive");
