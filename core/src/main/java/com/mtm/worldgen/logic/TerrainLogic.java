@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 9;
+    public static final int ALGORITHM_VERSION = 10;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -809,7 +809,10 @@ public final class TerrainLogic {
         if (grown <= 0.0 || hit.distance() >= half + CREEK_BANK + config.creekIncision * grown / config.creekValleyGrade) {
             return null;
         }
-        if (!Double.isNaN(sampleLakeLevel(x, z))) {
+        // A creek runs on to the lake's water, not just to the edge of its share: the rim along a shore stands above
+        // the water, and would wall the creek off from the lake
+        double lake = sampleLakeLevel(x, z);
+        if (!Double.isNaN(lake) && sampleCarvedLand(x, z) < lake) {
             return null;
         }
         // A creek runs on into the river it reaches, which takes over in its channel. Ending it short would leave its

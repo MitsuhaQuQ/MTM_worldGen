@@ -75,6 +75,8 @@ public final class RiverRegion {
     private final double fadePerWidth;
     private final double[] segments;
     private final byte[] classes;
+    /** The segment above each one along its river, or -1 where nothing above it was built. */
+    private final int[] upstream;
     private final int[][] index;
     /** Alluvial fans: apex x and z, downstream direction x and z, radius and height at the apex. */
     private final double[] fans;
@@ -85,6 +87,8 @@ public final class RiverRegion {
     private final DoubleBinaryOperator ground;
     /** Lowered levels per segment end, as raw long bits, NaN until first needed. */
     private final AtomicLongArray lowered;
+    /** Levels per segment end lowered onto the ground right there, before looking upstream, as raw long bits. */
+    private final AtomicLongArray grounded;
 
     /**
      * @param originX    block X of the region's corner
@@ -95,26 +99,30 @@ public final class RiverRegion {
      * @param fadeBase   distance from the valley floor over which texture fades, plus fadePerWidth per block of width
      * @param segments   segment values, {@link #STRIDE} per segment
      * @param classes    river class of each segment
+     * @param upstream   the segment above each one, or -1
      * @param index      segment numbers per bucket
      * @param fans       alluvial fans that reach into the region, {@link #FAN_STRIDE} values each
      * @param oxbows     oxbow lakes that reach into the region, {@link #OXBOW_STRIDE} values each
      * @param oxbowSpan  degrees an oxbow's arc reaches to each side of its middle
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                double[] segments, byte[] classes, int[][] index, double[] fans, double[] oxbows, double oxbowSpan) {
-        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, oxbows, oxbowSpan, null);
+                double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan) {
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan, null);
     }
 
     private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
-                        double[] segments, byte[] classes, int[][] index, double[] fans, double[] oxbows, double oxbowSpan, DoubleBinaryOperator ground) {
+                        double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan,
+                        DoubleBinaryOperator ground) {
         this.fans = fans;
         this.oxbows = oxbows;
         this.oxbowSpan = oxbowSpan;
         this.ground = ground;
         this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
+        this.grounded = ground == null ? null : new AtomicLongArray(2 * classes.length);
         if (lowered != null) {
             for (int i = 0; i < lowered.length(); i++) {
                 lowered.set(i, NAN_BITS);
+                grounded.set(i, NAN_BITS);
             }
         }
         this.reach = config.queryReach;
@@ -127,6 +135,7 @@ public final class RiverRegion {
         this.buckets = buckets;
         this.segments = segments;
         this.classes = classes;
+        this.upstream = upstream;
         this.index = index;
     }
 
@@ -284,10 +293,13 @@ public final class RiverRegion {
 
     /**
      * The same rivers with water no higher than the ground at each segment end, except in pools above waterfalls,
-     * which rise above the ground by design. A segment never rises downstream from its start.
+     * which rise above the ground by design, and no higher than anywhere rivers.fitReach nodes upstream. A river that
+     * was lowered onto low ground, such as a lake lower than its routing cells, does not climb back up over the higher
+     * ground below it, which would leave it running on a ridge, but cuts through at the level it reached.
      */
     RiverRegion lowered(DoubleBinaryOperator ground) {
-        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, index, fans, oxbows, oxbowSpan, ground);
+        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan,
+                ground);
     }
 
     /**
@@ -390,42 +402,61 @@ public final class RiverRegion {
 
     /**
      * Water level at one end of a segment, lowered onto the ground the first time it is needed: most segments of a
-     * region are never queried, and the ground under each one can take erosion of a region of its own. The value only
-     * depends on the segment, so threads racing to fill it in store the same thing.
+     * region are never queried, and the ground under each one can take erosion of a region of its own. A segment starts
+     * no higher than the segments a bounded way above it end, so the value only depends on the river around the segment,
+     * which every region holding it builds alike, and threads racing to fill it in store the same thing.
      */
     private double level(int segment, int end) {
-        int s = segment * STRIDE;
         if (ground == null) {
-            return segments[s + 8 + end];
+            return segments[segment * STRIDE + 8 + end];
         }
         int slot = 2 * segment + end;
         long bits = lowered.get(slot);
         if (bits != NAN_BITS) {
             return Double.longBitsToDouble(bits);
         }
+        double level;
+        if (end == 0) {
+            level = grounded(segment, 0);
+            int above = upstream[segment];
+            for (int k = config.fitReach * config.curveSegments; k > 0 && above >= 0; k--) {
+                level = Math.min(level, grounded(above, 1));
+                above = upstream[above];
+            }
+        } else {
+            level = Math.min(grounded(segment, 1), level(segment, 0));
+        }
+        lowered.set(slot, Double.doubleToRawLongBits(level));
+        return level;
+    }
+
+    /** Water level at one end of a segment, lowered onto the ground there, before looking upstream. */
+    private double grounded(int segment, int end) {
+        int s = segment * STRIDE;
+        int slot = 2 * segment + end;
+        long bits = grounded.get(slot);
+        if (bits != NAN_BITS) {
+            return Double.longBitsToDouble(bits);
+        }
+        double level;
         if ((classes[segment] & POOL) != 0) {
             // A pool stays level from end to end, but no higher than the ground half way along it. Kept at the level it
             // was routed at, a pool on a steep stream stood thirty blocks and more above the eroded slope, and its banks
             // held the land up around it in a round dome hundreds of blocks across, with the stream in a slot cut through
             // it. Lowered to the ground at its lower end instead, it sank its upper half into a trench as deep
-            double pool = Math.min(Math.max(segments[s + 8], segments[s + 9]),
+            level = Math.min(Math.max(segments[s + 8], segments[s + 9]),
                     ground.applyAsDouble(0.5 * (segments[s] + segments[s + 2]), 0.5 * (segments[s + 1] + segments[s + 3])));
-            lowered.set(2 * segment, Double.doubleToRawLongBits(pool));
-            lowered.set(2 * segment + 1, Double.doubleToRawLongBits(pool));
-            return pool;
+        } else {
+            level = Math.min(segments[s + 8 + end], ground.applyAsDouble(segments[s + 2 * end], segments[s + 1 + 2 * end]));
         }
-        double level = Math.min(segments[s + 8 + end], ground.applyAsDouble(segments[s + 2 * end], segments[s + 1 + 2 * end]));
-        if (end == 1) {
-            level = Math.min(level, level(segment, 0));
-        }
-        lowered.set(slot, Double.doubleToRawLongBits(level));
+        grounded.set(slot, Double.doubleToRawLongBits(level));
         return level;
     }
 
     /** Whether this region holds exactly the same segments as another. */
     public boolean contentEquals(RiverRegion other) {
         return originX == other.originX && originZ == other.originZ && Arrays.equals(segments, other.segments)
-                && Arrays.equals(classes, other.classes) && Arrays.deepEquals(index, other.index) && Arrays.equals(fans, other.fans)
+                && Arrays.equals(classes, other.classes) && Arrays.equals(upstream, other.upstream) && Arrays.deepEquals(index, other.index) && Arrays.equals(fans, other.fans)
                 && Arrays.equals(oxbows, other.oxbows);
     }
 }

@@ -6,7 +6,9 @@ import com.mtm.worldgen.noise.ValueNoise;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Refines the routing grid into river courses. Each routing cell gets a jittered node, and each flow edge a smooth
@@ -238,6 +240,9 @@ final class RiverLayer {
                     siltStart[0] + from * (siltEnd[0] - siltStart[0]), siltStart[0] + t * (siltEnd[0] - siltStart[0]),
                     siltStart[1] + middle * (siltEnd[1] - siltStart[1]), bend,
                     pool ? (byte) (riverClass | RiverRegion.POOL) : riverClass);
+            // Each segment links to the one above it, the first across the node to the end of the main stem's edge
+            curves.link(i > 1 ? Curves.PREVIOUS : source ? Curves.NONE : Curves.key(cellX + flow.inflowX(lx, lz), cellZ + flow.inflowZ(lx, lz)),
+                    i == config.curveSegments ? Curves.key(cellX, cellZ) : Curves.NONE);
             previousStrength = strength;
             previousX = x;
             previousZ = z;
@@ -801,7 +806,6 @@ final class RiverLayer {
         return length > 0.0 ? new double[]{x / length, z / length} : new double[]{0.0, 0.0};
     }
 
-    /** Cells beyond a region whose edges can reach into it, deltas included. */
     /**
      * Routing cells around a region whose edges a query in it can reach. Only these need their sediment budget, which
      * walks siltReach nodes upstream, to stay within the regions around.
@@ -810,9 +814,13 @@ final class RiverLayer {
         return Math.max(1, ceilDiv(config.queryReach, config.flowCellSize) + 3);
     }
 
+    /**
+     * Cells beyond a region whose edges it builds: those a query can reach, the deltas that reach into them, and the
+     * edges fitReach nodes above them, whose water fitted levels look back on.
+     */
     static int margin(WorldgenSettings.Rivers config) {
-        return queryMargin(config) + config.deltaLength
-                + ceilDiv((int) Math.ceil(config.deltaSpread + config.deltaOverrun), config.flowCellSize);
+        return queryMargin(config) + Math.max(config.fitReach, config.deltaLength
+                + ceilDiv((int) Math.ceil(config.deltaSpread + config.deltaOverrun), config.flowCellSize));
     }
 
     private static int ceilDiv(int value, int divisor) {
@@ -853,9 +861,27 @@ final class RiverLayer {
 
     private final class Curves {
         private static final int STRIDE = RiverRegion.STRIDE;
+        /** No segment above, or a segment that ends no edge. */
+        static final long NONE = Long.MIN_VALUE;
+        /** The segment above is the one added just before, in the same edge. */
+        static final long PREVIOUS = Long.MIN_VALUE + 1;
         private double[] values = new double[STRIDE * 1024];
         private byte[] classes = new byte[1024];
+        /** Per segment: the edge whose last segment lies above it, by its cell, or NONE or PREVIOUS. */
+        private long[] above = new long[1024];
+        /** Per segment: the cell of the edge it ends, or NONE. */
+        private long[] ends = new long[1024];
         private int count;
+
+        static long key(int cellX, int cellZ) {
+            return (long) cellX << 32 | cellZ & 0xFFFFFFFFL;
+        }
+
+        /** Sets which segment lies above the last one added, and which edge it ends. */
+        void link(long above, long ends) {
+            this.above[count - 1] = above;
+            this.ends[count - 1] = ends;
+        }
         private double[] fans = new double[0];
         private int fanCount;
         private double[] oxbows = new double[0];
@@ -904,7 +930,11 @@ final class RiverLayer {
             if (count == classes.length) {
                 values = Arrays.copyOf(values, values.length * 2);
                 classes = Arrays.copyOf(classes, classes.length * 2);
+                above = Arrays.copyOf(above, above.length * 2);
+                ends = Arrays.copyOf(ends, ends.length * 2);
             }
+            above[count] = NONE;
+            ends[count] = NONE;
             int s = count * STRIDE;
             values[s] = x0;
             values[s + 1] = z0;
@@ -941,6 +971,7 @@ final class RiverLayer {
                         other.values[s + 6], other.values[s + 7], other.values[s + 8], other.values[s + 9],
                         other.values[s + 10], other.values[s + 11], other.values[s + 12], other.values[s + 13],
                         other.values[s + 14], other.values[s + 15], other.classes[i]);
+                link(other.above[i], other.ends[i]);
             }
         }
 
@@ -968,11 +999,22 @@ final class RiverLayer {
             for (int i = 0; i < index.length; i++) {
                 index[i] = lists.get(i).stream().mapToInt(Integer::intValue).toArray();
             }
+            // Edges join where one ends at the cell the next starts from; one that is not built has nothing above it
+            Map<Long, Integer> lastOfEdge = new HashMap<>();
+            for (int segment = 0; segment < count; segment++) {
+                if (ends[segment] != NONE) {
+                    lastOfEdge.put(ends[segment], segment);
+                }
+            }
+            int[] upstream = new int[count];
+            for (int segment = 0; segment < count; segment++) {
+                upstream[segment] = above[segment] == PREVIOUS ? segment - 1 : above[segment] == NONE ? -1 : lastOfEdge.getOrDefault(above[segment], -1);
+            }
             boolean eroded = settings.erosion.enabled;
             return new RiverRegion(originX, originZ, bucketSize, buckets, config,
                     eroded ? config.erodedTextureFadeBase : config.textureFadeBase, eroded ? config.erodedTextureFadePerWidth : config.textureFadePerWidth,
                     Arrays.copyOf(values, count * STRIDE),
-                    Arrays.copyOf(classes, count), index, Arrays.copyOf(fans, fanCount * RiverRegion.FAN_STRIDE),
+                    Arrays.copyOf(classes, count), upstream, index, Arrays.copyOf(fans, fanCount * RiverRegion.FAN_STRIDE),
                     Arrays.copyOf(oxbows, oxbowCount * RiverRegion.OXBOW_STRIDE), settings.rivers.oxbowSpan);
         }
 

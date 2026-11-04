@@ -17,6 +17,19 @@ Builds for Minecraft 26.3, on Fabric, Forge and NeoForge. 1.20.1 stays the main 
 - The unit tests share one terrain logic where they only read the default world, which cuts them from about 7 minutes to 2
 - The terrain hash of the game tests is the same in every version. It counts vanilla's ore veins as stone: 26.x places them after the block columns the hash reads
 
+## v0.5.2
+
+Fixes for rivers leaving lakes and creeks running into them, and fewer cliff patches by default. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
+
+### Water
+
+- A river leaving a lake no longer climbs back up from the lake's surface to the level of the lake's routing cells, which left it running on a ridge above the land beside it, between flat terraces raised along its banks. River water now never stands higher than it did a few nodes upstream, and the river cuts through any higher ground at the level it reached (`rivers.fitReach`)
+- Creeks run on into a lake's water instead of ending at the raised rim along its shore, a dozen blocks or more short of it
+
+### Settings
+
+- Cliff patches on igneous mountains are rarer by default: `mountains.cliffLow` is now 0.5 and `mountains.cliffHigh` 0.66. Existing config files keep their own values
+
 ## v0.5.1
 
 Fixes for raised land along steep streams. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.

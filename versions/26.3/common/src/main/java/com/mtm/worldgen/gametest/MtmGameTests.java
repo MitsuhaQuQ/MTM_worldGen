@@ -94,13 +94,13 @@ public final class MtmGameTests {
      * whenever terrain generation changes on purpose: update it then in every version's tests, together with
      * LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0xfa051de85fb5f22eL;
+    private static final long EXPECTED_COLUMN_HASH = 0x9f1d69f3fd673462L;
     /**
      * The same hash for a world without caves, which leaves out vanilla's cave noise and so holds where Minecraft does
      * not run as Mojang built it: NeoForge's development environment recompiles it from decompiled sources, and floats
      * in vanilla's cave noise come out a bit apart, which moves a few cave walls by a block.
      */
-    private static final long EXPECTED_SOLID_COLUMN_HASH = 0x3e59fbc22d939385L;
+    private static final long EXPECTED_SOLID_COLUMN_HASH = 0xe37247cdcb44d5b9L;
     /** Settings of {@link #EXPECTED_SOLID_COLUMN_HASH}. */
     private static final WorldgenSettings SOLID_SETTINGS = WorldgenSettings.fromJson("{\"general\": {\"caves\": false}}");
 
