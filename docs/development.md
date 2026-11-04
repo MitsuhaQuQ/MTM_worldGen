@@ -26,4 +26,4 @@ gradlew :amidst:windowsZip             Amidst with Java and the Fabric jar for W
 
 Every loader and Minecraft version is tested against the same terrain hash. After an intentional terrain change, update `EXPECTED_COLUMN_HASH` in each version's `MtmGameTests`; the failure message prints the new value.
 
-See [How it works](how-it-works.md) for the design of the terrain logic.
+See [How it works](how-it-works.md) for the design of the terrain logic, and [Architecture](architecture.md) for the code structure and runtime flows.

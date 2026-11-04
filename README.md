@@ -106,6 +106,7 @@ Saves use the settings stored with them; worlds from a seed use `config/mtm_worl
 ## More
 
 - [How it works](docs/how-it-works.md): why vanilla's terrain rules are not enough, and how terrain, rivers and lakes are computed
+- [Architecture](docs/architecture.md): code structure and how a world and its chunks are generated, with UML diagrams
 - [Building and development](docs/development.md)
 
 ## License
