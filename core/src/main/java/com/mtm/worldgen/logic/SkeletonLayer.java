@@ -15,7 +15,8 @@ import java.util.function.DoubleBinaryOperator;
  * <ul>
  *   <li>One low-frequency field divides land into three tiers, low to high: plains, hills and mountains. Being
  *       continuous, it puts hills between plains and mountains by itself, and it also rises into hills alone.
- *       It is held down along coasts, so hills stand in for mountains there.</li>
+ *       It is held down along coasts, so hills stand in for mountains there. It rises into mountain belts along the
+ *       borders of plates that move together, and sinks toward plains where they move apart.</li>
  *   <li>Mountain sites sit on a jittered grid inside the mountain tier. Sites link to the neighbor best aligned with a low-frequency
  *       orientation field, so neighboring ranges run roughly parallel and chain into long ridges.</li>
  *   <li>Mountains stand on a broad massif uplift of their zone. Cross sections are S-shaped, with the half-width
@@ -56,6 +57,8 @@ final class SkeletonLayer {
     private static final double PEAK_BEND = 3.0;
     /** Style field values at which a range is fully eroded and fully igneous. */
     private static final double STYLE_RANGE = 0.3;
+    /** Convergence at which a mountain belt steers its ranges fully along the plate border. */
+    private static final double BELT_FULL = 0.3;
     /** Cross section used to relate a range's width at half height to its full width. */
     private static final double TYPICAL_SHARPNESS = 0.15;
 
@@ -128,6 +131,9 @@ final class SkeletonLayer {
     private final double greatLow;
     private final double greatHigh;
     private final double siteSpacing;
+    /** Half-width of mountain belts along plate borders, and how far the plateaus beside them reach, in blocks. */
+    private final double beltWidth;
+    private final double plateauReach;
     private final double isolatedSpacing;
     private final double plainsHigh;
     private final double hillsMiddle;
@@ -146,6 +152,8 @@ final class SkeletonLayer {
         this.siteSeed = Hashing.derive(seed, SITE_SALT);
         WorldgenSettings.Scale size = settings.scale;
         this.siteSpacing = m.siteSpacing * size.mountains;
+        this.beltWidth = m.beltWidth * size.terrainZones;
+        this.plateauReach = settings.plateaus.beltReach * size.plateaus;
         this.isolatedSpacing = settings.isolated.spacing * size.isolated;
         this.zone = new Fbm(Hashing.derive(seed, ZONE_SALT), 3, m.zoneWavelength * size.terrainZones);
         this.orientation = new Fbm(Hashing.derive(seed, ORIENTATION_SALT), 2, m.orientationWavelength * size.mountains);
@@ -180,7 +188,7 @@ final class SkeletonLayer {
         this.plainsLow = zoneStats.quantile(settings.plains.coverage - settings.plains.fade / 2.0);
         this.plainsHigh = zoneStats.quantile(settings.plains.coverage + settings.plains.fade / 2.0);
         this.hillsMiddle = zoneStats.quantile(settings.plains.coverage + 0.5 * (1.0 - settings.plains.coverage - m.zoneCoverage));
-        NoiseStats plateauStats = new NoiseStats(plateauZone::sample, STATS_SAMPLES_PER_AXIS, STATS_SPACING);
+        NoiseStats plateauStats = new NoiseStats(this::plateauValue, STATS_SAMPLES_PER_AXIS, STATS_SPACING * GREAT_STATS_SPREAD);
         this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
         this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
         this.gentleLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.gentleFade / 2.0);
@@ -273,7 +281,7 @@ final class SkeletonLayer {
      * the coast, like mountains do.
      */
     private double plateauShare(double x, double z, double baseAboveSea) {
-        double zoneValue = plateauZone.sample(x, z);
+        double zoneValue = plateauValue(x, z);
         if (zoneValue <= gentleLow) {
             return 0.0;
         }
@@ -327,7 +335,26 @@ final class SkeletonLayer {
     /** The terrain zone field, lowered toward plains where great plains lie. */
     private double zoneValue(double x, double z) {
         double great = smoothstep(greatLow, greatHigh, greatPlains.sample(x, z));
-        return zone.sample(x, z) - settings.plains.greatStrength * great;
+        double[] plates = plates(x, z);
+        double tectonic = plates[0];
+        double belt = tectonic > 0.0 ? m.beltStrength * tectonic : m.riftStrength * tectonic;
+        return m.zoneNoise * zone.sample(x, z) + m.plateRelief * plates[4] + belt - settings.plains.greatStrength * great;
+    }
+
+    /** The plateau zone field: highland plates, the wide flanks of mountain belts, and noise. */
+    private double plateauValue(double x, double z) {
+        double[] plates = plates(x, z);
+        return plateaus.zoneNoise * plateauZone.sample(x, z) + plateaus.plateHighland * plates[5] + plateaus.beltShare * Math.max(0.0, plates[6]);
+    }
+
+    /** The plates around a position, as {@link ContinentLayer#belt} gives them. */
+    private double[] plates(double x, double z) {
+        return continents.belt(x, z, beltWidth, plateauReach);
+    }
+
+    /** How fast plates move together at a position, weighted by closeness to their border: below 0 where they part. */
+    private double convergence(double x, double z) {
+        return plates(x, z)[0];
     }
 
     /** Height of the isolated peaks and dome hills around a position. */
@@ -592,6 +619,19 @@ final class SkeletonLayer {
         double angle = Math.PI * 1.5 * orientation.sample(site.x, site.z);
         double dirX = Math.cos(angle);
         double dirZ = Math.sin(angle);
+        // In a belt, ranges run along the plate border, as real ones do along the collision that raised them
+        double[] belt = m.beltAlignment > 0.0 ? plates(site.x, site.z) : null;
+        if (belt != null && belt[0] > 0.0) {
+            double along = m.beltAlignment * belt[3] * Math.min(1.0, belt[0] / BELT_FULL);
+            double sign = belt[1] * dirX + belt[2] * dirZ >= 0.0 ? 1.0 : -1.0;
+            double bx = dirX + along * (sign * belt[1] - dirX);
+            double bz = dirZ + along * (sign * belt[2] - dirZ);
+            double length = Math.hypot(bx, bz);
+            if (length > 1e-9) {
+                dirX = bx / length;
+                dirZ = bz / length;
+            }
+        }
         Site ahead = null;
         double bestAhead = m.linkMinAlignment;
         for (int dx = -1; dx <= 1; dx++) {
@@ -646,7 +686,9 @@ final class SkeletonLayer {
 
     /** How igneous a position is: 0 for smooth wind-worn ranges, 1 for steep igneous ones, blending between them. */
     private double style(double x, double z) {
-        return smoothstep(-STYLE_RANGE, STYLE_RANGE, style.sample(x, z));
+        // Belts are young mountains, still steep and sharp; old ranges away from plate borders have worn down
+        double young = m.beltIgneous > 0.0 ? m.beltIgneous * Math.max(0.0, convergence(x, z)) : 0.0;
+        return smoothstep(-STYLE_RANGE, STYLE_RANGE, style.sample(x, z) + young);
     }
 
     private static double mix(double from, double to, double t) {

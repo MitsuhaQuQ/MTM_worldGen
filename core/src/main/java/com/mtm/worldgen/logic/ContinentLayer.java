@@ -3,6 +3,8 @@ package com.mtm.worldgen.logic;
 import com.mtm.worldgen.noise.Fbm;
 import com.mtm.worldgen.noise.Hashing;
 
+import java.util.Arrays;
+
 /**
  * Pipeline step 1: continent and ocean layout. A pure function of seed + block coordinates.
  *
@@ -21,6 +23,10 @@ final class ContinentLayer {
     private static final long DETAIL_SALT = 0x44455441494CL;
     private static final long STRAIT_SALT = 0x535452414954L;
     private static final long ISLAND_SALT = 0x49534C414E44L;
+    private static final long MOTION_SALT = 0x4D4F54494F4EL;
+    private static final long CHARACTER_SALT = 0x43484152L;
+    /** Slowest plate drift, as a share of the fastest. */
+    private static final double MIN_DRIFT = 0.4;
     private static final int ISLAND_CACHE_SIZE = 256;
     /** Beyond the waterline, how far around an island still counts as its shore, as a share of its radius. */
     private static final double ISLAND_REACH = 1.3;
@@ -31,6 +37,12 @@ final class ContinentLayer {
     /** Plates searched in each direction around the containing plate cell. */
     private static final int PLATE_SEARCH = 2;
     private static final int PLATE_WINDOW = PLATE_SEARCH * 2 + 1;
+    /**
+     * Plates searched for belts and plate character, which reach further than coasts do: a plate a little more than a
+     * belt's reach beyond the nearest one still counts, and one missing from a smaller window would make the terrain jump.
+     */
+    private static final int BELT_SEARCH = 3;
+    private static final int BELT_WINDOW = BELT_SEARCH * 2 + 1;
     /** Slots of the per-thread plate cache, a power of two. */
     private static final int PLATE_CACHE_SIZE = 256;
     /**
@@ -67,6 +79,21 @@ final class ContinentLayer {
     private final double high;
     private final double low;
     private final ThreadLocal<Plate[]> plates = ThreadLocal.withInitial(() -> new Plate[PLATE_CACHE_SIZE]);
+    /**
+     * The last belts looked up on each thread, {x, z, width, result...} each: a column asks for them several times, at
+     * its own position and at the warped one its ridges are looked up at, which would push each other out of one slot.
+     */
+    private final ThreadLocal<double[][]> lastBelts = ThreadLocal.withInitial(() -> {
+        double[][] last = new double[BELT_MEMO][3 + BELT_VALUES];
+        for (double[] slot : last) {
+            slot[0] = Double.NaN;
+        }
+        return last;
+    });
+    private static final int BELT_MEMO = 4;
+    private final ThreadLocal<int[]> nextBelt = ThreadLocal.withInitial(() -> new int[1]);
+    /** Values {@link #belt} returns. */
+    static final int BELT_VALUES = 7;
     private final ThreadLocal<Island[]> islands = ThreadLocal.withInitial(() -> new Island[ISLAND_CACHE_SIZE]);
     private final long islandSeed;
     private boolean islandsReady;
@@ -271,6 +298,122 @@ final class ContinentLayer {
         return ownerOcean ? -nearestCoast : nearestCoast;
     }
 
+    /**
+     * Plates around a position, for the terrain tiers: {convergence, border direction x, border direction z, weight,
+     * relief, highland, wide convergence}. Wide convergence is the same as convergence, reaching the wide width instead. Convergence is how fast the plates on either side move together, from -1 (apart) to 1,
+     * weighted by closeness to the border, which falls to 0 at the given width in blocks. The direction runs along the
+     * border. Relief and highland are each plate's own character, from -1 to 1, blended across the same width at its
+     * borders, so that each plate holds one kind of land over its whole interior.
+     *
+     * <p>Every pair of nearby plates counts, through the larger of their two distances less the nearest one's: next to
+     * the border of the nearest plate that is the distance to it, and where three plates meet, the border between the
+     * other two joins in. The value only depends on distances, so it is continuous across borders and junctions.
+     */
+    double[] belt(double x, double z, double width, double wide) {
+        double[][] memo = lastBelts.get();
+        for (double[] slot : memo) {
+            if (slot[0] == x && slot[1] == z && slot[2] == width + wide) {
+                return Arrays.copyOfRange(slot, 3, 3 + BELT_VALUES);
+            }
+        }
+        double[] result = computeBelt(x, z, width, wide);
+        int[] next = nextBelt.get();
+        double[] last = memo[next[0]];
+        next[0] = (next[0] + 1) % BELT_MEMO;
+        last[0] = x;
+        last[1] = z;
+        last[2] = width + wide;
+        System.arraycopy(result, 0, last, 3, BELT_VALUES);
+        return result;
+    }
+
+    private double[] computeBelt(double x, double z, double width, double wide) {
+        double wx = x + config.warpAmplitude * warpX.sample(x, z);
+        double wz = z + config.warpAmplitude * warpZ.sample(x, z);
+        double u = wx / plateSpacing;
+        double v = wz / plateSpacing;
+        double reach = width / plateSpacing;
+        double wideReach = Math.max(reach, wide / plateSpacing);
+        int cellU = (int) Math.floor(u);
+        int cellV = (int) Math.floor(v);
+        Plate[] near = new Plate[BELT_WINDOW * BELT_WINDOW];
+        double[] distances = new double[near.length];
+        int count = 0;
+        double nearest = Double.MAX_VALUE;
+        for (int du = -BELT_SEARCH; du <= BELT_SEARCH; du++) {
+            for (int dv = -BELT_SEARCH; dv <= BELT_SEARCH; dv++) {
+                Plate plate = plate(cellU + du, cellV + dv);
+                near[count] = plate;
+                distances[count] = Math.hypot(u - plate.u, v - plate.v);
+                nearest = Math.min(nearest, distances[count]);
+                count++;
+            }
+        }
+        // Distances are halved to the border, so plates further than twice the reach take no part
+        int kept = 0;
+        for (int i = 0; i < count; i++) {
+            if (distances[i] - nearest < 2.0 * wideReach) {
+                near[kept] = near[i];
+                distances[kept] = distances[i];
+                kept++;
+            }
+        }
+        double convergence = 0.0;
+        double wideConvergence = 0.0;
+        double weightSum = 0.0;
+        double cos2 = 0.0;
+        double sin2 = 0.0;
+        for (int i = 0; i < kept; i++) {
+            for (int j = i + 1; j < kept; j++) {
+                double border = 0.5 * (Math.max(distances[i], distances[j]) - nearest);
+                if (border >= wideReach) {
+                    continue;
+                }
+                double t = Math.min(1.0, border / reach);
+                double weight = (1.0 - t * t) * (1.0 - t * t);
+                double tw = border / wideReach;
+                double wideWeight = (1.0 - tw * tw) * (1.0 - tw * tw);
+                double nu = near[j].u - near[i].u;
+                double nv = near[j].v - near[i].v;
+                double length = Math.hypot(nu, nv);
+                if (length <= 0.0) {
+                    continue;
+                }
+                nu /= length;
+                nv /= length;
+                // Closing speed along the line between the two plates, from -1 to 1
+                double closing = 0.5 * ((near[i].driftU - near[j].driftU) * nu + (near[i].driftV - near[j].driftV) * nv);
+                convergence += weight * closing;
+                wideConvergence += wideWeight * closing;
+                weightSum += weight;
+                // Directions along borders have no sign, so they are averaged at double angle
+                cos2 += weight * (nv * nv - nu * nu);
+                sin2 += weight * (-2.0 * nu * nv);
+            }
+        }
+        double characterWeight = 0.0;
+        double relief = 0.0;
+        double highland = 0.0;
+        for (int i = 0; i < kept; i++) {
+            double t = Math.min(1.0, 0.5 * (distances[i] - nearest) / reach);
+            double weight = 1.0 - t * t * (3.0 - 2.0 * t);
+            characterWeight += weight;
+            relief += weight * near[i].relief;
+            highland += weight * near[i].highland;
+        }
+        relief /= characterWeight;
+        highland /= characterWeight;
+        if (weightSum <= 0.0) {
+            return new double[]{0.0, 0.0, 0.0, 0.0, relief, highland, clamp(wideConvergence)};
+        }
+        double angle = 0.5 * Math.atan2(sin2, cos2);
+        return new double[]{clamp(convergence), Math.cos(angle), Math.sin(angle), Math.min(1.0, weightSum), relief, highland, clamp(wideConvergence)};
+    }
+
+    private static double clamp(double value) {
+        return Math.max(-1.0, Math.min(1.0, value));
+    }
+
     /** Center and group of a plate. Plates are far larger than any sampling step, so nearly every lookup is a repeat. */
     private Plate plate(int cellU, int cellV) {
         Plate[] cache = plates.get();
@@ -281,7 +424,15 @@ final class ContinentLayer {
             double pu = cellU + 0.5 + config.plateJitter * (Hashing.unit(hash) - 0.5);
             double pv = cellV + 0.5 + config.plateJitter * (Hashing.unit(Hashing.mix(hash)) - 0.5);
             boolean ocean = Hashing.unit(Hashing.derive(hash, OCEAN_PLATE_SALT)) < config.oceanPlateFraction;
-            plate = new Plate(cellU, cellV, pu, pv, ocean ? OCEAN_GROUP : continentGroup(pu, pv));
+            long motion = Hashing.derive(hash, MOTION_SALT);
+            double heading = 2.0 * Math.PI * Hashing.unit(motion);
+            double speed = MIN_DRIFT + (1.0 - MIN_DRIFT) * Hashing.unit(Hashing.mix(motion));
+            long character = Hashing.derive(hash, CHARACTER_SALT);
+            plate = new Plate(cellU, cellV, pu, pv, ocean ? OCEAN_GROUP : continentGroup(pu, pv), speed * Math.cos(heading), speed * Math.sin(heading),
+                    // A plate is highland or not as a whole, which keeps it out of the threshold's reach and its plateau in
+                    // one piece; plateaus are continental, so an ocean plate is never one
+                    2.0 * Hashing.unit(character) - 1.0,
+                    !ocean && Hashing.unit(Hashing.mix(character)) < settings.plateaus.plateChance ? 1.0 : -1.0);
             cache[slot] = plate;
         }
         return plate;
@@ -317,6 +468,6 @@ final class ContinentLayer {
     private record Island(int cellX, int cellZ, double x, double z, double radius, double rise, IslandKind kind) {
     }
 
-    private record Plate(int cellU, int cellV, double u, double v, long group) {
+    private record Plate(int cellU, int cellV, double u, double v, long group, double driftU, double driftV, double relief, double highland) {
     }
 }

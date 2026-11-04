@@ -46,6 +46,13 @@ public final class RiverRegion {
     private static final double BLEND_RADIUS = 4.0;
     /** Share of the reach over which a river's say in blended values fades out, so nothing jumps where it leaves the query. */
     private static final double REACH_FADE = 0.25;
+    /**
+     * Grade at which the upper valley wall gives way over the last REACH_FADE of the reach, the steepest mountains get.
+     * A wide river's floor can take up most of the reach, and land far above it, such as a plateau, was capped by the
+     * wall up to the edge of the reach and then stood at its full height one block further out, as a wall a hundred
+     * blocks high.
+     */
+    private static final double REACH_WALL_GRADE = 1.5;
     /** How steeply the land a pool holds up drops away past the ends of its segment, as a grade. */
     private static final double POOL_END_GRADE = 4.0;
     /** Strength a river counts with at its very source, where dividing by zero would otherwise loom. */
@@ -229,7 +236,8 @@ public final class RiverRegion {
             double past = (classes[segment] & POOL) != 0 ? Math.max(0.0, Math.max(-along, along - 1.0)) * Math.sqrt(dx * dx + dz * dz) : 0.0;
             double bankWall = Math.max(0.0, distance - half) * config.valleyWallMaxGrade + past * POOL_END_GRADE;
             low = Math.max(low, level + config.bankHeight - bankWall);
-            high = Math.min(high, level + config.bankHeight + wall);
+            double giving = Math.max(0.0, distance - (1.0 - REACH_FADE) * reach) * REACH_WALL_GRADE;
+            high = Math.min(high, level + config.bankHeight + wall + giving);
             double inReach = smooth((reach - distance) / (REACH_FADE * reach));
             double closeness = 1.0 / (distance + BLEND_RADIUS);
             closeness *= closeness;

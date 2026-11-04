@@ -263,6 +263,25 @@ public final class WorldgenSettings {
     public static final class Mountains {
         /** Wavelength of the tier field that divides land into plains, hills and mountains. */
         public double zoneWavelength = 11264.0;
+        /**
+         * Plate tectonics: every plate drifts its own way. Where two plates move together, the tier field rises along
+         * their border into a mountain belt by up to beltStrength (the tier noise spans about -1 to 1); where they move
+         * apart, it sinks toward plains by up to riftStrength. Belts reach beltWidth blocks to either side of the border.
+         */
+        public double beltStrength = 2.5;
+        public double riftStrength = 1.0;
+        /**
+         * Each plate is lowland or upland country of its own, from -1 to 1, which moves the tier field by up to
+         * plateRelief over the whole plate, so plains, hills and mountains each hold wide connected stretches. The tier
+         * noise only adds zoneNoise of its own on top, for variety within them.
+         */
+        public double plateRelief = 0.6;
+        public double zoneNoise = 0.5;
+        public double beltWidth = 4000.0;
+        /** How closely ranges in a belt follow the plate border, from 0 (the orientation field alone) to 1. */
+        public double beltAlignment = 0.8;
+        /** How far a belt tips its ranges toward the steep igneous style, on the scale of the style field. */
+        public double beltIgneous = 0.3;
         /** Share of the world in the mountain tier. */
         public double zoneCoverage = 0.30;
         /** Within this many blocks of the coast, mountains give way to hills. */
@@ -365,6 +384,17 @@ public final class WorldgenSettings {
         /** Size in blocks of the noise that places plateaus, and the share of the land they cover. */
         public double zoneWavelength = 12288.0;
         public double coverage = 0.12;
+        /**
+         * Like the tiers, plateaus follow the plates: plateChance of the continental plates are highland as a whole,
+         * which lifts their plateau field by plateHighland, and wide
+         * table lands flank the mountain belts where plates collide, reaching beltReach blocks from the border
+         * (beltShare). The plateau noise adds zoneNoise of its own.
+         */
+        public double plateChance = 0.2;
+        public double plateHighland = 1.0;
+        public double beltShare = 1.0;
+        public double beltReach = 12000.0;
+        public double zoneNoise = 0.15;
         /**
          * Width of the plateau edge, as a share of the zone noise: narrow on the steep stretches that stand as table land
          * escarpments, wide on the gentle slopes that make up most of an edge. Which stretch is which follows a noise
@@ -610,10 +640,13 @@ public final class WorldgenSettings {
         public double pondDepth = 3.0;
         public double shoreWarp = 0.3;
         public double shoreWavelength = 18.0;
-        /** Green land around the pond, and the dunes cleared around it, as multiples of its radius. */
+        /**
+         * Green land around the pond, and the dunes cleared around it, as multiples of its radius. Dunes fade out between
+         * the two, which needs room: cleared at 6 radii, they dropped at up to 44% around small ponds.
+         */
         public double greenRadius = 3.0;
         public double greenWarp = 0.25;
-        public double clearRadius = 6.0;
+        public double clearRadius = 9.5;
         /** The ground around an oasis rises no more than this across the cleared radius. */
         public double maxRelief = 10.0;
         /** Share of the grass along the water that grows sugar cane, and its tallest stalks. */
@@ -1274,6 +1307,10 @@ public final class WorldgenSettings {
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.fitReach >= 0, "rivers.fitReach must not be negative");
         require(rivers.lakeBackwater >= 0, "rivers.lakeBackwater must not be negative");
+        require(mountains.beltStrength >= 0.0 && mountains.riftStrength >= 0.0 && mountains.beltIgneous >= 0.0,
+                "mountains.beltStrength, riftStrength and beltIgneous must not be negative");
+        require(mountains.beltWidth > 0.0, "mountains.beltWidth must be positive");
+        require(mountains.beltAlignment >= 0.0 && mountains.beltAlignment <= 1.0, "mountains.beltAlignment must be between 0 and 1");
         require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
         require(rivers.oxbowChance >= 0.0 && rivers.oxbowChance <= 1.0 && rivers.oxbowMaxGrade >= 0.0 && rivers.oxbowRadiusMin > 0.0
                         && rivers.oxbowRadiusMax >= rivers.oxbowRadiusMin && rivers.oxbowWidth > 0.0 && rivers.oxbowMinWidth >= 2.0

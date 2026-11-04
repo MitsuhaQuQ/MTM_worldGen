@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 11;
+    public static final int ALGORITHM_VERSION = 12;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -499,6 +499,11 @@ public final class TerrainLogic {
     /** The sinkhole of a site cell as x, floor height, z, or null. */
     public double[] sinkholePit(int cellX, int cellZ) {
         return sinkholes.pit(cellX, cellZ);
+    }
+
+    /** Whether a position lies on the walls or floor of a sinkhole. */
+    boolean inSinkhole(double x, double z) {
+        return sinkholes.contains(x, z);
     }
 
     /** Whether a block column has overhangs. */

@@ -21,9 +21,10 @@ Formerly MTM Worldgen; the mod id is still `mtm_worldgen`. It adds a new world t
 ## Terrain
 
 - **Continents and oceans.** Land is grouped into continents separated by straits and open oceans, about 30% ocean by default.
+- **Plate tectonics.** Continents are made of drifting plates. Mountain belts rise where plates collide, with ranges running along the collision, and plains spread where they pull apart. Whole plates are lowland, upland or highland, so plains, plateaus and mountain country each cover areas tens of kilometres across.
 - **Plains, hills and mountains.** Hills always lie between plains and mountains and can also stand alone. Great plains over ten thousand blocks across leave room for big cities.
 - **Mountains.** Ranges follow winding ridges, with isolated peaks where hills meet mountains and rounded dome hills among the hills. Along coasts, mountains give way to hills.
-- **Plateaus.** Table lands at a common height, with steep or gentle edges.
+- **Plateaus.** Table lands at a common height, with steep or gentle edges, on highland plates and beside mountain belts.
 - **Rock detail.** Cliff bands with exposed rock strata on steep faces, overhangs on high cliffs, sea stacks off rocky coasts, and sinkholes in dry uplands that open into caves.
 - **Deserts.** Fields of dune ridges shaped by a single wind direction, with small oases of grass, trees and sugar cane between them.
 - **Climate.** Tropical, temperate, cold and polar zones, each with its own snow line and biomes. All vanilla biomes are kept, and the deep dark spreads deep underground.

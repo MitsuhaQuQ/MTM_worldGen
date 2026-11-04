@@ -136,8 +136,10 @@ class TerrainLogicTest {
             if (h < sea) {
                 continue;
             }
-            // Cliffs and sea stacks are exempt from slope limits by design, and a grade spans a column and its neighbors
-            if (logic.sampleCliffShare(x, z) > 0.0 || logic.sampleCliffShare(x + 1, z) > 0.0 || logic.sampleCliffShare(x, z + 1) > 0.0) {
+            // Cliffs, sea stacks and the walls of sinkholes are exempt from slope limits by design, and a grade spans a
+            // column and its neighbors
+            if (logic.sampleCliffShare(x, z) > 0.0 || logic.sampleCliffShare(x + 1, z) > 0.0 || logic.sampleCliffShare(x, z + 1) > 0.0
+                    || logic.inSinkhole(x, z) || logic.inSinkhole(x + 1, z) || logic.inSinkhole(x, z + 1)) {
                 continue;
             }
             // River banks are channel structure, steeper than any slope limit by design
@@ -170,7 +172,8 @@ class TerrainLogicTest {
             columns += surface >= SETTINGS.general.seaLevel ? 1 : 0;
             assertEquals(logic.sampleSurfaceHeight(x, z), surface);
             if (!logic.hasOverhangs(x, z)) {
-                assertEquals(surface, logic.solidHeight(x, 200, z));
+                // Above the ground, where a sinkhole's chamber below cannot reach
+                assertEquals(surface, logic.solidHeight(x, (int) surface + 8, z));
                 continue;
             }
             overhangs++;
@@ -480,8 +483,8 @@ class TerrainLogicTest {
         int inside = 0;
         double steepest = 0.0;
         for (int i = 0; i < 20000; i++) {
-            int x = -20000 + random.nextInt(2400);
-            int z = 16400 + random.nextInt(2400);
+            int x = -28000 + random.nextInt(2400);
+            int z = 29600 + random.nextInt(2400);
             double dunes = logic.sampleSurfaceHeight(x, z) - plain.sampleSurfaceHeight(x, z);
             assertTrue(dunes > -1e-9, "dunes dig at " + x + "," + z);
             if (dunes > 0.0) {
@@ -498,8 +501,9 @@ class TerrainLogicTest {
         assertTrue(steepest < 0.6 * SETTINGS.slopes.hills / 100.0, "dunes as steep as " + steepest);
 
         int oases = 0;
-        for (int x = -24000; x <= 24000; x += 48) {
-            for (int z = -24000; z <= 24000; z += 48) {
+        // Around the desert sampled above
+        for (int x = -36000; x <= -24000; x += 48) {
+            for (int z = 24000; z <= 36000; z += 48) {
                 if (!logic.isOasis(x, z)) {
                     continue;
                 }
