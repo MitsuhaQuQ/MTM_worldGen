@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 13;
+    public static final int ALGORITHM_VERSION = 15;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -33,6 +33,8 @@ public final class TerrainLogic {
     private static final int NOISE_CELL_WIDTH = 4;
 
 
+    /** Sink share at which an inland lake's basin and rim shape the land in full, where the basin starts to be dug. */
+    private static final double SINK_RIM_FADE = 0.2;
     private static final int FIELD_HEIGHT = 0;
     private static final int FIELD_COAST_DISTANCE = 1;
 
@@ -1033,7 +1035,12 @@ public final class TerrainLogic {
         return riversAt(x, z).oxbow(x, z);
     }
 
-    /** Land dug out for an inland lake, which unlike other lakes has no hollow of its own to fill. */
+    /**
+     * Land dug out for an inland lake, which unlike other lakes has no hollow of its own to fill. Around it, land is
+     * held down to the rim, more firmly the more the sink holds a position. Held down at full strength wherever the sink
+     * reached at all, which ends at the centers of the routing cells beyond it, higher land around it such as a sea
+     * cliff was cut flat along straight lines meeting at right angles, with walls thirty blocks high.
+     */
     private double sinkBasin(double x, double z, double[] lake, double land) {
         if (lake[2] <= 0.0) {
             return land;
@@ -1041,7 +1048,8 @@ public final class TerrainLogic {
         WorldgenSettings.Rivers rivers = settings.rivers;
         double dug = smooth((lake[2] + rivers.sinkWarp * sinkShore.sample(x, z) - 0.2) / 0.5);
         double rim = lake[1] + rivers.sinkRim;
-        return Math.min(land, rim + (lake[1] - rivers.sinkDepth - rim) * dug);
+        double held = Math.min(land, rim + (lake[1] - rivers.sinkDepth - rim) * dug);
+        return land + (held - land) * smooth(lake[2] / SINK_RIM_FADE);
     }
 
     /** Whether a sea stack can stand at a position: in the water a little way off a rocky coast. */

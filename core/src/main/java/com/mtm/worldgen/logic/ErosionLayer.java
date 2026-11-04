@@ -53,6 +53,8 @@ final class ErosionLayer {
     /** Points along each piece of a creek's course tried before the nearest is refined. */
     private static final int CURVE_STEPS = 6;
     /** Side creeks no longer than this many cells before they join another are left out. */
+    /** Lake cells a creek runs on into, straight ahead, before the lake takes over. */
+    private static final int CREEK_LAKE_CELLS = 2;
     private static final int STUB_CELLS = 2;
 
     private final WorldgenSettings settings;
@@ -639,6 +641,29 @@ final class ErosionLayer {
             }
         }
         pruneStraightCreeks(creek, down);
+        // Creeks run on into the lakes they reach. A lake's cells begin where its share does, along its rim, which
+        // stands above the water: ending at the first of them, a creek stopped short of the lake behind a dry bank.
+        // Its course goes on straight, and it ends where the land first lies below the water
+        List<Integer> mouths = new ArrayList<>();
+        for (int index = 0; index < n; index++) {
+            if (creek[index] > 0.0F && down[index] >= 0 && lake[index + offset[down[index]]]) {
+                mouths.add(index);
+            }
+        }
+        for (int index : mouths) {
+            int d = down[index];
+            int next = index + offset[d];
+            for (int step = 0; step < CREEK_LAKE_CELLS && lake[next] && creek[next] <= 0.0F; step++) {
+                int col = next % size;
+                int row = next / size;
+                if (col == 0 || row == 0 || col == size - 1 || row == size - 1) {
+                    break;
+                }
+                creek[next] = creek[index];
+                down[next] = (byte) d;
+                next += offset[d];
+            }
+        }
         return new Eroded(change, creek, down);
     }
 

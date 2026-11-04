@@ -9,6 +9,8 @@ The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so e
 - Plate tectonics now lay out the land. Every plate drifts its own way: where two plates move together, a mountain belt rises along their border, with ranges running along it; where they move apart, the land sinks into plains and basins. Each plate is lowland or upland country as a whole, and some are highland plates whose plateaus stay in one piece, with more plateaus flanking the belts. Plains, hills, plateaus and mountains each spread over areas tens of kilometres across instead of patches of noise. All worlds change
 - Belt mountains are young and steep, in the igneous style; ranges away from plate borders are older and worn down
 - Plateaus no longer end in a wall a hundred blocks high where they come near a wide river valley
+- Land around inland lakes is no longer cut flat along straight lines meeting at right angles, which left walls tens of blocks high where higher ground such as a sea cliff came near one
+- Creeks run on into the lakes they reach, instead of ending behind the dry rim along the shore
 - Dunes fade out more gently around oases
 - Trunk rivers widen with their catchment, from 100 blocks up to the 200 of major trunks, instead of keeping one width until they become a major trunk
 - Rivers no longer meet a lake a step below its surface. Where eroded ground near the shore lies below the lake, the river used to be fitted onto it, and the lake stood up to four blocks above the river at its mouth. Rivers are now held at the lake's level for the last nodes before it (`rivers.lakeBackwater`, 5 by default)
