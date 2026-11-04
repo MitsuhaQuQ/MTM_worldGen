@@ -694,6 +694,108 @@ class TerrainLogicTest {
         assertTrue(lakes > 0, "no lake centers found");
     }
 
+    /**
+     * Follows each river into the lake it feeds along its actual course, segment by segment, rather than straight
+     * between routing nodes, which would miss the bends. From where the river first holds water to the lake, the
+     * water must not be cut off by dry ground, nor climb on its way down. Regions on both sides of zero cover
+     * negative coordinates and region borders.
+     */
+    @Test
+    void riversEnterLakesContinuously() {
+        TerrainLogic logic = SHARED;
+        int regionSize = SETTINGS.general.regionSize;
+        double approach = 96.0;
+        int inlets = 0;
+        int nearBorders = 0;
+        int blocked = 0;
+        int climbing = 0;
+        List<String> worst = new ArrayList<>();
+        for (int rx = -4; rx < 4; rx++) {
+            for (int rz = -4; rz < 4; rz++) {
+                RiverRegion rivers = logic.riverRegion(rx, rz);
+                for (int s = 0; s < rivers.segments(); s++) {
+                    double ex = rivers.endX(s);
+                    double ez = rivers.endZ(s);
+                    // Each segment once, by the region its downstream end lies in
+                    if (Math.floorDiv((int) Math.floor(ex), regionSize) != rx || Math.floorDiv((int) Math.floor(ez), regionSize) != rz
+                            || !inLake(logic, ex, ez) || inLake(logic, rivers.startX(s), rivers.startZ(s))) {
+                        continue;
+                    }
+                    List<double[]> path = approachPath(rivers, s, approach);
+                    double dryRun = 0.0;
+                    double longestDry = 0.0;
+                    double lowest = Double.NaN;
+                    double climb = 0.0;
+                    boolean wet = false;
+                    for (double[] point : path) {
+                        double water = logic.sampleWaterLevel(point[0], point[1]);
+                        double ground = logic.sampleSurfaceHeight(point[0], point[1]);
+                        boolean holds = !Double.isNaN(water) && ground < water;
+                        if (holds) {
+                            wet = true;
+                            dryRun = 0.0;
+                            climb = Math.max(climb, Double.isNaN(lowest) ? 0.0 : water - lowest);
+                            lowest = Double.isNaN(lowest) ? water : Math.min(lowest, water);
+                        } else if (wet) {
+                            dryRun += point[2];
+                            longestDry = Math.max(longestDry, dryRun);
+                        }
+                    }
+                    if (!wet) {
+                        // A source still too weak to hold water
+                        continue;
+                    }
+                    inlets++;
+                    double border = Math.min(Math.min(Math.floorMod((int) ex, regionSize), regionSize - Math.floorMod((int) ex, regionSize)),
+                            Math.min(Math.floorMod((int) ez, regionSize), regionSize - Math.floorMod((int) ez, regionSize)));
+                    nearBorders += border < approach ? 1 : 0;
+                    boolean cut = longestDry > 2.0;
+                    boolean rises = climb > 1.0;
+                    blocked += cut ? 1 : 0;
+                    climbing += rises ? 1 : 0;
+                    if ((cut || rises) && worst.size() < 10) {
+                        worst.add(String.format("%s %.0f %.0f: dry %.0f, climbs %.1f", rivers.riverClass(s), ex, ez, longestDry, climb));
+                    }
+                }
+            }
+        }
+        System.out.println("lake inlets " + inlets + " near region borders " + nearBorders + " cut off " + blocked + " climbing " + climbing + " " + worst);
+        assertTrue(inlets > 20, "too few lake inlets: " + inlets);
+        assertTrue(blocked <= inlets / 50, blocked + " of " + inlets + " lake inlets are cut off by dry ground: " + worst);
+        assertTrue(climbing <= inlets / 50, climbing + " of " + inlets + " lake inlets climb on the way in: " + worst);
+    }
+
+    private static boolean inLake(TerrainLogic logic, double x, double z) {
+        double lake = logic.sampleLakeLevel(x, z);
+        return !Double.isNaN(lake) && logic.sampleSurfaceHeight(x, z) < lake;
+    }
+
+    /**
+     * Points every block along a river's course, from up to this far upstream of a segment down to its end, each with
+     * the length of course it stands for.
+     */
+    private static List<double[]> approachPath(RiverRegion rivers, int segment, double approach) {
+        List<Integer> chain = new ArrayList<>();
+        double length = 0.0;
+        for (int s = segment; s >= 0 && length < approach; s = rivers.upstream(s)) {
+            chain.add(s);
+            length += Math.hypot(rivers.endX(s) - rivers.startX(s), rivers.endZ(s) - rivers.startZ(s));
+        }
+        Collections.reverse(chain);
+        List<double[]> path = new ArrayList<>();
+        for (int s : chain) {
+            double x0 = rivers.startX(s);
+            double z0 = rivers.startZ(s);
+            double span = Math.hypot(rivers.endX(s) - x0, rivers.endZ(s) - z0);
+            int steps = Math.max(1, (int) Math.ceil(span));
+            for (int i = 1; i <= steps; i++) {
+                double t = (double) i / steps;
+                path.add(new double[] {x0 + t * (rivers.endX(s) - x0), z0 + t * (rivers.endZ(s) - z0), span / steps});
+            }
+        }
+        return path;
+    }
+
     /** Where a river's route ends in the sea, the real surface there must be sea, with nothing closing off the mouth. */
     @Test
     void riversEndInOpenSea() {

@@ -816,10 +816,10 @@ final class RiverLayer {
 
     /**
      * Cells beyond a region whose edges it builds: those a query can reach, the deltas that reach into them, and the
-     * edges fitReach nodes above them, whose water fitted levels look back on.
+     * edges fitReach nodes above and lakeBackwater nodes below them, whose water fitted levels look at.
      */
     static int margin(WorldgenSettings.Rivers config) {
-        return queryMargin(config) + Math.max(config.fitReach, config.deltaLength
+        return queryMargin(config) + Math.max(Math.max(config.fitReach, config.lakeBackwater), config.deltaLength
                 + ceilDiv((int) Math.ceil(config.deltaSpread + config.deltaOverrun), config.flowCellSize));
     }
 

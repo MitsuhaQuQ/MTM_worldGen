@@ -89,6 +89,12 @@ public final class RiverRegion {
     private final AtomicLongArray lowered;
     /** Levels per segment end lowered onto the ground right there, before looking upstream, as raw long bits. */
     private final AtomicLongArray grounded;
+    /** Lake surface at a position, or NaN outside lakes; null when levels stay as routed. */
+    private final DoubleBinaryOperator lake;
+    /** The segment below each one, or -1 where the river ends or leaves this region's segments; null when not lowered. */
+    private final int[] downstream;
+    /** Surface of the lake each segment runs into a bounded way downstream, as raw long bits, NaN until first needed. */
+    private final AtomicLongArray floors;
 
     /**
      * @param originX    block X of the region's corner
@@ -107,22 +113,28 @@ public final class RiverRegion {
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
                 double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan) {
-        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan, null);
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan, null, null);
     }
 
     private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
                         double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan,
-                        DoubleBinaryOperator ground) {
+                        DoubleBinaryOperator ground, DoubleBinaryOperator lake) {
         this.fans = fans;
         this.oxbows = oxbows;
         this.oxbowSpan = oxbowSpan;
         this.ground = ground;
+        this.lake = lake;
         this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
         this.grounded = ground == null ? null : new AtomicLongArray(2 * classes.length);
+        this.floors = ground == null ? null : new AtomicLongArray(classes.length);
+        this.downstream = ground == null ? null : downstream(segments, upstream);
         if (lowered != null) {
             for (int i = 0; i < lowered.length(); i++) {
                 lowered.set(i, NAN_BITS);
                 grounded.set(i, NAN_BITS);
+            }
+            for (int i = 0; i < floors.length(); i++) {
+                floors.set(i, NAN_BITS);
             }
         }
         this.reach = config.queryReach;
@@ -287,6 +299,11 @@ public final class RiverRegion {
         return segments[segment * STRIDE + 4];
     }
 
+    /** The segment above this one along the main stem, or -1 at a source or where the stem leaves this region's segments. */
+    int upstream(int segment) {
+        return upstream[segment];
+    }
+
     public FlowRegion.RiverClass riverClass(int segment) {
         return CLASSES[classes[segment] & ~(SANDY | POOL)];
     }
@@ -297,9 +314,39 @@ public final class RiverRegion {
      * was lowered onto low ground, such as a lake lower than its routing cells, does not climb back up over the higher
      * ground below it, which would leave it running on a ridge, but cuts through at the level it reached.
      */
-    RiverRegion lowered(DoubleBinaryOperator ground) {
+    RiverRegion lowered(DoubleBinaryOperator ground, DoubleBinaryOperator lake) {
         return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan,
-                ground);
+                ground, lake);
+    }
+
+    /**
+     * The segment below each one. Within an edge that is the next segment; past its end, the edge starting at the node
+     * it ends on, which a tributary reaches as well as the main stem.
+     */
+    private static int[] downstream(double[] segments, int[] upstream) {
+        int count = upstream.length;
+        int[] below = new int[count];
+        Arrays.fill(below, -1);
+        java.util.Map<Long, Integer> starts = new java.util.HashMap<>();
+        for (int segment = 0; segment < count; segment++) {
+            int above = upstream[segment];
+            if (above >= 0 && above == segment - 1) {
+                below[above] = segment;
+            } else {
+                starts.putIfAbsent(pointKey(segments[segment * STRIDE], segments[segment * STRIDE + 1]), segment);
+            }
+        }
+        for (int segment = 0; segment < count; segment++) {
+            if (below[segment] < 0) {
+                Integer next = starts.get(pointKey(segments[segment * STRIDE + 2], segments[segment * STRIDE + 3]));
+                below[segment] = next != null && next != segment ? next : -1;
+            }
+        }
+        return below;
+    }
+
+    private static long pointKey(double x, double z) {
+        return Double.doubleToLongBits(x) * 31 + Double.doubleToLongBits(z);
     }
 
     /**
@@ -426,8 +473,34 @@ public final class RiverRegion {
         } else {
             level = Math.min(grounded(segment, 1), level(segment, 0));
         }
+        // Never below the lake the river runs into: lowered onto eroded ground lower than the lake, it met the lake a
+        // step below its surface, and the lake stood up to four blocks above it at the shore
+        double floor = floor(segment);
+        if (!Double.isNaN(floor)) {
+            level = Math.max(level, Math.min(floor, segments[segment * STRIDE + 8 + end]));
+        }
         lowered.set(slot, Double.doubleToRawLongBits(level));
         return level;
+    }
+
+    /** Surface of the lake a segment ends in or runs into within rivers.lakeBackwater nodes, or NaN if there is none. */
+    private double floor(int segment) {
+        long bits = floors.get(segment);
+        if (bits != NAN_BITS) {
+            return Double.longBitsToDouble(bits);
+        }
+        double floor = Double.NEGATIVE_INFINITY;
+        int below = segment;
+        for (int k = config.lakeBackwater * config.curveSegments; k >= 0 && below >= 0; k--) {
+            double surface = lake.applyAsDouble(segments[below * STRIDE + 2], segments[below * STRIDE + 3]);
+            if (!Double.isNaN(surface)) {
+                floor = surface;
+                break;
+            }
+            below = downstream[below];
+        }
+        floors.set(segment, Double.doubleToRawLongBits(floor));
+        return floor == Double.NEGATIVE_INFINITY ? Double.NaN : floor;
     }
 
     /** Water level at one end of a segment, lowered onto the ground there, before looking upstream. */

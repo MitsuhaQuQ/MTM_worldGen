@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 10;
+    public static final int ALGORITHM_VERSION = 11;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -313,12 +313,16 @@ public final class TerrainLogic {
      */
     private RiverRegion fitRivers(int regionX, int regionZ) {
         // Lakes keep the rivers through them at their own level: their beds lie below it, and a river lowered onto the
-        // bed would run under the lake, which then leaves no channel for it and walls it in at the shore
+        // bed would run under the lake, which then leaves no channel for it and walls it in at the shore. Nor do they
+        // stay above it: a river skirting a lake on higher ground dropped into it and came out again four blocks up
         return riverRegion(regionX, regionZ).lowered((x, z) -> {
             double[] lake = sampleLake(x, z);
+            if (lake != null && lake[0] > LAKE_EDGE) {
+                return lake[1];
+            }
             double land = sampleLandform(x, z);
             return lake == null ? land : Math.max(land, lake[1]);
-        });
+        }, this::sampleLakeLevel);
     }
 
     /** Coarse surface height at a cell center, by global cell index. */

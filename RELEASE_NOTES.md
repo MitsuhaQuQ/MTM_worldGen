@@ -1,5 +1,19 @@
 # Release notes
 
+## Unreleased
+
+The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so existing worlds, configs and servers keep working.
+
+### Terrain
+
+- Rivers no longer meet a lake a step below its surface. Where eroded ground near the shore lies below the lake, the river used to be fitted onto it, and the lake stood up to four blocks above the river at its mouth. Rivers are now held at the lake's level for the last nodes before it (`rivers.lakeBackwater`, 5 by default)
+- A river passing through a lake takes the lake's level, instead of staying above it on higher ground and dropping into the lake and out again
+- Terrain changes near lakes, so chunks generated after the update can meet older ones with a seam there
+
+### Development
+
+- A new unit test follows rivers into lakes along their actual courses and checks that the water stays continuous and never climbs on the way in
+
 ## v0.6.0
 
 Builds for Minecraft 26.3, on Fabric, Forge and NeoForge. 1.20.1 stays the main version. Terrain is the same block for block in every version and on every loader; worlds cannot be moved from 1.20.1 to 26.x yet.

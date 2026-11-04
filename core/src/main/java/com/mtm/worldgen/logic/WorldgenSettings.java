@@ -975,6 +975,12 @@ public final class WorldgenSettings {
          * eroded ground, cuts through at the level it already reached instead of climbing back up.
          */
         public int fitReach = 4;
+        /**
+         * With erosion, river water is held no lower than the lake it runs into up to this many nodes downstream. Eroded
+         * ground near a shore can lie below the lake, which is shaped on the smooth ground, and a river lowered onto it
+         * would meet the lake a step below its surface.
+         */
+        public int lakeBackwater = 5;
         /** Rivers vary by this fraction of their width. */
         /** Nodes before the sea over which rivers settle down to sea level, so that they do not fall into it. */
         public int estuaryLength = 5;
@@ -1267,6 +1273,7 @@ public final class WorldgenSettings {
         require(islands.sandShare + islands.rockShare <= 1.0, "island shares must not exceed 1");
         require(rivers.curveSegments > 0, "rivers.curveSegments must be positive");
         require(rivers.fitReach >= 0, "rivers.fitReach must not be negative");
+        require(rivers.lakeBackwater >= 0, "rivers.lakeBackwater must not be negative");
         require(rivers.sourceTaper > 0.0 && rivers.sourceTaper <= 1.0, "rivers.sourceTaper must be above 0 and at most 1");
         require(rivers.oxbowChance >= 0.0 && rivers.oxbowChance <= 1.0 && rivers.oxbowMaxGrade >= 0.0 && rivers.oxbowRadiusMin > 0.0
                         && rivers.oxbowRadiusMax >= rivers.oxbowRadiusMin && rivers.oxbowWidth > 0.0 && rivers.oxbowMinWidth >= 2.0
