@@ -1,5 +1,5 @@
 {
-  "generator.mtm_worldgen.realistic": "MTM 真实地形",
+  "generator.mtm_worldgen.realistic": "真实地貌",
   "commands.mtm_worldgen.flyspeed.query": "当前飞行速度为默认的 %s 倍",
   "commands.mtm_worldgen.flyspeed.set": "飞行速度已设为默认的 %s 倍",
   "commands.mtm_worldgen.debugmap.started": "正在渲染地形图（范围 %s 格）……",

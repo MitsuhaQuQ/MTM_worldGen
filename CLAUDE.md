@@ -351,7 +351,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
 
 ## 开发约定
 
-- mod id：`mtm_worldgen`；包名：`com.mtm.worldgen`
+- 显示名称：Realistic Landforms（原名 MTM Worldgen，2026-11 改名，世界类型中文名“真实地貌”）；mod id `mtm_worldgen`、包名 `com.mtm.worldgen`、存档目录和资源 id 不改，否则已有世界打不开
 - 许可证：MIT
 - 构建工具：Architectury Loom（仅为构建插件，不引入运行时依赖）
 - 模块结构（按 Minecraft 版本分模块，由用户选定）：`core` 是纯 Java 地形逻辑（`logic`、`noise`、`preview` 和全部单元测试），不单独出 jar，作为源码目录编进每个版本的 common；`versions/<版本>/` 下是该版本的 `common`（接入原版生成器的代码与资源）和每个加载器一个模块，Gradle 项目名为 `:<版本>:<模块>`，如 `:26.3:neoforge`

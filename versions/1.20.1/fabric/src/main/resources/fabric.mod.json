@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mtm_worldgen",
   "version": "${version}",
-  "name": "MTM Worldgen",
+  "name": "Realistic Landforms",
   "description": "Realistic terrain generation: continuous landforms, river networks and climate zones.",
   "authors": [],
   "license": "MIT",

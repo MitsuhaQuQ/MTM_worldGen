@@ -5,7 +5,7 @@ license = "MIT"
 [[mods]]
 modId = "mtm_worldgen"
 version = "${version}"
-displayName = "MTM Worldgen"
+displayName = "Realistic Landforms"
 description = '''
 Realistic terrain generation: continuous landforms, river networks and climate zones.
 '''

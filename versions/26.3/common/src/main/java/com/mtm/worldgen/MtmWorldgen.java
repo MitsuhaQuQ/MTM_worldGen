@@ -17,6 +17,6 @@ public final class MtmWorldgen {
 
     /** Called once by each loader's entry point during mod construction. */
     public static void init() {
-        LOGGER.info("MTM Worldgen initializing on {}", Platform.get().loaderName());
+        LOGGER.info("Realistic Landforms initializing on {}", Platform.get().loaderName());
     }
 }

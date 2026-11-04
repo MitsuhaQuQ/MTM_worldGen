@@ -26,7 +26,7 @@ import java.util.Map;
 public final class MtmConfig {
     private static final String FILE_NAME = "mtm_worldgen.json";
     private static final String DOCS = "/mtm_worldgen/settings_docs.properties";
-    private static final String HEADER = "MTM Worldgen settings. They only apply to worlds created after a change: a new "
+    private static final String HEADER = "Realistic Landforms settings. They only apply to worlds created after a change: a new "
             + "world locks them into its level.dat, and the terrain of existing worlds never changes. Delete this file to "
             + "have it written again with the current defaults; settings missing from it take their defaults, and values "
             + "out of range stop the world from being created, with the reason in the log. Lines starting with // are "

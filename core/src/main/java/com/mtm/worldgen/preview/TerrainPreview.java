@@ -103,7 +103,7 @@ public final class TerrainPreview {
         } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException e) {
             // The default look works as well
         }
-        JFrame frame = new JFrame("MTM-Worldgen terrain preview");
+        JFrame frame = new JFrame("Realistic Landforms terrain preview");
         MapPanel map = new MapPanel();
         JTextField seed = new JTextField(seedText, 18);
         JTextField target = new JTextField(12);
