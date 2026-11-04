@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:function",
+  "function": "mtm_worldgen:surface_is_continuous_across_region_borders",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 400,
+  "required": true,
+  "sky_access": true
+}

@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:function",
+  "function": "mtm_worldgen:generator_is_recognized_after_save_and_load",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 400,
+  "required": true,
+  "sky_access": true
+}

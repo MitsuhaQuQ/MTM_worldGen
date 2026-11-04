@@ -1,0 +1,25 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.mtm.worldgen.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BiomeMixin",
+    "BlenderMixin",
+    "ChunkGeneratorMixin",
+    "HeightRangePlacementMixin",
+    "MinecraftServerMixin",
+    "NoiseBasedChunkGeneratorMixin",
+    "NoiseFillAccess",
+    "RandomStateMixin",
+    "RegistryLoadTaskMixin",
+    "SerializableChunkDataMixin",
+    "ServerLevelMixin",
+    "WorldDimensionsMixin",
+    "WorldPresetMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

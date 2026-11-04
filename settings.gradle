@@ -3,14 +3,27 @@ pluginManagement {
         maven { url = "https://maven.fabricmc.net/" }
         maven { url = "https://maven.architectury.dev/" }
         maven { url = "https://maven.minecraftforge.net/" }
+        maven { url = "https://maven.neoforged.net/releases/" }
         gradlePluginPortal()
     }
 }
 
 rootProject.name = "mtm_worldgen"
 
-include "common"
-include "fabric"
-include "forge"
+// The terrain logic, which knows nothing of Minecraft: compiled into every version's common module, tested once here
+include "core"
+
+// One set of modules per Minecraft version, in versions/<version>: common (the Minecraft side of the mod) and one
+// module per loader. Projects are named :<version>:<module>, as in :1.20.1:fabric
+for (String mc : minecraft_versions.split(",")) {
+    def modules = ["common"] + providers.gradleProperty("${mc}.platforms").get().split(",").toList()
+    include ":${mc}"
+    project(":${mc}").projectDir = file("versions/${mc}")
+    for (String module : modules) {
+        include ":${mc}:${module}"
+        project(":${mc}:${module}").projectDir = file("versions/${mc}/${module}")
+    }
+}
+
 // Amidst map viewer for MTM worlds, released with the mod
 include "amidst"

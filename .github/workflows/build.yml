@@ -14,15 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - run: ./gradlew :common:test :amidst:test
+      - run: ./gradlew :core:test :amidst:test
 
   game-tests:
     runs-on: ubuntu-latest
     strategy:
-      # One loader failing says nothing about the other, and both must generate the same terrain
+      # One loader failing says nothing about the others, and all must generate the same terrain
       fail-fast: false
       matrix:
-        task: [":fabric:runGametest", ":forge:runGameTestServer"]
+        task:
+          - ":1.20.1:fabric:runGametest"
+          - ":1.20.1:forge:runGameTestServer"
+          - ":26.3:fabric:runGametest"
+          - ":26.3:forge:runGameTestServer"
+          - ":26.3:neoforge:runGameTestServer"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
@@ -38,6 +43,8 @@ jobs:
         with:
           name: mod-jars
           path: |
-            fabric/build/libs/*.jar
-            forge/build/libs/*.jar
+            versions/*/*/build/libs/mtm_worldgen-*.jar
+            !versions/*/common/build/libs/*
+            !versions/*/*/build/libs/*-dev*.jar
+            !versions/*/*/build/libs/*-sources.jar
             amidst/build/libs/*.jar

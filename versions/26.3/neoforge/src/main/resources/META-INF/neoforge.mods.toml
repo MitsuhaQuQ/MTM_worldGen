@@ -1,0 +1,28 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "mtm_worldgen"
+version = "${version}"
+displayName = "MTM Worldgen"
+description = '''
+Realistic terrain generation: continuous landforms, river networks and climate zones.
+'''
+
+[[mixins]]
+config = "mtm_worldgen.mixins.json"
+
+[[dependencies.mtm_worldgen]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.3,26.4)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.mtm_worldgen]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.3,26.4)"
+ordering = "NONE"
+side = "BOTH"

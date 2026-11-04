@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:function",
+  "function": "mtm_worldgen:land_below_sea_level_is_flooded",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 400,
+  "required": true,
+  "sky_access": true
+}

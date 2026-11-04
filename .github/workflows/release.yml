@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the mod and publishes a GitHub release with the Fabric and Forge jars, and Amidst
-# for MTM worlds: a jar that runs on Java 25, and a Windows zip that ships its own Java and the Fabric jar.
+# Pushing a tag such as v0.1.0 builds the mod and publishes a GitHub release with a jar for every Minecraft version and
+# loader in gradle.properties, and Amidst for MTM worlds: a jar that runs on Java 25, and a Windows zip that ships its
+# own Java and the 1.20.1 Fabric jar.
 # The tag has to match mod_version in gradle.properties, so a release never ships jars named for another version.
 on:
   push:
@@ -46,8 +47,7 @@ jobs:
       - name: Read the versions
         run: |
           echo "VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_ENV"
-          echo "MINECRAFT=$(grep '^minecraft_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_ENV"
-      - run: ./gradlew :common:test :amidst:test assemble
+      - run: ./gradlew :core:test :amidst:test assemble
       - uses: actions/download-artifact@v4
         with:
           name: amidst-windows
@@ -57,9 +57,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=$(awk -v tag="$GITHUB_REF_NAME" '$0 == "## " tag {found = 1; next} found && /^## / {exit} found {print}' RELEASE_NOTES.md)
+          # One jar per Minecraft version and loader, named as in mtm_worldgen-fabric-0.6.0-26.3.jar
+          jars=()
+          for mc in $(grep '^minecraft_versions=' gradle.properties | cut -d= -f2 | tr ',' ' '); do
+            minecraft=$(grep "^$mc.minecraft_version=" gradle.properties | cut -d= -f2)
+            for loader in $(grep "^$mc.platforms=" gradle.properties | cut -d= -f2 | tr ',' ' '); do
+              jars+=("versions/$mc/$loader/build/libs/mtm_worldgen-$loader-$VERSION-$minecraft.jar")
+            done
+          done
           gh release create "$GITHUB_REF_NAME" \
-            "fabric/build/libs/mtm_worldgen-fabric-$VERSION-$MINECRAFT.jar" \
-            "forge/build/libs/mtm_worldgen-forge-$VERSION-$MINECRAFT.jar" \
+            "${jars[@]}" \
             "amidst/build/libs/amidst-mtm-$VERSION.jar" \
             "amidst/build/distributions/AMIDST-MTM-$VERSION-windows.zip" \
             --title "MTM-Worldgen $VERSION" \

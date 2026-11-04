@@ -17,7 +17,11 @@
 
 - Minecraft 版本从 1.20.1 开始支持，按向上兼容扩展原则：新版本新增的群系，在该版本对应的 mod 构建中增加支持
   - 主开发版本为 1.20.1，后续向上更新扩展；1.18.2 的版本只保留在 git 历史中，其存档不能直接升级
-- Java 版本与对应 Minecraft 版本要求一致（1.20.4 及以前为 17，1.20.5 及以后为 21）
+  - 当前构建（2026-11）：1.20.1（Fabric、Forge）；26.3，即最新正式版（Fabric、Forge、NeoForge）。版本号从 26.1 起按年份编号，且不再混淆
+  - 最新快照 26.4-snapshot-7 尚未支持（不在 `minecraft_versions` 里）：只有 Fabric 支持快照，且快照把填充、地表、雕刻合成按列一次完成（`ChunkTerrainBuilder.fillChunk`：`NoiseChunk.prepareColumn` 得到 `NoiseColumn` 后直接套材质规则），`MtmWater` 放水（要在噪声之后、地表规则之前）、`TerrainCondition`、雕刻保护、只填到地表的体积都要重新接；另有 `DensityFunctions.interpolated` 换成 `*Upscale`、`NoiseGeneratorSettings` 去掉 `defaultBlock`、`RandomState.create` 改名、`WorldGenerationContext` 去掉、`Mth.clamp` 去掉等。`versions/26.4` 已按 `base_version` 搭好（只覆盖 `MtmBiomeSource`、`BaseColumn`、`fabric.mod.json`、`version_biomes.properties`），可从这里继续
+  - 新版本新增的群系由该版本 common 的资源 `mtm_worldgen/version_biomes.properties` 加进默认群系列表（`VersionBiomes`，每行 `<气候带>.<列表>` 或 `caves` = 群系）；core 和 1.20.1 没有这个资源，默认列表保持不变。26.3：苍白之园进温带高地（和樱花林一起，原版放在高原），斑驳森林进温带中湿度低地，硫磺洞穴进洞穴；26.4 快照的资源里再加了冰洞
+  - 1.20.1 的存档还不能移到 26.x：level.dat 里锁定的生成器设置是 1.20.1 的格式
+- Java 版本与对应 Minecraft 版本要求一致（1.20.4 及以前为 17，1.20.5–1.21.x 为 21，26.1 起为 25）
 - 支持 Forge、Fabric，以及 NeoForge（1.20.1 之后与 Forge 分家）
 - 除加载器自身 API 外不依赖其它 mod
   - 允许：Fabric API
@@ -26,9 +30,9 @@
 
 ## Forge / Fabric 一致性
 
-Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
+Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之间也一样：
 
-- **地形一致**：同一 seed + 同一配置，在各加载器上生成完全相同的地形（逐方块一致）
+- **地形一致**：同一 seed + 同一配置，在各加载器和各 Minecraft 版本上生成完全相同的地形（逐方块一致）；新版本新增的群系只改变群系，不改变方块。已验证 1.20.1 与 26.3 采样列逐方块相同（原版矿脉在 26.x 移到了材质规则里，基础列里看不到，哈希按石头计）
 - **功能一致**：配置项、世界类型、命令、外来区块快照格式在各加载器上相同；存档可在不同加载器之间互换使用
 - **逻辑全部放在 common**：所有地形逻辑、配置读写、存储读写都在 common 模块实现；加载器模块只做注册、事件挂接与平台适配，不写任何生成逻辑
 - **平台差异隔离**：需要加载器差异的地方，在 common 中定义接口，由各加载器模块实现；接口的行为对生成结果不得产生差异
@@ -94,7 +98,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 
 ## 当前进度
 
-以 1.20.1 上的 Fabric 与 Forge 为准（NeoForge 与更高版本尚未开始）。
+以 1.20.1 上的 Fabric 与 Forge 为准；26.3（Fabric、Forge、NeoForge）是同一套地形接到新版本生成器上，GameTest 全部通过，进游戏的观感未单独确认。
 
 | 流水线步骤 | 状态 | 说明 |
 |---|---|---|
@@ -310,7 +314,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - 1.19 起种子只存在于 `RandomState`，生成器和群系源都不再持有：`RandomStateMixin` 在创建时把种子传给密度函数，其余地方从 `RandomState` 或气候采样器取 `TerrainLogic`
 - 建筑高度由地表最大高度推出，世界引用对应高度的维度类型
 - 逻辑范围 `general.logicRange`（默认 1，允许 1–3）：只放大地形逻辑看多远，不改地貌尺寸和三档比例；`TerrainLogic` 用 `WorldgenSettings.resolved()` 得到的副本，同时放大 `regionSize`、`lookAhead`、`flowLookAhead`、`queryReach`、`siltReach`、`erosion.margin`、`erosion.blend`（取整到各网格的倍数，彼此的约束仍成立），内存缓存的区域数按倍数平方减少（不少于 32）；配置文件和 level.dat 里保持原值，`fromJson` 也校验放大后的副本。实测 2 时新区域约 10 s（1 时约 1.4 s，按面积约慢一倍），新世界首个区域约 30 s（1 时约 5 s）；地势三档比例和水面比例不变
-- 配置文件带英文注释：`MtmConfig` 写出 `toCommentedJson`，每个分组和设置上方是 `WorldgenSettings.java` 里的文档注释，由 `gradlew :common:updateSettingsDocs` 生成资源 `mtm_worldgen/settings_docs.properties`（`SettingsDocs`，在测试源码里），`SettingsDocsTest` 检查资源是否过期；修改设置的文档注释后要重新生成。Gson 宽松解析会跳过 `//` 注释；level.dat 里仍是不带注释的 `toJson`。没有注释的旧配置文件在加载时按原值重写成带注释的版本（缺的字段补默认值）
+- 配置文件带英文注释：`MtmConfig` 写出 `toCommentedJson`，每个分组和设置上方是 `WorldgenSettings.java` 里的文档注释，由 `gradlew :core:updateSettingsDocs` 生成资源 `mtm_worldgen/settings_docs.properties`（`SettingsDocs`，在测试源码里），`SettingsDocsTest` 检查资源是否过期；修改设置的文档注释后要重新生成。Gson 宽松解析会跳过 `//` 注释；level.dat 里仍是不带注释的 `toJson`。没有注释的旧配置文件在加载时按原值重写成带注释的版本（缺的字段补默认值）
 - 测试和基准固定使用默认值，本地配置文件不影响标准哈希
 - 配置文件首次生成时写入全部字段，之后修改代码默认值不会影响已有文件；调参后进游戏前先删除 `fabric/run/config/mtm_worldgen.json`（Forge 同理），否则看到的仍是旧值。排查地形问题时先核对存档 level.dat 里锁定的配置
 - 作为独立"世界类型"出现在创建世界界面：世界预设是数据包 `mtm_worldgen:realistic`，其主世界群系源是占位，创建世界时由 `WorldPresetMixin` 按配置文件换成真正的生成器和维度类型；服务器 `level-type=mtm_worldgen:realistic` 走同一条路径
@@ -342,7 +346,7 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - 水系的主要开销曾是板块重复计算、流不进当前区域的格子、站点缓存；分别用板块缓存、`feeders` 过滤、直接映射缓存解决。后两者不改变结果，地形哈希应保持不变
 - 基准：`/mwg benchmark` 或 GameTest `reportGenerationBenchmark`（日志里搜 `Benchmark:`），每次改地形后对比
   - 只覆盖群系和噪声填充两个阶段，同样的区块位置、单线程；不含地表、雕刻器、地物
-  - 当前结果（地表最大高度 750）：原版约 12 ms/区块，MTM 约 5.6 ms/区块（约 47%），已包含噪声洞穴；首次进入新区域的冷启动约 150 ms/区块（含侵蚀）
+  - 当前结果（地表最大高度 750）：1.20.1 原版约 12 ms/区块，MTM 约 5.6 ms/区块（约 47%），已包含噪声洞穴；首次进入新区域的冷启动约 150 ms/区块（含侵蚀）。26.3 原版快了约三倍（约 3.9 ms/区块），MTM 约 3.6 ms/区块（约 93%，三个加载器 91–97%）
 - C2ME：不专门适配，但保证线程安全、不与其冲突；用户实测 v0.5.1 与 C2ME + Chunky 并用预生成未发现问题，且在已有存档中途加入 C2ME，新旧区块交界处地形一致（2026-11）；尚无逐方块哈希对比的自动测试
 
 ## 开发约定
@@ -350,21 +354,28 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 - mod id：`mtm_worldgen`；包名：`com.mtm.worldgen`
 - 许可证：MIT
 - 构建工具：Architectury Loom（仅为构建插件，不引入运行时依赖）
-- 模块结构：`common`（全部共享逻辑）+ `forge` + `fabric`；支持 1.20.1 以上版本时加入 NeoForge 模块
+- 模块结构（按 Minecraft 版本分模块，由用户选定）：`core` 是纯 Java 地形逻辑（`logic`、`noise`、`preview` 和全部单元测试），不单独出 jar，作为源码目录编进每个版本的 common；`versions/<版本>/` 下是该版本的 `common`（接入原版生成器的代码与资源）和每个加载器一个模块，Gradle 项目名为 `:<版本>:<模块>`，如 `:26.3:neoforge`
+  - 构建哪些版本、各版本的加载器及版本号都在 `gradle.properties`（`minecraft_versions`，`<版本>.<键>`）；根 `build.gradle` 按版本给模块套上 Loom、Java 版本、Shadow
+  - 接近另一版本的版本（快照）用 `<版本>.base_version`：模块编译基础版本同名模块的源码和资源，只有自己 `src` 里同路径的文件替换掉基础版本的（`syncBase*` 任务），构建脚本用 `apply from` 复用基础版本的；26.4（尚未构建）目前覆盖了 `MtmBiomeSource`（`NoiseBiomeResolver`）、`gametest/BaseColumn`（`NoiseColumn` 换了包）、`fabric.mod.json` 和 `version_biomes.properties`。会随版本变化的类型尽量收进这样的小文件，不要复制大文件
+  - 同一处修改要在每个版本的 common 里各做一遍（core 只有一份）；GameTest 的期望哈希各版本相同
 - 地图查看器 `amidst`：MTM 版 Amidst 的源码副本（来自 MitsuhaQuQ/amidst 的 `mtm-on-latest` 分支，原版 Amidst 及其最新 Minecraft 支持在那个仓库单独发布），随 mod 一起构建和发布
   - 许可证为 GPLv3（`amidst/LICENSE.txt`），其余仍是 MIT；不要把 Amidst 的代码搬进 mod 模块
   - 普通 Java 子项目，不套 Loom（根 `build.gradle` 的 `configure` 排除了它），用 JDK 25 工具链（`amidst_java_version`），本机已在 `~/.gradle/gradle.properties` 里登记 JDK 25
   - 通过反射调用 mod jar 里的 `TerrainLogic.sampleBiome`、`findSpawn`、`isVillageGround` 和 `WorldgenSettings.fromJson`、`DEFAULT`，改这些方法的名字或签名会让 Amidst 失效；群系 id 用 Amidst 的 `ModernBiomes` 表，新增原版群系时看那里有没有
   - `gradlew :amidst:jar` 出可运行 jar；`gradlew :amidst:windowsZip` 只能在 Windows 上跑，用 jpackage 打出带 Java 运行时和 Fabric jar 的 `AMIDST-MTM.exe`（mod jar 放在 `app/mods`，不进类路径，由系统属性 `amidst.mtmjar` 指过去）
   - 测试只跑 `*Test` 和 `TestWorldEntryEquality`：测试目录里还有很多以 `Test` 开头的测试世界和辅助类，JUnit 会把它们当成无效测试
-- 构建环境：Gradle 8.10.2（wrapper）、Architectury Loom 1.7、Mojang 官方映射；版本号集中在根目录 `gradle.properties`
-- Mixin 配置 `mtm_worldgen.mixins.json` 在 jar 里必须写明 `refmap`，源码里却不能写（Forge 开发环境会因此找不到注入目标，Architectury 也会警告）：Fabric 为了开发环境直接把 common 的原始配置拷进资源（`processResources`），Architectury 补上 refmap 的那份被当作重复文件丢掉，所以由 Fabric 的 `shadowJar` 打包时补上；缺了它开发环境和 GameTest 照常通过，正式游戏里启动即崩（v0.1.0–v0.4.0 的 Fabric jar 都是这样）。两个加载器的 `remapJar` 会检查 jar 里的配置和 refmap
-- JDK：Gradle 本身可用 JDK 21 运行；编译与运行 1.20.1 需要 JDK 17 工具链，已关闭工具链自动下载
-  - 若 Gradle 找不到 JDK 17，在 `~/.gradle/gradle.properties` 中设置 `org.gradle.java.installations.paths=<JDK 17 路径>`，或在命令行加 `-Porg.gradle.java.installations.paths=...`（本机已在用户配置中设置好）
+- 构建环境：Gradle 9.6.0（wrapper）、Architectury Loom 1.17、Architectury 插件 3.5（3.4 与 Loom 1.17 不兼容）、Shadow（`com.gradleup.shadow` 9.6.1）；同一个 Loom 插件包里，1.20.1 用 `dev.architectury.loom-remap`（Mojang 官方映射，remapJar），26.x 用 `dev.architectury.loom-no-remap`（不混淆，不映射，shadowJar 就是成品 jar）
+  - no-remap 时 Architectury 不提供 common 的 `namedElements`、`transformProduction*` 配置，加载器模块编译依赖 common 项目本身，打包直接取 `transformProduction<加载器>` 任务的 jar
+  - Forge 与 NeoForge 的开发运行不能再把 common 放进 runtimeClasspath：Architectury 自己会把 common 的 dev jar 交给运行，两份会让模块系统报包重复；因此 `run*` 任务显式依赖 common 的 `jar`，否则运行的是旧 jar（曾因此调试了很久已删掉的 Mixin）
+- Mixin 配置 `mtm_worldgen.mixins.json` 在 1.20.1 的 jar 里必须写明 `refmap`，源码里却不能写（Forge 开发环境会因此找不到注入目标，Architectury 也会警告）：Fabric 为了开发环境直接把 common 的原始配置拷进资源（`processResources`），Architectury 补上 refmap 的那份被当作重复文件丢掉，所以由 Fabric 的 `shadowJar` 打包时补上，名字取自 common 的 `loom.mixin.defaultRefmapName`（Loom 1.17 按项目路径命名，如 `mtm_worldgen-common-1.20.1_common-refmap.json`）；缺了它开发环境和 GameTest 照常通过，正式游戏里启动即崩（v0.1.0–v0.4.0 的 Fabric jar 都是这样）。Loom 1.17 默认不再用注解处理器生成 refmap，1.20.1 用 `useLegacyMixinAp = true` 保持原样。两个加载器的 `remapJar` 会检查 jar 里的配置和 refmap；26.x 不混淆，不需要 refmap
+  - Forge 26.3 的 jar 靠清单的 `MixinConfigs` 找 Mixin；不要再用 Loom 的 `forge.mixinConfig`，开发运行会把配置传两次、Mixin 应用两次。NeoForge 用 `neoforge.mods.toml` 的 `[[mixins]]`
+  - 26.x 不要用 `@Redirect`：Forge 26.3 自带的 MixinExtras 0.5.4 会在处理时崩溃（Fabric 的 0.5.5 没事）；改用 `@Inject`、`@ModifyVariable`
+- JDK：Gradle 本身可用 JDK 21 运行；编译与运行 1.20.1 需要 JDK 17 工具链，26.x 和 Amidst 需要 JDK 25，已关闭工具链自动下载
+  - 若 Gradle 找不到 JDK，在 `~/.gradle/gradle.properties` 中设置 `org.gradle.java.installations.paths=<JDK 路径，逗号分隔>`，或在命令行加 `-Porg.gradle.java.installations.paths=...`（本机已在用户配置中设置好 17、21、25）
 - 命令：
-  - `gradlew build`：构建全部模块（已验证），产物在 `fabric/build/libs`、`forge/build/libs`
-  - `gradlew :fabric:runClient` / `gradlew :forge:runClient`：开发环境客户端（未验证）
-  - `gradlew :fabric:runServer` / `gradlew :forge:runServer`：开发环境服务端（未验证）
+  - `gradlew build`：构建全部模块（已验证），产物在 `versions/<版本>/<加载器>/build/libs`，文件名带 Minecraft 版本，如 `mtm_worldgen-neoforge-0.5.1-26.3.jar`
+  - `gradlew :26.3:fabric:runClient` 等：开发环境客户端（未验证）
+  - `gradlew :1.20.1:fabric:runServer` 等：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：
   - `/mwg flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mwg flyspeed reset` 恢复默认；`/mwg flyspeed` 查询当前倍数
   - `/mwg locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
@@ -372,10 +383,18 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
   - `/mwg precompute <半径>`：在后台线程上由近及远预先计算玩家周围的逻辑区域（半径按区域数，0–5，最多 121 个），侵蚀结果写入磁盘缓存；聊天栏报告进度，`/mwg precompute cancel` 在当前区域算完后停止，同时只能运行一个（`RegionPrecompute`）。半径 5 超过内存缓存的 64 个区域，早算的区域会被挤出内存，靠磁盘缓存保留侵蚀
   - `/mwg debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
 - 独立预览：mod jar 清单带 `Main-Class`（`com.mtm.worldgen.preview.TerrainPreview`，加载器会忽略），`java -jar <mod jar> [种子]` 打开窗口，可拖动、缩放、随机种子、跳转出生点和坐标，底栏显示高度、水位和群系，右下角显示视图内海洋、平原、丘陵、高原、山地的比例（按地形骨架分类，`sampleLandformKind`）；`java -jar <mod jar> <种子> [x z 每像素格数 输出.png]` 导出 1024×1024 PNG。只用默认配置。JAR 外没有 Gson，所以 `WorldgenSettings` 里所有 Gson 类型都放在内部类 `Json`（连 `catch` 的异常类型也算，类加载时就要解析）
-- 代码结构：`logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`world`（接入原版生成器）、`command`（调试命令）
-- 单元测试：`gradlew :common:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行；只读取默认世界的测试共用一个 `TerrainLogic`（`TerrainLogicTest.SHARED`，区域缓存放大到 1024），每个侵蚀区域只算一次；比较两个实例、依赖计算顺序或设置外来区块的测试自己建实例。共用实例必须放大缓存：用默认的 64 时并行的测试互相挤掉区域，比各建一个还慢（433 s → 631 s）；放大后约 100 s。测试堆 6 GB。河流查询会算出所到之处的侵蚀，各自建实例的大范围取样测试仍要控制范围（曾用 ±16000，单个测试 9 分钟）
-- CI：`.github/workflows/build.yml`，单元测试、Fabric GameTest、Forge GameTest、打包四个任务并行
-- 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`（Windows 任务打 Amidst 的 zip，Ubuntu 任务连同两个 mod jar 和 Amidst jar 一起发布），标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
+- 代码结构：core 里的 `logic`（纯 Java 地形逻辑，不引用 Minecraft 类）、`noise`（无状态确定性噪声）、`preview`；各版本 common 里的 `world`（接入原版生成器）、`command`（调试命令）、`gametest`
+- 26.x 的接入方式（与 1.20.1 差别很大，原版世界生成在 26.1 重写过）：
+  - 密度函数在 `levelgen.densityfunction`，按 float 计算，由 `RandomState` 第一次 `getSampler` 时编译成采样器；种子在编译时才需要，`RandomStateMixin` 在 `getSampler` 前后设置 `SeedCapture`，并在构造时记下所属世界的 `TerrainLogic`（`TerrainLogicHolder`）
+  - 路由只有 8 个槽：初始密度换成 `chunkSurfaceLevel`（2D，直接给出高度），`TerrainDensity` 的 surface 变体按 1.20.1 的找法给出预估地表（4 格网格角点、8 格一级）；含水层、矿脉移到 `NoiseGeneratorSettings` 的 `Aquifer.Config` 和材质规则里。含水层用原版噪声，地表和深暗之域判断换成 MTM 的；不放矿物时从原版材质规则顶层去掉名字以 `ore_vein` 结尾的规则
+  - 地表规则换成材质规则（`MaterialRule`/`MaterialCondition`，公开 API，不再需要访问加宽器）；`TerrainCondition` 仍靠 `buildSurface` 前后的线程局部变量拿到地形逻辑
+  - 填充、地表、雕刻合并在 `buildTerrain` 里：按体积采样，`createNoiseChunk` 被替换成只到 `highestBlockInChunk` 的体积；雕刻器先写遮罩，地表保护放在 `applyCarvingMask` 的过滤器里（`MtmCarving.protect`）；只要噪声填充时用 `NoiseFillAccess` 调用 `createNoiseChunk` 和 `doFill`（`MtmGenerators.fillTerrain`）
+  - 原版会把轴少于三个的函数切片成自己的采样器，群系源要从气候采样器里拿到 `TerrainClimate.Sampler`，所以气候函数一律声明全部三个轴
+  - 包住原版洞穴的 `TerrainCaves` 必须整体积采样原版洞穴再逐列淡出：逐点采样会绕过原版插值器和缓存，区块生成曾慢到原版的五倍
+  - 维度类型在 `RegistryLoadTask.registerElements` 之后加入（只对从资源加载的注册表）；区块标记在 `SerializableChunkData.copyOf` 时取、`write` 时写；26.x 的区块调色板里默认状态的方块只存名字字符串，不再是带 `Name` 的复合标签，读写调色板时两种都要处理（`ForeignChunks.blockName`）
+- 单元测试：`gradlew :core:test`（`logic` 包的确定性、顺序无关、跨区域连续、海洋占比），测试方法并行运行；只读取默认世界的测试共用一个 `TerrainLogic`（`TerrainLogicTest.SHARED`，区域缓存放大到 1024），每个侵蚀区域只算一次；比较两个实例、依赖计算顺序或设置外来区块的测试自己建实例。共用实例必须放大缓存：用默认的 64 时并行的测试互相挤掉区域，比各建一个还慢（433 s → 631 s）；放大后约 100 s。测试堆 6 GB。河流查询会算出所到之处的侵蚀，各自建实例的大范围取样测试仍要控制范围（曾用 ±16000，单个测试 9 分钟）
+- CI：`.github/workflows/build.yml`，单元测试、每个版本每个加载器一个 GameTest、打包并行
+- 发布：推送 `v<版本>` 标签触发 `.github/workflows/release.yml`（Windows 任务打 Amidst 的 zip，Ubuntu 任务把 `gradle.properties` 里每个版本每个加载器的 mod jar 和 Amidst jar 一起发布；Amidst 带的是 1.20.1 的 Fabric jar），标签必须与 `gradle.properties` 的 `mod_version` 一致，说明取自 `RELEASE_NOTES.md` 对应小节（英文）；目前发布为预发布版本
 - 平台服务：common 中的 `com.mtm.worldgen.platform.Platform` 接口，各加载器通过 `META-INF/services` 注册实现
 - 已知问题（Claude Code 沙箱环境）：Gradle 启动报 `Unable to establish loopback connection` 时，需在沙箱外运行，并设置环境变量 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=F:\MC\MTM_worldgen\.gradle\uds`（该目录需事先存在）
 
@@ -384,12 +403,14 @@ Forge 与 Fabric（以及之后的 NeoForge）版本须尽可能一致：
 以游戏内测试为主，能自动化的尽量自动化。
 
 - **框架**：原版 GameTest（Forge 自带；Fabric 使用 Fabric API 的 GameTest 模块），在无头服务器上运行
-  - 自动运行：`gradlew :fabric:runGametest`、`gradlew :forge:runGameTestServer`；任一测试失败即构建失败（已验证）
-  - 同一套测试用例写在 common 的 `com.mtm.worldgen.gametest.MtmGameTests`，Forge 与 Fabric 各跑一遍
+  - 自动运行：`gradlew :<版本>:fabric:runGametest`、`gradlew :<版本>:forge:runGameTestServer`、`gradlew :26.3:neoforge:runGameTestServer`；任一测试失败即构建失败（已验证）
+  - 同一套测试用例写在各版本 common 的 `com.mtm.worldgen.gametest.MtmGameTests`，每个加载器各跑一遍
   - GameTest 服务端固定为超平坦世界，测试自建 MTM 生成器，用 `getBaseColumn` / `getBaseHeight` 直接计算方块列（覆盖种子 Mixin、密度函数、含水层、群系源），不生成区块
-  - Forge 与 Fabric 一致：两端都与同一常量 `EXPECTED_COLUMN_HASH` 比对；有意修改地形后需更新该值（失败信息会打印新哈希，须确认两端相同）
-  - 空结构模板两端解析不同，两份都需保留：Fabric 读 `data/minecraft/gametest/structures/mtm_worldgen_empty.snbt`，Forge 读 `data/minecraft/structures/mtmgametests.mtm_worldgen_empty.nbt`
-  - Forge 的 GameTest 用普通服务端启动目标加 `forge.gameTestServer=true`；专用的 `gameTestServer` 启动目标在此开发环境下会因模块名为空而崩溃
+  - 各加载器、各 Minecraft 版本一致：都与同一组常量比对；有意修改地形后需在每个版本里更新（失败信息会打印新哈希，须确认各端相同）
+    - `EXPECTED_SOLID_COLUMN_HASH`：关掉洞穴的世界，覆盖全部 MTM 地形逻辑，处处检查
+    - `EXPECTED_COLUMN_HASH`：带洞穴的世界；原版矿脉方块按石头计（26.x 在基础列之后才放矿脉）。NeoForge 的开发环境不检查它（`Platform.recompilesMinecraft`）：那里的 Minecraft 由 NeoForm 反编译再编译，原版洞穴噪声的 float 有几位不同，实测 88 万个方块中有 2 个洞壁方块差一格；MTM 自己的地表、固体高度逐位相同，Forge 26.3 用的是原版字节码，与 Fabric 完全一致。正式环境的 NeoForge 用原版 jar 打补丁，应与 Fabric 相同（未在正式环境验证）
+  - 1.20.1：空结构模板两端解析不同，两份都需保留：Fabric 读 `data/minecraft/gametest/structures/mtm_worldgen_empty.snbt`，Forge 读 `data/minecraft/structures/mtmgametests.mtm_worldgen_empty.nbt`；Forge 的 GameTest 用普通服务端启动目标加 `forge.gameTestServer=true`，专用的 `gameTestServer` 启动目标在此开发环境下会因模块名为空而崩溃
+  - 26.x：GameTest 是注册表条目。各加载器把 `MtmGameTests.register` 列出的函数注册为 `test_function`，运行它们的测试实例是数据 `data/mtm_worldgen/test_instance/*.json`（原版的 `minecraft:empty` 结构，`sky_access` 为真，否则测试区上方的屏障会被外来区块测试当成地面）。Forge 用 Loom 的 `environment "gameTestServer"` 加 `forgeTemplate "gameTestServer"`（用 `server()` 时 Loom 去掉客户端库，Forge 早期显示要的 LWJGL 缺了核心模块；用 `client()` 会启动客户端）；NeoForge 用 `server()` 加主类 `net.neoforged.fml.startup.GameTestServer`
 - **确定性测试**（同 seed、同配置，在全新世界生成同一片区域，比对逐区块方块哈希）：
   - 不同探索顺序（如由内向外螺旋 vs 反向，或从相反方向接近）
   - 不同 worldgen 线程数

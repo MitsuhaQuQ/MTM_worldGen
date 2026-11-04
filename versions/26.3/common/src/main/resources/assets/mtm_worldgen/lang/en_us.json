@@ -1,0 +1,21 @@
+{
+  "generator.mtm_worldgen.realistic": "MTM Realistic",
+  "commands.mtm_worldgen.flyspeed.query": "Flying speed is %s× the default",
+  "commands.mtm_worldgen.flyspeed.set": "Flying speed set to %s× the default",
+  "commands.mtm_worldgen.debugmap.started": "Rendering terrain map (%s blocks across)...",
+  "commands.mtm_worldgen.debugmap.done": "Terrain map saved to %s",
+  "commands.mtm_worldgen.debugmap.failed": "Failed to export terrain map: %s",
+  "commands.mtm_worldgen.not_mtm_world": "This world does not use MTM terrain",
+  "commands.mtm_worldgen.benchmark.started": "Running generation benchmark...",
+  "commands.mtm_worldgen.benchmark.failed": "Benchmark failed: %s",
+  "commands.mtm_worldgen.locate.mountain.found": "Nearest mountain is at %s (%s blocks away)",
+  "commands.mtm_worldgen.locate.mountain.none": "No mountain within %s blocks",
+  "commands.mtm_worldgen.precompute.started": "Precomputing %s logic regions around you (radius %s) in the background",
+  "commands.mtm_worldgen.precompute.progress": "Precomputed %s of %s logic regions",
+  "commands.mtm_worldgen.precompute.done": "Precomputed %s logic regions in %s s",
+  "commands.mtm_worldgen.precompute.cancelling": "Stopping the precompute after the current region",
+  "commands.mtm_worldgen.precompute.cancelled": "Precompute stopped after %s of %s logic regions",
+  "commands.mtm_worldgen.precompute.running": "A precompute is already running; stop it with /mwg precompute cancel",
+  "commands.mtm_worldgen.precompute.none": "No precompute is running",
+  "commands.mtm_worldgen.precompute.failed": "Precompute failed: %s"
+}

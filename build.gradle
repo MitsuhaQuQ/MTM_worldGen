@@ -1,10 +1,9 @@
 plugins {
-    id "architectury-plugin" version "3.4-SNAPSHOT"
-    id "dev.architectury.loom" version "1.7-SNAPSHOT" apply false
-}
-
-architectury {
-    minecraft = rootProject.minecraft_version
+    // One Loom for every version: its loom-remap plugin maps obfuscated Minecraft (up to 1.21.x), loom-no-remap
+    // builds unobfuscated Minecraft (26.1 on) as it is
+    id "architectury-plugin" version "3.5-SNAPSHOT" apply false
+    id "dev.architectury.loom" version "1.17-SNAPSHOT" apply false
+    id "com.gradleup.shadow" version "9.6.1" apply false
 }
 
 allprojects {
@@ -12,11 +11,37 @@ allprojects {
     version = rootProject.mod_version
 }
 
-// The mod's modules; Amidst builds on its own (amidst/build.gradle)
-configure(subprojects.findAll { it.name != "amidst" }) {
+// The properties of one Minecraft version, as in gradle.properties: mcProperty(project, "java_version") reads
+// 1.20.1.java_version for the modules in versions/1.20.1
+ext.mcProperty = { Project project, String key -> rootProject.property("${project.parent.name}.${key}") }
+
+// The mod's modules, :<version>:<module>
+configure(subprojects.findAll { it.parent != null && it.parent.parent == rootProject }) {
+    def mcVersion = mcProperty(project, "minecraft_version")
+    def javaVersion = mcProperty(project, "java_version") as int
+    def obfuscated = mcProperty(project, "obfuscated").toBoolean()
+
+    // Read by the modules' own build scripts
+    ext.mc = { String key -> mcProperty(project, key) }
+    ext.mcVersion = mcVersion
+    ext.obfuscated = obfuscated
+
     apply plugin: "java"
     apply plugin: "architectury-plugin"
-    apply plugin: "dev.architectury.loom"
+    apply plugin: obfuscated ? "dev.architectury.loom-remap" : "dev.architectury.loom-no-remap"
+    // Loader modules bundle common into their jar
+    if (project.name != "common") {
+        apply plugin: "com.gradleup.shadow"
+    }
+
+    architectury {
+        minecraft = mcVersion
+    }
+
+    repositories {
+        maven { url = "https://maven.neoforged.net/releases/" }
+        maven { url = "https://maven.minecraftforge.net/" }
+    }
 
     base {
         archivesName = "${rootProject.archives_base_name}-${project.name}"
@@ -25,27 +50,54 @@ configure(subprojects.findAll { it.name != "amidst" }) {
     // Jars carry the Minecraft version after the mod's own, as in mtm_worldgen-fabric-0.2.0-1.20.1.jar; the version
     // inside the mod metadata stays the mod's alone
     tasks.withType(AbstractArchiveTask).configureEach {
-        archiveVersion = "${project.version}-${rootProject.minecraft_version}"
+        archiveVersion = "${project.version}-${mcVersion}"
     }
 
     loom {
         silentMojangMappingsLicense()
+        if (obfuscated) {
+            // Mixins of obfuscated versions find their targets through the refmap the annotation processor writes, as
+            // with Loom 1.7, which these jars were first released with. Newer Loom leaves the processor off by default
+            mixin {
+                useLegacyMixinAp = true
+            }
+        }
     }
 
     dependencies {
-        minecraft "com.mojang:minecraft:${rootProject.minecraft_version}"
-        mappings loom.officialMojangMappings()
+        minecraft "com.mojang:minecraft:${mcVersion}"
+        if (obfuscated) {
+            mappings loom.officialMojangMappings()
+        }
     }
 
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(rootProject.java_version as int)
+            languageVersion = JavaLanguageVersion.of(javaVersion)
         }
         withSourcesJar()
     }
 
     tasks.withType(JavaCompile).configureEach {
         options.encoding = "UTF-8"
-        options.release = rootProject.java_version as int
+        options.release = javaVersion
+        options.compilerArgs += ["-Xmaxerrs", "1000"]
+    }
+
+    // A version close to another one, such as a snapshot, builds on that version's sources (<version>.base_version):
+    // the module compiles the base module's files, except those it has a file of its own for at the same path
+    def baseVersion = rootProject.findProperty("${project.parent.name}.base_version")
+    if (baseVersion != null) {
+        def baseSources = rootProject.file("versions/${baseVersion}/${project.name}/src/main")
+        def ownSources = file("src/main")
+        ["java", "resources"].each { kind ->
+            def sync = tasks.register("syncBase${kind.capitalize()}", Sync) {
+                from(new File(baseSources, kind)) {
+                    exclude { element -> !element.directory && new File(ownSources, "${kind}/${element.relativePath.pathString}").exists() }
+                }
+                into layout.buildDirectory.dir("baseSources/${kind}")
+            }
+            sourceSets.main[kind].srcDir(sync)
+        }
     }
 }

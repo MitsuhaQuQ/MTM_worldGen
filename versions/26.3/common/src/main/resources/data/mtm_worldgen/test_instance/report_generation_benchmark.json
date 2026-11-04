@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:function",
+  "function": "mtm_worldgen:report_generation_benchmark",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 400,
+  "required": false,
+  "sky_access": true
+}

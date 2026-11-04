@@ -1,0 +1,14 @@
+architectury {
+    common(mc("platforms").split(","))
+}
+
+// The terrain logic is compiled into every version's common module
+sourceSets.main {
+    java.srcDir rootProject.file("core/src/main/java")
+    resources.srcDir rootProject.file("core/src/main/resources")
+}
+
+dependencies {
+    // Only for the Mixin and access widener annotations; no Fabric API classes may be used in common
+    implementation "net.fabricmc:fabric-loader:${mc("fabric_loader_version")}"
+}

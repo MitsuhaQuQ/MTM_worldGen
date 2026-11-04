@@ -1,0 +1,70 @@
+architectury {
+    fabric()
+}
+
+loom {
+    runs {
+        // Headless game test server: runs all game tests, then exits non-zero on failure
+        gametest {
+            server()
+            name "Fabric Game Test"
+            property "fabric-api.gametest"
+            property "fabric-api.gametest.report-file", "${project.layout.buildDirectory.get().asFile}/gametest/junit.xml"
+            runDir "build/gametest"
+        }
+    }
+}
+
+configurations {
+    common {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    compileClasspath.extendsFrom common
+    runtimeClasspath.extendsFrom common
+    developmentFabric.extendsFrom common
+
+    // Files in this configuration are bundled into the mod jar
+    shadowBundle {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+}
+
+dependencies {
+    implementation "net.fabricmc:fabric-loader:${mc("fabric_loader_version")}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${mc("fabric_api_version")}"
+
+    // Without remapping, Architectury offers common only as its plain classes and as the jar its transform task makes
+    common(project("${project.parent.path}:common")) { transitive = false }
+    shadowBundle files(rootProject.project("${project.parent.path}:common").tasks.named("transformProductionFabric").flatMap { it.archiveFile })
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+
+    // In dev, Fabric Loader only reads resources (access widener, mixin config, assets) from this mod's own output
+    from(project("${project.parent.path}:common").sourceSets.main.resources)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Minecraft is not obfuscated, so nothing is remapped: the shadow jar with common bundled in is the mod jar
+jar {
+    archiveClassifier = "dev"
+}
+
+shadowJar {
+    configurations = [project.configurations.shadowBundle]
+    archiveClassifier = ""
+    // Loaders ignore it; run on its own, the jar opens the terrain preview
+    manifest {
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview"
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+assemble.dependsOn shadowJar

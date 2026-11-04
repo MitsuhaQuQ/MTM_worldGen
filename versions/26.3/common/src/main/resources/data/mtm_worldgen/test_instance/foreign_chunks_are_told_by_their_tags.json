@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:function",
+  "function": "mtm_worldgen:foreign_chunks_are_told_by_their_tags",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 400,
+  "required": true,
+  "sky_access": true
+}

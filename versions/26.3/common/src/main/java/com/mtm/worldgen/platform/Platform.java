@@ -1,0 +1,37 @@
+package com.mtm.worldgen.platform;
+
+import java.nio.file.Path;
+import java.util.ServiceLoader;
+
+/**
+ * Loader-specific services. Each loader module provides exactly one implementation,
+ * registered under META-INF/services. Implementations must not affect generation results.
+ */
+public interface Platform {
+    String loaderName();
+
+    Path configDir();
+
+    boolean isDevelopmentEnvironment();
+
+    /**
+     * Whether Minecraft runs recompiled from decompiled sources rather than as Mojang built it, as in NeoForge's
+     * development environment. Floats in vanilla code can then come out a bit apart; only tests ask.
+     */
+    default boolean recompilesMinecraft() {
+        return false;
+    }
+
+    static Platform get() {
+        return Holder.INSTANCE;
+    }
+
+    final class Holder {
+        private static final Platform INSTANCE = ServiceLoader.load(Platform.class, Platform.class.getClassLoader())
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("No Platform implementation found"));
+
+        private Holder() {
+        }
+    }
+}

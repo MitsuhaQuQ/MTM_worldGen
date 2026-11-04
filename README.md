@@ -8,14 +8,14 @@ The mod adds a new world type. Existing vanilla worlds, the Nether and the End a
 
 ## Requirements
 
-| | |
-|---|---|
-| Minecraft | 1.20.1 |
-| Java | 17 |
-| Fabric | Loader 0.16.10, Fabric API 0.92.2 |
-| Forge | 47.3.0 |
+| Minecraft | Java | Fabric | Forge | NeoForge |
+|---|---|---|---|---|
+| 1.20.1 | 17 | Loader 0.16.10, Fabric API 0.92.2 | 47.3.0 | |
+| 26.3 | 25 | Loader 0.20.1, Fabric API 0.165.2 | 66.1.5 | 26.3.0.101 |
 
-Later Minecraft versions and NeoForge are planned. No other mods are required.
+Each jar is built for one Minecraft version, as its name says: `mtm_worldgen-fabric-<version>-26.3.jar`. The 26.4 snapshots are not supported yet. No other mods are required.
+
+Terrain is the same in every version: the same seed and settings give the same blocks. 26.3 also places the vanilla biomes 1.20.1 does not have: the pale garden, the dappled forest and sulfur caves. Worlds cannot be moved from 1.20.1 to 26.x yet.
 
 ## Using the mod
 
@@ -38,7 +38,7 @@ Build height runs from -64 to 800 by default, following the configured maximum s
 - **Coasts and islands.** Sand, gravel, rock and sea cliff coasts follow each other along the shore, and sand, rock and mushroom islands dot the open sea.
 - **Surface.** Bare rock on steep ground and snow above the snow line. Caves and ravines stay below the surface.
 
-Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on Fabric and Forge, and in any exploration order.
+Generation only depends on the seed, the coordinates and the settings of the world. The same seed and settings give the same terrain on every loader and Minecraft version, and in any exploration order.
 
 Every detail feature can be switched off in the configuration.
 
@@ -142,30 +142,31 @@ Saves use the settings locked in their `level.dat`; worlds from a seed use `conf
 
 ## Development
 
-Building needs a JDK 17 toolchain, and a JDK 25 toolchain for Amidst. Gradle itself can run on JDK 21, and toolchains are not downloaded automatically. If Gradle cannot find JDK 17, set `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`.
+Building needs JDK 17 and JDK 25 toolchains: 17 for Minecraft 1.20.1, 25 for Minecraft 26.x and Amidst. Gradle itself can run on JDK 21, and toolchains are not downloaded automatically. If Gradle cannot find a JDK, set `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`.
+
+The terrain logic is plain Java in `core`. Each Minecraft version has its own modules in `versions/<version>`: `common` connects the logic to that version's generator, and one module per loader registers it. Gradle projects are named after them, as in `:26.3:fabric`. The versions, their loaders and the versions of those are in `gradle.properties`. A version close to another, such as a snapshot, can build on that version's modules with files of its own only where it differs (`base_version`); `versions/26.4` is set up that way for the 26.4 snapshot, but is not built yet.
 
 ```
-gradlew build                     Build all modules; jars are in fabric/build/libs and forge/build/libs
-gradlew :fabric:runClient         Run a development client
-gradlew :forge:runClient
-gradlew :common:test              Unit tests of the terrain logic
-gradlew :fabric:runGametest       In-game tests
-gradlew :forge:runGameTestServer
-gradlew :amidst:test              Tests of Amidst
-gradlew :amidst:windowsZip        Amidst with Java and the Fabric jar for Windows (on Windows only)
+gradlew build                          Build everything; jars are in versions/<version>/<loader>/build/libs
+gradlew :core:test                     Unit tests of the terrain logic
+gradlew :26.3:fabric:runClient         Run a development client
+gradlew :1.20.1:fabric:runGametest     In-game tests, on Fabric
+gradlew :1.20.1:forge:runGameTestServer
+gradlew :26.3:forge:runGameTestServer
+gradlew :26.3:neoforge:runGameTestServer
+gradlew :amidst:test                   Tests of Amidst
+gradlew :amidst:windowsZip             Amidst with Java and the Fabric jar for Windows (on Windows only)
 ```
 
-All terrain logic lives in the `common` module, and the loader modules only register it and hook it up:
-
-| Package | Contents |
+| Where | Contents |
 |---|---|
-| `logic` | Terrain logic in plain Java, with no Minecraft classes |
-| `noise` | Stateless, deterministic noise |
-| `world` | Connection to the vanilla generator |
-| `command` | Debug commands |
-| `gametest` | In-game tests, run on both loaders |
+| `core`: `logic` | Terrain logic in plain Java, with no Minecraft classes |
+| `core`: `noise` | Stateless, deterministic noise |
+| `common`: `world` | Connection to the vanilla generator |
+| `common`: `command` | Debug commands |
+| `common`: `gametest` | In-game tests, run on every loader |
 
-Both loaders are tested against the same terrain hash. After an intentional terrain change, update `EXPECTED_COLUMN_HASH` in `MtmGameTests`; the failure message prints the new value.
+Every loader and Minecraft version is tested against the same terrain hash. After an intentional terrain change, update `EXPECTED_COLUMN_HASH` in each version's `MtmGameTests`; the failure message prints the new value.
 
 ## License
 

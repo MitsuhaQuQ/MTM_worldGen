@@ -1,0 +1,83 @@
+architectury {
+    forge()
+}
+
+loom {
+    accessWidenerPath = project("${project.parent.path}:common").loom.accessWidenerPath
+
+    forge {
+        convertAccessWideners = true
+        extraAccessWideners.add loom.accessWidenerPath.get().asFile.name
+
+        mixinConfig "mtm_worldgen.mixins.json"
+    }
+
+    runs {
+        // Headless game test server: runs all game tests, then exits non-zero on failure
+        gameTestServer {
+            // Plain server launch target plus the properties Forge's GameTestMain would set: the dedicated
+            // gametest launch target fails to build its module layer in this dev environment
+            server()
+            name "Forge Game Test"
+            property "forge.enableGameTest", "true"
+            property "forge.gameTestServer", "true"
+            runDir "build/gametest"
+        }
+    }
+}
+
+configurations {
+    common {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    compileClasspath.extendsFrom common
+    runtimeClasspath.extendsFrom common
+    developmentForge.extendsFrom common
+
+    // Files in this configuration are bundled into the mod jar
+    shadowBundle {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+}
+
+dependencies {
+    forge "net.minecraftforge:forge:${mcVersion}-${mc("forge_version")}"
+
+    common(project(path: "${project.parent.path}:common", configuration: "namedElements")) { transitive = false }
+    shadowBundle project(path: "${project.parent.path}:common", configuration: "transformProductionForge")
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("META-INF/mods.toml") {
+        expand "version": project.version
+    }
+}
+
+shadowJar {
+    configurations = [project.configurations.shadowBundle]
+    archiveClassifier = "dev-shadow"
+    // Loaders ignore it; run on its own, the jar opens the terrain preview
+    manifest {
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview"
+    }
+}
+
+remapJar {
+    inputFile.set shadowJar.archiveFile
+}
+
+// Mixins name methods by their Mojang names, which only exist in dev: in a real game they find their targets through the
+// refmap their config names. The Fabric jar takes its config straight from the common sources, which once left it out
+remapJar {
+    doLast {
+        def jar = zipTree(archiveFile.get().asFile)
+        def config = new groovy.json.JsonSlurper().parse(jar.matching { include "mtm_worldgen.mixins.json" }.singleFile)
+        if (!config.refmap || jar.matching { include config.refmap }.isEmpty()) {
+            throw new GradleException("${archiveFile.get().asFile.name}: mtm_worldgen.mixins.json names no refmap in the jar")
+        }
+    }
+}

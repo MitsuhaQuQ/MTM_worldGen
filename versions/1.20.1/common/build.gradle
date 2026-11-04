@@ -1,0 +1,18 @@
+architectury {
+    common(mc("platforms").split(","))
+}
+
+loom {
+    accessWidenerPath = file("src/main/resources/mtm_worldgen.accesswidener")
+}
+
+// The terrain logic is compiled into every version's common module
+sourceSets.main {
+    java.srcDir rootProject.file("core/src/main/java")
+    resources.srcDir rootProject.file("core/src/main/resources")
+}
+
+dependencies {
+    // Only for the Mixin and access widener annotations; no Fabric API classes may be used in common
+    modImplementation "net.fabricmc:fabric-loader:${mc("fabric_loader_version")}"
+}

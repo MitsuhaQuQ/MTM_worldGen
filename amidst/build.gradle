@@ -56,15 +56,15 @@ def runtimeModules = [
         "jdk.crypto.cryptoki", "jdk.zipfs", "jdk.accessibility"
 ].join(",")
 
-// The Fabric jar of the mod, looked up late: forcing :fabric to configure first breaks :common's Loom setup
-def modJar = provider { project(":fabric").tasks.named("remapJar").get().archiveFile.get() }
+// The Fabric jar of the mod, looked up late: forcing :1.20.1:fabric to configure first breaks :1.20.1:common's Loom setup
+def modJar = provider { project(":1.20.1:fabric").tasks.named("remapJar").get().archiveFile.get() }
 def appImage = layout.buildDirectory.dir("app-image")
 
 // AMIDST-MTM.exe with its own Java runtime and the Fabric jar of the mod, which it shows unless told otherwise
 def windowsAppImage = tasks.register("windowsAppImage") {
     group = "distribution"
     description = "Packages Amidst, a Java runtime and the mod as a portable Windows app."
-    dependsOn jar, ":fabric:remapJar"
+    dependsOn jar, ":1.20.1:fabric:remapJar"
     inputs.file modJar
     inputs.file jar.archiveFile
     outputs.dir appImage

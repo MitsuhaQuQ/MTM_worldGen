@@ -1,0 +1,71 @@
+architectury {
+    forge()
+}
+
+loom {
+    runs {
+        // Headless game test server: runs all game tests, then exits non-zero on failure
+        gameTestServer {
+            // Forge's own game test server launch
+            environment "gameTestServer"
+            forgeTemplate "gameTestServer"
+            name "Forge Game Test"
+            runDir "build/gametest"
+        }
+    }
+}
+
+configurations {
+    common {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    compileClasspath.extendsFrom common
+    // Architectury puts its own copy of common on the runtime classpath; a second one splits its packages between two modules
+    developmentForge.extendsFrom common
+
+    // Files in this configuration are bundled into the mod jar
+    shadowBundle {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+}
+
+dependencies {
+    forge "net.minecraftforge:forge:${mcVersion}-${mc("forge_version")}"
+
+    // Without remapping, Architectury offers common only as its plain classes and as the jar its transform task makes
+    common(project("${project.parent.path}:common")) { transitive = false }
+    shadowBundle files(rootProject.project("${project.parent.path}:common").tasks.named("transformProductionForge").flatMap { it.archiveFile })
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("META-INF/mods.toml") {
+        expand "version": project.version
+    }
+}
+
+// Minecraft is not obfuscated, so nothing is remapped: the shadow jar with common bundled in is the mod jar
+jar {
+    archiveClassifier = "dev"
+}
+
+shadowJar {
+    configurations = [project.configurations.shadowBundle]
+    archiveClassifier = ""
+    // Loaders ignore it; run on its own, the jar opens the terrain preview
+    manifest {
+        // Forge finds the mixins of a mod jar through this attribute; in development the run passes them on its own
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview", "MixinConfigs": "mtm_worldgen.mixins.json"
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+assemble.dependsOn shadowJar
+
+// Runs take common from the jar Architectury hands them, not from the runtime classpath, so build it first
+tasks.matching { it.name.startsWith("run") }.configureEach {
+    dependsOn rootProject.project("${project.parent.path}:common").tasks.named("jar")
+}

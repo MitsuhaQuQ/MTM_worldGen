@@ -1,0 +1,2 @@
+// The 26.3 common module, built for the 26.4 snapshot with the files under src of its own
+apply from: rootProject.file("versions/26.3/common/build.gradle")

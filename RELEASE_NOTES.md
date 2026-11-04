@@ -1,5 +1,21 @@
 # Release notes
 
+## Unreleased
+
+Builds for Minecraft 26.3, on Fabric, Forge and NeoForge. 1.20.1 stays the main version. Terrain is the same block for block in every version and on every loader; worlds cannot be moved from 1.20.1 to 26.x yet.
+
+### Minecraft versions
+
+- Minecraft 26.3 (Java 25): Fabric Loader 0.20.1 with Fabric API 0.165.2, Forge 66.1.5 and NeoForge 26.3.0.101. Each jar names the Minecraft version it is for, as in `mtm_worldgen-neoforge-<version>-26.3.jar`
+- No build for the 26.4 snapshots yet: they build chunks in a new way that MTM's water, surface and cave protection still have to be fitted to, and only Fabric supports them so far
+- In 26.3 the pale garden grows on temperate highlands next to cherry groves, the dappled forest among the temperate forests, and sulfur caves join the cave biomes. These lists only change the defaults of new configs in 26.3
+
+### Development
+
+- The terrain logic moved to a plain Java module, `core`, which every version builds into its jar. Each Minecraft version has its own modules under `versions/`
+- The build runs on Gradle 9.6 with Architectury Loom 1.17
+- The terrain hash of the game tests is the same in every version. It counts vanilla's ore veins as stone: 26.x places them after the block columns the hash reads
+
 ## v0.5.1
 
 Fixes for raised land along steep streams. Chunks already saved by earlier versions count as an older version, and terrain generated around them blends toward their edges.
