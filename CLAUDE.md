@@ -373,7 +373,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
 - JDK：Gradle 本身可用 JDK 21 运行；编译与运行 1.20.1 需要 JDK 17 工具链，26.x 和 Amidst 需要 JDK 25，已关闭工具链自动下载
   - 若 Gradle 找不到 JDK，在 `~/.gradle/gradle.properties` 中设置 `org.gradle.java.installations.paths=<JDK 路径，逗号分隔>`，或在命令行加 `-Porg.gradle.java.installations.paths=...`（本机已在用户配置中设置好 17、21、25）
 - 命令：
-  - `gradlew build`：构建全部模块（已验证），产物在 `versions/<版本>/<加载器>/build/libs`，文件名带 Minecraft 版本，如 `mtm_worldgen-neoforge-0.5.1-26.3.jar`
+  - `gradlew build`：构建全部模块（已验证），产物在 `versions/<版本>/<加载器>/build/libs`，文件名带 Minecraft 版本，如 `mtm_worldgen-neoforge-0.6.0-26.3.jar`
   - `gradlew :26.3:fabric:runClient` 等：开发环境客户端（未验证）
   - `gradlew :1.20.1:fabric:runServer` 等：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：

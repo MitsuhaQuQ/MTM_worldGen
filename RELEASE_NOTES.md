@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.6.0
 
 Builds for Minecraft 26.3, on Fabric, Forge and NeoForge. 1.20.1 stays the main version. Terrain is the same block for block in every version and on every loader; worlds cannot be moved from 1.20.1 to 26.x yet.
 
@@ -14,6 +14,7 @@ Builds for Minecraft 26.3, on Fabric, Forge and NeoForge. 1.20.1 stays the main 
 
 - The terrain logic moved to a plain Java module, `core`, which every version builds into its jar. Each Minecraft version has its own modules under `versions/`
 - The build runs on Gradle 9.6 with Architectury Loom 1.17
+- The unit tests share one terrain logic where they only read the default world, which cuts them from about 7 minutes to 2
 - The terrain hash of the game tests is the same in every version. It counts vanilla's ore veins as stone: 26.x places them after the block columns the hash reads
 
 ## v0.5.1
