@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.7.3
 
 ### Preview
 
