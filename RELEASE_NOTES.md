@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.7.0
 
 The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so existing worlds, configs and servers keep working.
 
