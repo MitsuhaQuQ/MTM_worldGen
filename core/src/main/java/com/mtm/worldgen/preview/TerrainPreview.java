@@ -20,9 +20,13 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.GraphicsEnvironment;
+import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -46,6 +50,12 @@ public final class TerrainPreview {
     /** Logic regions kept: a window full of map covers far more of them than a game does around its players. */
     private static final int REGION_CACHE = 256;
     private static final int DEFAULT_SCALE = 16;
+    /** Scroll that makes one zoom step: a wheel notch, or a trackpad slide adding up to one. */
+    private static final double SCROLL_STEP = 1.0;
+    /** Trackpad pinch, as macOS measures its magnification, that makes one zoom step. */
+    private static final double PINCH_STEP = 0.3;
+    /** Pixels a sideways scroll pans per wheel notch. */
+    private static final double PAN_PER_NOTCH = 32.0;
     private static final int CACHED_TILES = 400;
     private static final int PICTURE_SIZE = 1024;
     /** Samples per side of the view when counting kinds of land, and how long the view has to rest first. */
@@ -191,6 +201,8 @@ public final class TerrainPreview {
         private double centerX;
         private double centerZ;
         private int scale = DEFAULT_SCALE;
+        private final ZoomGesture scrollZoom = new ZoomGesture(SCROLL_STEP);
+        private final ZoomGesture pinchZoom = new ZoomGesture(PINCH_STEP);
         private int dragX;
         private int dragZ;
         private JLabel status;
@@ -222,21 +234,72 @@ public final class TerrainPreview {
 
                 @Override
                 public void mouseWheelMoved(MouseWheelEvent event) {
-                    int next = event.getWheelRotation() < 0 ? Math.max(MIN_SCALE, scale / 2) : Math.min(MAX_SCALE, scale * 2);
-                    if (next != scale) {
-                        // Keep the block under the cursor where it is
-                        double blockX = centerX + (event.getX() - getWidth() / 2.0) * scale;
-                        double blockZ = centerZ + (event.getY() - getHeight() / 2.0) * scale;
-                        scale = next;
-                        centerX = blockX - (event.getX() - getWidth() / 2.0) * scale;
-                        centerZ = blockZ - (event.getY() - getHeight() / 2.0) * scale;
+                    double amount = event.getPreciseWheelRotation();
+                    if (event.isShiftDown()) {
+                        // Sideways: a shifted wheel, and how macOS delivers a sideways trackpad slide
+                        centerX += amount * PAN_PER_NOTCH * scale;
                         repaint();
+                        return;
                     }
+                    zoomAt(event.getX(), event.getY(), scrollZoom.add(amount));
                 }
             };
             addMouseListener(mouse);
             addMouseMotionListener(mouse);
             addMouseWheelListener(mouse);
+            listenForPinch();
+        }
+
+        /** Zooms by whole steps, keeping the block under a point of the panel where it is. */
+        private void zoomAt(int px, int py, int steps) {
+            int next = scale;
+            for (int i = 0; i < Math.abs(steps); i++) {
+                next = steps < 0 ? Math.max(MIN_SCALE, next / 2) : Math.min(MAX_SCALE, next * 2);
+            }
+            if (next == scale) {
+                return;
+            }
+            double blockX = centerX + (px - getWidth() / 2.0) * scale;
+            double blockZ = centerZ + (py - getHeight() / 2.0) * scale;
+            scale = next;
+            centerX = blockX - (px - getWidth() / 2.0) * scale;
+            centerZ = blockZ - (py - getHeight() / 2.0) * scale;
+            repaint();
+        }
+
+        /**
+         * Zooms with a trackpad pinch on macOS. Swing has no pinch events, but the macOS JDK sends them through
+         * com.apple.eawt.event, which the jar manifest exports to this class. It is looked up by reflection, so
+         * nothing fails where it does not exist.
+         */
+        private void listenForPinch() {
+            try {
+                Class<?> utilities = Class.forName("com.apple.eawt.event.GestureUtilities");
+                Class<?> listener = Class.forName("com.apple.eawt.event.GestureListener");
+                Class<?> magnification = Class.forName("com.apple.eawt.event.MagnificationListener");
+                Method amount = Class.forName("com.apple.eawt.event.MagnificationEvent").getMethod("getMagnification");
+                InvocationHandler handler = (proxy, method, args) -> {
+                    if (method.getName().equals("magnify") && args != null && args.length == 1) {
+                        Point at = getMousePosition();
+                        int px = at != null ? at.x : getWidth() / 2;
+                        int py = at != null ? at.y : getHeight() / 2;
+                        // Spreading the fingers magnifies, which is zooming in
+                        int steps = pinchZoom.add(-(double) amount.invoke(args[0]));
+                        SwingUtilities.invokeLater(() -> zoomAt(px, py, steps));
+                        return null;
+                    }
+                    return switch (method.getName()) {
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == args[0];
+                        case "toString" -> "pinch zoom";
+                        default -> null;
+                    };
+                };
+                Object pinch = Proxy.newProxyInstance(magnification.getClassLoader(), new Class<?>[]{magnification}, handler);
+                utilities.getMethod("addGestureListenerTo", javax.swing.JComponent.class, listener).invoke(null, this, pinch);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+                // Not macOS, or a JDK without trackpad gestures: the wheel and dragging still work
+            }
         }
 
         void show(long newSeed) {

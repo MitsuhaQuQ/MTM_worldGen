@@ -60,7 +60,7 @@ shadowJar {
     archiveClassifier = "dev-shadow"
     // Loaders ignore it; run on its own, the jar opens the terrain preview
     manifest {
-        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview"
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview", "Add-Exports": "java.desktop/com.apple.eawt.event"
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     // The mixin config copied in above for dev wins over the one Architectury gave the refmap, which dev must not have

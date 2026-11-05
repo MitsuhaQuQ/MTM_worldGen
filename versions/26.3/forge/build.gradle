@@ -58,7 +58,7 @@ shadowJar {
     // Loaders ignore it; run on its own, the jar opens the terrain preview
     manifest {
         // Forge finds the mixins of a mod jar through this attribute; in development the run passes them on its own
-        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview", "MixinConfigs": "mtm_worldgen.mixins.json"
+        attributes "Main-Class": "com.mtm.worldgen.preview.TerrainPreview", "Add-Exports": "java.desktop/com.apple.eawt.event", "MixinConfigs": "mtm_worldgen.mixins.json"
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

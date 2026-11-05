@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Preview
+
+- Trackpads zoom the map preview smoothly: small scroll amounts add up to one step instead of each zooming a full step, sideways slides pan, and pinching zooms on macOS
+
 ## v0.7.2
 
 ### Commands
