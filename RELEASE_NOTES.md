@@ -1,10 +1,14 @@
 # Release notes
 
-## Unreleased
+## v0.7.2
 
 ### Commands
 
 - `/mwg locate` also finds the nearest `plains`, `plateau`, `lake` and `ocean`, besides `mountain`
+
+### Development
+
+- Releases are titled Realistic Landforms
 
 ## v0.7.1
 

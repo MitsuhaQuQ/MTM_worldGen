@@ -69,6 +69,6 @@ jobs:
             "${jars[@]}" \
             "amidst/build/libs/amidst-mtm-$VERSION.jar" \
             "amidst/build/distributions/AMIDST-MTM-$VERSION-windows.zip" \
-            --title "MTM-Worldgen $VERSION" \
+            --title "Realistic Landforms $VERSION" \
             --notes "$notes" \
             --prerelease
