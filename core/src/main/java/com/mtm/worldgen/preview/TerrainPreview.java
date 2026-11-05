@@ -232,6 +232,14 @@ public final class TerrainPreview {
                     describe(event.getX(), event.getY());
                 }
 
+                /** Swing only counts a click when the mouse has not moved since the press, so drags never copy. */
+                @Override
+                public void mouseClicked(MouseEvent event) {
+                    if (SwingUtilities.isLeftMouseButton(event)) {
+                        copyPosition(event.getX(), event.getY());
+                    }
+                }
+
                 @Override
                 public void mouseWheelMoved(MouseWheelEvent event) {
                     double amount = event.getPreciseWheelRotation();
@@ -329,6 +337,23 @@ public final class TerrainPreview {
             centerX = x;
             centerZ = z;
             repaint();
+        }
+
+        /**
+         * Copies the block position under a point of the panel as "x z", the form the Go to field takes, so it can be
+         * pasted back there or into a command.
+         */
+        private void copyPosition(int px, int py) {
+            int x = (int) Math.floor(centerX + (px - getWidth() / 2.0) * scale);
+            int z = (int) Math.floor(centerZ + (py - getHeight() / 2.0) * scale);
+            String text = x + " " + z;
+            try {
+                java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(text), null);
+                status.setText("Copied " + text);
+            } catch (IllegalStateException e) {
+                // Another program holds the clipboard for a moment
+                status.setText("Could not copy " + text + ": the clipboard is busy");
+            }
         }
 
         private void describe(int px, int py) {
