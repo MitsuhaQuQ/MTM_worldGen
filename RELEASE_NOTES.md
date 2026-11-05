@@ -5,6 +5,7 @@
 ### Web map
 
 - Servers can show their world as a topographic web map, drawn from the generated chunks: real rivers, lakes and land, without buildings, with hill shading and contour lines. Off by default; turn it on in `config/mtm_worldgen-webmap.json`. `/mwg webmap` shows its address
+- Tiles are cached in one SQLite file per world (`<world>/mtm_worldgen/webmap.db`) rather than a file for every tile. The mod jars nest the SQLite driver, so they grow to about 5.4 MB
 
 ### Fixes
 

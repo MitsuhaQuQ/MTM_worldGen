@@ -151,6 +151,11 @@ class WebMapTest {
         Path config = root.resolve("config");
         Files.createDirectories(config);
         Files.writeString(config.resolve("mtm_worldgen-webmap.json"), "{\"enabled\": true, \"bind\": \"127.0.0.1\", \"port\": 0}");
+        // A tile file as older versions wrote them, next to a file of someone else's
+        Path oldCache = root.resolve("mtm_worldgen/webmap/0");
+        Files.createDirectories(oldCache);
+        Files.write(oldCache.resolve("0.-1.png"), new byte[]{1});
+        Files.write(oldCache.resolve("notes.txt"), new byte[]{1});
         WebMap.start(root, regions, config, "Test world", new WebMap.Log() {
             @Override
             public void info(String message) {
@@ -173,11 +178,28 @@ class WebMapTest {
             }
             HttpURLConnection empty = (HttpURLConnection) URI.create(address + "tiles/0/5/5.png").toURL().openConnection();
             assertEquals(404, empty.getResponseCode());
-            assertTrue(Files.exists(root.resolve("mtm_worldgen/webmap/0/0.-1.png")), "tile cached");
         } finally {
             WebMap.stop();
         }
         assertNull(WebMap.status());
+        // Tiles are kept in one database, for the stamp of the region file under them
+        long stamp = Files.getLastModifiedTime(regions.resolve("r.0.-1.mca")).toMillis();
+        try (TileDatabase database = TileDatabase.open(root.resolve("mtm_worldgen/webmap.db"))) {
+            for (int level = 0; level <= 3; level++) {
+                assertNotNull(database.read(TileDatabase.IMAGES, level, 0, -1, stamp), "image of level " + level);
+                assertNotNull(database.read(TileDatabase.RASTERS, level, 0, -1, stamp), "raster of level " + level);
+            }
+            assertNull(database.read(TileDatabase.IMAGES, 0, 0, -1, stamp + 1), "an out of date tile");
+        } catch (java.sql.SQLException | ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+        // The old tile files go on a thread of their own; what is not a tile stays
+        long until = System.currentTimeMillis() + 10_000;
+        while (Files.exists(oldCache.resolve("0.-1.png")) && System.currentTimeMillis() < until) {
+            Thread.onSpinWait();
+        }
+        assertTrue(!Files.exists(oldCache.resolve("0.-1.png")), "old tile file removed");
+        assertTrue(Files.exists(oldCache.resolve("notes.txt")), "other files stay");
     }
 
     private static String get(String url) throws IOException {

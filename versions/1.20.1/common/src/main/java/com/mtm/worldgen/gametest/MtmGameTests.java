@@ -526,6 +526,8 @@ public final class MtmGameTests {
             assertTrue(page.getResponseCode() == 200, "web map page answered " + page.getResponseCode());
             java.net.HttpURLConnection info = (java.net.HttpURLConnection) java.net.URI.create(address + "info.json").toURL().openConnection();
             assertTrue(info.getResponseCode() == 200, "web map info answered " + info.getResponseCode());
+            // The tile database opens only where the loader gives the mod its nested SQLite driver
+            assertTrue(Files.exists(root.resolve("mtm_worldgen").resolve("webmap.db")), "web map has no tile database; did SQLite fail to load?");
         } catch (IOException e) {
             throw new IllegalStateException(e);
         } finally {

@@ -11,6 +11,50 @@ allprojects {
     version = rootProject.mod_version
 }
 
+// The web map keeps its tiles in SQLite. Its driver carries native code for two dozen platforms, 14 MB in all; the
+// loader jars nest a copy with only the platforms Minecraft runs on: Windows, Linux (glibc and musl) and macOS, on
+// x86-64 and ARM64. The copy keeps the driver's own coordinates, in a repository of its own under build, so that a
+// loader still picks one copy when other mods nest the driver too
+repositories {
+    mavenCentral()
+}
+configurations {
+    sqlite {
+        canBeConsumed = false
+        transitive = false
+    }
+}
+dependencies {
+    sqlite "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
+}
+ext.sqliteRepository = layout.buildDirectory.dir("sqlite").get().asFile
+def sqliteNatives = ["Windows/x86_64", "Windows/aarch64", "Linux/x86_64", "Linux/aarch64", "Linux-Musl/x86_64",
+                     "Linux-Musl/aarch64", "Mac/x86_64", "Mac/aarch64"]
+def trimmedSqlite = new File(sqliteRepository, "org/xerial/sqlite-jdbc/${sqlite_jdbc_version}/sqlite-jdbc-${sqlite_jdbc_version}.jar")
+def trimmedNatives = new File(trimmedSqlite.parentFile, "natives.txt")
+// Made while configuring, since dependencies resolve from it; only again when the list of platforms changes
+if (!trimmedSqlite.exists() || !trimmedNatives.exists() || trimmedNatives.text != sqliteNatives.join(",")) {
+    trimmedSqlite.parentFile.mkdirs()
+    def temporary = new File(trimmedSqlite.path + ".tmp")
+    new java.util.zip.ZipFile(configurations.sqlite.singleFile).withCloseable { original ->
+        new java.util.zip.ZipOutputStream(new FileOutputStream(temporary)).withCloseable { out ->
+            original.entries().each { entry ->
+                def path = entry.name
+                if (path.startsWith("org/sqlite/native/") && !entry.directory && !sqliteNatives.any { path.startsWith("org/sqlite/native/${it}/") }) {
+                    return
+                }
+                def copy = new java.util.zip.ZipEntry(path)
+                copy.time = entry.time
+                out.putNextEntry(copy)
+                original.getInputStream(entry).withCloseable { out << it }
+                out.closeEntry()
+            }
+        }
+    }
+    java.nio.file.Files.move(temporary.toPath(), trimmedSqlite.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    trimmedNatives.text = sqliteNatives.join(",")
+}
+
 // The properties of one Minecraft version, as in gradle.properties: mcProperty(project, "java_version") reads
 // 1.20.1.java_version for the modules in versions/1.20.1
 ext.mcProperty = { Project project, String key -> rootProject.property("${project.parent.name}.${key}") }
@@ -32,6 +76,37 @@ configure(subprojects.findAll { it.parent != null && it.parent.parent == rootPro
     // Loader modules bundle common into their jar
     if (project.name != "common") {
         apply plugin: "com.gradleup.shadow"
+
+        // The web map's SQLite driver, trimmed: a nested jar, so that the loader picks one copy when other mods carry it too
+        def sqlite = "org.xerial:sqlite-jdbc:${rootProject.sqlite_jdbc_version}"
+        dependencies {
+            include sqlite
+            if (loom.platform.get().name() in ["FORGE", "NEOFORGE"]) {
+                forgeRuntimeLibrary sqlite
+            } else {
+                runtimeOnly sqlite
+            }
+        }
+        if (!obfuscated) {
+            // Without remapping the shadow jar is the mod jar, but Loom nests jars into the plain jar only: the shadow
+            // jar takes them from there, and Fabric's metadata names them as Loom's would
+            def nested = "META-INF/jars/sqlite-jdbc-${rootProject.sqlite_jdbc_version}.jar"
+            tasks.named("shadowJar") {
+                dependsOn tasks.named("jar")
+                from({ zipTree(tasks.named("jar").get().archiveFile) }) {
+                    include "META-INF/jars/**", "META-INF/jarjar/**"
+                }
+                filesMatching("fabric.mod.json") {
+                    filter { line -> line.contains('"schemaVersion"') ? line + System.lineSeparator() + "  \"jars\": [{\"file\": \"${nested}\"}]," : line }
+                }
+                doLast {
+                    def jar = zipTree(archiveFile.get().asFile)
+                    if (jar.matching { include nested }.isEmpty()) {
+                        throw new GradleException("${archiveFile.get().asFile.name} does not nest ${nested}")
+                    }
+                }
+            }
+        }
     }
 
     architectury {
@@ -39,6 +114,16 @@ configure(subprojects.findAll { it.parent != null && it.parent.parent == rootPro
     }
 
     repositories {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "Trimmed SQLite"
+                    url = rootProject.sqliteRepository
+                    metadataSources { artifact() }
+                }
+            }
+            filter { includeModule "org.xerial", "sqlite-jdbc" }
+        }
         maven { url = "https://maven.neoforged.net/releases/" }
         maven { url = "https://maven.minecraftforge.net/" }
     }

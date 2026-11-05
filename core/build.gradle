@@ -24,6 +24,8 @@ dependencies {
     compileOnly "com.google.code.gson:gson:${rootProject.gson_version}"
 
     testImplementation "com.google.code.gson:gson:${rootProject.gson_version}"
+    // The web map's tile database; mod jars carry it as a nested jar
+    testRuntimeOnly "org.xerial:sqlite-jdbc:${rootProject.sqlite_jdbc_version}"
     testImplementation "org.junit.jupiter:junit-jupiter:${rootProject.junit_version}"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }

@@ -91,7 +91,7 @@ It is off by default, since it opens a port. Turn it on in `config/mtm_worldgen-
 { "enabled": true, "bind": "0.0.0.0", "port": 8130, "threads": 2 }
 ```
 
-Then open `http://<server address>:8130/`. Drag to move, scroll to zoom, click to copy the coordinates under the pointer. `/mwg webmap` shows the address. The map follows the region files, so new land appears after the game has saved it, every few minutes; tiles are cached under `<world>/mtm_worldgen/webmap/`, which is safe to delete.
+Then open `http://<server address>:8130/`. Drag to move, scroll to zoom, click to copy the coordinates under the pointer. `/mwg webmap` shows the address. The map follows the region files, so new land appears after the game has saved it, every few minutes; tiles are cached in one SQLite file, `<world>/mtm_worldgen/webmap.db`, which is safe to delete. Mod jars carry the SQLite driver (xerial sqlite-jdbc, with native code for Windows, Linux and macOS on x86-64 and ARM64); elsewhere the map still works, keeping tiles in memory only.
 
 ## Merging other maps
 

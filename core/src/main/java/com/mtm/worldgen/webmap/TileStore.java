@@ -2,14 +2,13 @@ package com.mtm.worldgen.webmap;
 
 import javax.imageio.ImageIO;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.FileTime;
+import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,9 +20,9 @@ import java.util.zip.GZIPOutputStream;
 
 /**
  * The tile pyramid of a world's overworld. A tile of level 0 is one region file; a tile of level k covers 2^k by 2^k
- * of them, merged from the four tiles of level k - 1 below it. Rasters and images are kept in a cache folder and
- * stamped with the newest change of the region files under them, so a tile is drawn again only once the game has
- * saved something new there.
+ * of them, merged from the four tiles of level k - 1 below it. Rasters and images are kept in the world's tile
+ * database and stamped with the newest change of the region files under them, so a tile is drawn again only once the
+ * game has saved something new there. Without a database (its driver could not load) tiles are only kept in memory.
  */
 final class TileStore {
     static final int MAX_LEVEL = 8;
@@ -32,7 +31,8 @@ final class TileStore {
     private static final int MEMORY_RASTERS = 48;
 
     private final Path regions;
-    private final Path cache;
+    /** Null where there is none: tiles are then drawn again after every restart. */
+    private final TileDatabase database;
     private final Map<Long, CompletableFuture<Raster>> computing = new ConcurrentHashMap<>();
     private final Map<Long, Raster> memory = new LinkedHashMap<>(64, 0.75f, true) {
         @Override
@@ -43,9 +43,9 @@ final class TileStore {
     private volatile Map<Long, Long> listing = Map.of();
     private volatile long listedAt;
 
-    TileStore(Path regions, Path cache) {
+    TileStore(Path regions, TileDatabase database) {
         this.regions = regions;
-        this.cache = cache;
+        this.database = database;
     }
 
     /** Region files by their key, with the time each was last changed. */
@@ -107,9 +107,9 @@ final class TileStore {
         if (stamp == 0) {
             return null;
         }
-        Path file = cache.resolve(Integer.toString(level)).resolve(tileX + "." + tileZ + ".png");
-        if (Files.exists(file) && Files.getLastModifiedTime(file).toMillis() == stamp) {
-            return Files.readAllBytes(file);
+        byte[] stored = load(TileDatabase.IMAGES, level, tileX, tileZ, stamp);
+        if (stored != null) {
+            return stored;
         }
         Raster raster = raster(level, tileX, tileZ);
         if (raster == null) {
@@ -118,11 +118,11 @@ final class TileStore {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         ImageIO.write(TileRenderer.render(raster, level), "png", bytes);
         byte[] png = bytes.toByteArray();
-        save(file, stamp, out -> out.write(png));
+        store(TileDatabase.IMAGES, level, tileX, tileZ, stamp, png);
         return png;
     }
 
-    /** A tile's raster, from memory, the cache folder or the tiles below; null where nothing has been generated. */
+    /** A tile's raster, from memory, the database or the tiles below; null where nothing has been generated. */
     Raster raster(int level, int tileX, int tileZ) throws IOException {
         long stamp = stamp(level, tileX, tileZ);
         if (stamp == 0) {
@@ -158,13 +158,13 @@ final class TileStore {
                 return known;
             }
         }
-        Path file = cache.resolve(Integer.toString(level)).resolve(tileX + "." + tileZ + ".bin");
         Raster raster = null;
-        if (Files.exists(file) && Files.getLastModifiedTime(file).toMillis() == stamp) {
-            try (InputStream in = new GZIPInputStream(Files.newInputStream(file))) {
+        byte[] stored = load(TileDatabase.RASTERS, level, tileX, tileZ, stamp);
+        if (stored != null) {
+            try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(stored))) {
                 raster = Raster.read(in);
             } catch (IOException e) {
-                // A damaged cache file is only made again
+                // A damaged tile is only made again
             }
         }
         if (raster == null) {
@@ -172,12 +172,11 @@ final class TileStore {
             if (raster == null) {
                 return null;
             }
-            Raster written = raster;
-            save(file, stamp, out -> {
-                try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
-                    written.write(gzip);
-                }
-            });
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (GZIPOutputStream gzip = new GZIPOutputStream(bytes)) {
+                raster.write(gzip);
+            }
+            store(TileDatabase.RASTERS, level, tileX, tileZ, stamp, bytes.toByteArray());
         }
         synchronized (memory) {
             memory.put(key ^ stamp, raster);
@@ -205,19 +204,25 @@ final class TileStore {
         return any ? merged : null;
     }
 
-    private interface Writer {
-        void write(OutputStream out) throws IOException;
+    private byte[] load(String table, int level, int tileX, int tileZ, long stamp) throws IOException {
+        if (database == null) {
+            return null;
+        }
+        try {
+            return database.read(table, level, tileX, tileZ, stamp);
+        } catch (SQLException e) {
+            throw new IOException(e);
+        }
     }
 
-    /** Writes a cache file in one piece and stamps it, so a half-written file is never taken for a finished one. */
-    private static void save(Path file, long stamp, Writer writer) throws IOException {
-        Files.createDirectories(file.getParent());
-        Path temporary = file.resolveSibling(file.getFileName() + ".tmp" + Thread.currentThread().getId());
-        try (OutputStream out = Files.newOutputStream(temporary)) {
-            writer.write(out);
+    private void store(String table, int level, int tileX, int tileZ, long stamp, byte[] data) throws IOException {
+        if (database != null) {
+            try {
+                database.write(table, level, tileX, tileZ, stamp, data);
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
         }
-        Files.setLastModifiedTime(temporary, FileTime.fromMillis(stamp));
-        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
     /** Bounds of the region files, in blocks: min x, min z, max x, max z, or null if there are none. */

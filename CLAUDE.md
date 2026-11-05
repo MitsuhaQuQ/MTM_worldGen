@@ -26,6 +26,7 @@
 - 支持 Forge、Fabric，以及 NeoForge（1.20.1 之后与 Forge 分家）
 - 除加载器自身 API 外不依赖其它 mod
   - 允许：Fabric API
+  - 库（不是 mod）：网页地图的瓦片缓存用 SQLite（xerial `sqlite-jdbc`，用户选定），由各加载器的 jar-in-jar 嵌套（Fabric `include`、Forge/NeoForge JarJar），保持原坐标，其它 mod 也带时加载器只取一份；不能 shadow 进来，JNI 绑定了类名，重定位就加载不了，不重定位又会和别的 mod 的副本包重复
   - Architectury API / Forge Config API Port / Cloth Config 等仅在必须时使用，配置优先自行实现
 - 下界与末地不受影响
 
@@ -295,7 +296,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
 服务端（单人时是集成服务端）可以开一个 HTTP 端口，把已生成的区块画成 OpenTopoMap 风格的地形图（`core` 的 `webmap` 包，纯 Java，不依赖 Minecraft；用 JDK 自带的 `com.sun.net.httpserver`）。目的是看实际生成的水系、湖泊和地形，和按种子估算的地形预览不同。
 
 - 数据：直接读区域文件（`RegionScan`，自带 NBT 读取，各 Minecraft 版本共用），不经过游戏线程；跟随存档，游戏保存后才更新。每列从上往下扫到第一个天然地面方块（`BlockClass`，按方块名判断）：建筑、道路、铁轨、作物等非天然方块当作空气跳过，所以地图上没有建筑；树叶树干记为森林，雪层记为积雪，普通冰算水面（冻住的河湖仍是河湖），珊瑚和海泡菜算水。水面一直保留到下方地面，海底遗迹、沉船不会把海变成陆地
-- 金字塔（`TileStore`）：0 级瓦片一个区域文件（512×512，一格一像素），每升一级由下一级 2×2 合并（`Raster.merge`）。合并时只要四个里有一个是水就是水，否则几格宽的溪流缩两级就消失；陆地取多数的地表类型。栅格和 PNG 缓存在 `<存档>/mtm_worldgen/webmap/<级>/`，文件修改时间设为其下区域文件的最新修改时间，不一致就重画。首次画远景瓦片要读下面所有区域文件（实测 64 个区域约 28 s），之后走缓存
+- 金字塔（`TileStore`）：0 级瓦片一个区域文件（512×512，一格一像素），每升一级由下一级 2×2 合并（`Raster.merge`）。合并时只要四个里有一个是水就是水，否则几格宽的溪流缩两级就消失；陆地取多数的地表类型。栅格和 PNG 存在一个 SQLite 文件 `<存档>/mtm_worldgen/webmap.db` 里（`TileDatabase`，两张表 `rasters`、`images`，按级别和坐标存，带其下区域文件的最新修改时间作为戳，不一致就重画）。不要再用一瓦片一文件：大世界有几十万个瓦片，小文件多到难以复制、备份和删除；0.7.4 及以前写的 `webmap/` 目录在启动时由后台线程删掉（只删瓦片文件和由此变空的目录）。驱动按类名反射加载，不经过 `DriverManager`（Forge、NeoForge 上调用方的类加载器看不到嵌套库），core 编译时不依赖它；加载失败（如没有原生库的平台）时只在内存里缓存，不写散文件。驱动只保留 Windows、Linux（glibc、musl）、macOS 的 x86-64 和 ARM64 原生库（14 MB → 5 MB），由根 `build.gradle` 在配置阶段裁剪进 `build/sqlite` 下的本地仓库，坐标不变；26.x 不重映射，Loom 只把嵌套 jar 放进普通 jar，shadowJar 从那里取，并在 fabric.mod.json 里补上 `jars`。首次画远景瓦片要读下面所有区域文件（实测 64 个区域约 28 s），之后走缓存
 - 绘制（`TileRenderer`）：地表类型配色、西北光源的山体阴影、等高线（间距随级别 10–200 格，每五条一条粗线）、水按深度渐变。一格一像素时先平滑高度（否则方块台阶成了条纹），陡于 150% 的坡不画细等高线、陡于 400% 的不画等高线（挤成一片），森林按 3×3 多数平滑。瓦片边缘按自身边缘外推，阴影在瓦片交界处可能有细缝
 - 网页（`index.html`）：自写的拖动缩放地图，不依赖外部 CDN；单击复制坐标，网址 `#x,z,缩放` 可分享视角；只用 node 检查过语法，浏览器里的交互未确认
 - 配置在单独的 `config/mtm_worldgen-webmap.json`（`WebMap.Config`），属于服务器不属于世界，不锁进 level.dat；默认关闭，因为要开端口。各版本 common 的 `MtmWebMap` 在 `ForeignChunks.prepare` 之后（外来区块已改写完）启动，`MinecraftServerMixin` 在 `stopServer` 时关闭；线程都是守护线程。`/mwg webmap` 显示地址。GameTest `web_map_serves_its_page` 检查各加载器的模块层里能用 `jdk.httpserver`

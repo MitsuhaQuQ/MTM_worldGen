@@ -13,11 +13,13 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * A web map of a world's overworld as the game has generated it, served over HTTP by the server itself: rivers,
@@ -53,6 +55,9 @@ public final class WebMap {
         }
     };
     private static final String CONFIG_FILE = "mtm_worldgen-webmap.json";
+    private static final String DATABASE_FILE = "webmap.db";
+    /** Where versions up to 0.7.4 kept a file for every tile. */
+    private static final String OLD_CACHE = "webmap";
     private static final Pattern TILE = Pattern.compile("/tiles/(\\d+)/(-?\\d+)/(-?\\d+)\\.png");
     private static WebMap running;
     private static Log log = SILENT;
@@ -60,14 +65,16 @@ public final class WebMap {
     private final HttpServer server;
     private final ExecutorService workers;
     private final TileStore tiles;
+    private final TileDatabase database;
     private final String worldName;
     private final Config config;
 
-    private WebMap(Config config, Path regions, Path cache, String worldName) throws IOException {
+    private WebMap(Config config, Path regions, Path data, String worldName) throws IOException {
         this.config = config;
         this.worldName = worldName;
-        this.tiles = new TileStore(regions, cache);
         this.server = HttpServer.create(new InetSocketAddress(config.bind, config.port), 0);
+        this.database = openDatabase(data.resolve(DATABASE_FILE));
+        this.tiles = new TileStore(regions, database);
         AtomicInteger count = new AtomicInteger();
         // Daemon threads: a map left running must never keep the game's process alive
         this.workers = Executors.newFixedThreadPool(Math.max(1, config.threads), runnable -> {
@@ -85,7 +92,7 @@ public final class WebMap {
      * Starts the map of a world if its config turns it on, and stops one that is running. Called once the overworld
      * of a server has loaded.
      *
-     * @param root      the world folder, where tiles are cached under mtm_worldgen/webmap
+     * @param root      the world folder, where tiles are cached in mtm_worldgen/webmap.db
      * @param regions   where the overworld keeps its region files
      * @param configDir the game's config folder
      * @param gameLog   where to report
@@ -98,7 +105,9 @@ public final class WebMap {
             return;
         }
         try {
-            running = new WebMap(config, regions, root.resolve("mtm_worldgen").resolve("webmap"), worldName);
+            Path data = root.resolve("mtm_worldgen");
+            removeOldCache(data.resolve(OLD_CACHE));
+            running = new WebMap(config, regions, data, worldName);
             log.info("Web map of " + worldName + " at " + running.address());
         } catch (IOException | RuntimeException | LinkageError e) {
             log.warn("Could not start the web map on " + config.bind + ":" + config.port, e);
@@ -109,7 +118,69 @@ public final class WebMap {
         if (running != null) {
             running.server.stop(0);
             running.workers.shutdownNow();
+            if (running.database != null) {
+                try {
+                    running.database.close();
+                } catch (SQLException e) {
+                    log.warn("Could not close the web map's tile database", e);
+                }
+            }
             running = null;
+        }
+    }
+
+    /**
+     * The tile database, or null if SQLite cannot load here, as on a platform its library has no native code for:
+     * the map then keeps tiles in memory only, and draws them again after a restart.
+     */
+    private static TileDatabase openDatabase(Path file) {
+        try {
+            return TileDatabase.open(file);
+        } catch (SQLException | IOException | ReflectiveOperationException | RuntimeException | LinkageError e) {
+            log.warn("Could not open the web map's tile database " + file + ", tiles are kept in memory only", e);
+            return null;
+        }
+    }
+
+    /**
+     * Deletes the folder of tile files older versions wrote, on a thread of its own since it can hold hundreds of
+     * thousands of them. Only the tile files themselves go, and the folders they leave empty.
+     */
+    private static void removeOldCache(Path folder) {
+        if (!Files.isDirectory(folder)) {
+            return;
+        }
+        Thread thread = new Thread(() -> {
+            try (Stream<Path> levels = Files.list(folder)) {
+                for (Path level : levels.toList()) {
+                    if (!Files.isDirectory(level) || !level.getFileName().toString().matches("[0-9]+")) {
+                        continue;
+                    }
+                    try (Stream<Path> files = Files.list(level)) {
+                        for (Path file : files.toList()) {
+                            if (file.getFileName().toString().matches("-?[0-9]+[.]-?[0-9]+[.](png|bin)([.]tmp[0-9]+)?")) {
+                                Files.deleteIfExists(file);
+                            }
+                        }
+                    }
+                    deleteIfEmpty(level);
+                }
+                deleteIfEmpty(folder);
+                log.info("Removed the old web map tile files in " + folder);
+            } catch (IOException | RuntimeException e) {
+                log.warn("Could not remove the old web map tile files in " + folder, e);
+            }
+        }, "MTM web map cleanup");
+        thread.setDaemon(true);
+        thread.setPriority(Thread.MIN_PRIORITY);
+        thread.start();
+    }
+
+    private static void deleteIfEmpty(Path folder) throws IOException {
+        try (Stream<Path> left = Files.list(folder)) {
+            if (left.findAny().isEmpty()) {
+                Files.delete(folder);
+            }
         }
     }
 
