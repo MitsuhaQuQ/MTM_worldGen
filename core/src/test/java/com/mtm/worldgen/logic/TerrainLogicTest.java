@@ -800,6 +800,25 @@ class TerrainLogicTest {
         return path;
     }
 
+    /** /mwg locate finds each kind of land within its radius, and what it finds is that kind of land. */
+    @Test
+    void locateFindsEachKindOfLand() {
+        TerrainLogic logic = SHARED;
+        for (TerrainLogic.Feature feature : TerrainLogic.Feature.values()) {
+            BlockColumn found = logic.findNearest(feature, 0, 0, 64, 16384);
+            assertTrue(found != null, "no " + feature + " found");
+            int x = found.x();
+            int z = found.z();
+            switch (feature) {
+                case MOUNTAIN -> assertTrue(logic.sampleOverviewHeight(x, z) >= SETTINGS.general.maxSurfaceHeight / 2.0);
+                case PLAINS -> assertEquals(TerrainLogic.Landform.PLAINS, logic.sampleLandformKind(x, z));
+                case PLATEAU -> assertEquals(TerrainLogic.Landform.PLATEAU, logic.sampleLandformKind(x, z));
+                case OCEAN -> assertTrue(logic.sampleLandformKind(x, z) == TerrainLogic.Landform.OCEAN && logic.sampleCoastDistance(x, z) < 0.0);
+                case LAKE -> assertTrue(!Double.isNaN(logic.sampleLakeLevel(x, z)), "lake without water at " + x + "," + z);
+            }
+        }
+    }
+
     /** With plate tectonics off the plate settings change nothing, and the layout differs from the one plates give. */
     @Test
     void plateTectonicsCanBeSwitchedOff() {

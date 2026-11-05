@@ -389,7 +389,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
   - `gradlew :1.20.1:fabric:runServer` 等：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：
   - `/mwg flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mwg flyspeed reset` 恢复默认；`/mwg flyspeed` 查询当前倍数
-  - `/mwg locate mountain`：从玩家位置向外搜索最近的高山（地表高于最大高度一半），给出可点击传送的坐标
+  - `/mwg locate <mountain|plains|plateau|lake|ocean>`：从玩家位置向外按方环搜索最近的高山（地表高于最大高度一半）、平原、高原、湖泊（地面低于湖面）、海洋（离岸 64 格以上），给出可点击传送的坐标，湖泊和海洋的坐标在水面以上（`TerrainLogic.findNearest`）；平原、高原、海洋和高山只看地形骨架，不算水系和侵蚀，湖泊要算经过区域的水系和湖形，仍不算侵蚀
   - `/mwg benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
   - `/mwg precompute <半径>`：在后台线程上由近及远预先计算玩家周围的逻辑区域（半径按区域数，0–5，最多 121 个），侵蚀结果写入磁盘缓存；聊天栏报告进度，`/mwg precompute cancel` 在当前区域算完后停止，同时只能运行一个（`RegionPrecompute`）。半径 5 超过内存缓存的 64 个区域，早算的区域会被挤出内存，靠磁盘缓存保留侵蚀
   - `/mwg debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界

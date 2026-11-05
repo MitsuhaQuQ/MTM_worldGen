@@ -88,7 +88,7 @@ All commands need cheats enabled.
 
 | Command | Effect |
 |---|---|
-| `/mwg locate mountain` | Finds the nearest high mountain, with a coordinate you can click to teleport |
+| `/mwg locate <kind>` | Finds the nearest `mountain`, `plains`, `plateau`, `lake` or `ocean`, with a coordinate you can click to teleport |
 | `/mwg flyspeed <factor>` | Sets flying speed, 0.1 to 50 times the default. `reset` restores it, and no argument shows it |
 | `/mwg precompute <radius>` | Computes the areas within this many areas of you (0 to 5) in the background, so exploring there later does not wait. `cancel` stops it |
 | `/mwg benchmark` | Compares chunk generation time with vanilla |

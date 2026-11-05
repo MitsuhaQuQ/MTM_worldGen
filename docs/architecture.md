@@ -605,7 +605,7 @@ A release only publishes once every job has passed: when the Windows packaging f
 
 | Tool | What it does |
 |---|---|
-| `/mwg locate mountain` | Nearest high mountain, with a coordinate to click |
+| `/mwg locate <kind>` | Nearest mountain, plains, plateau, lake or ocean, with a coordinate to click (`TerrainLogic.findNearest`) |
 | `/mwg debugmap` | PNG of terrain, rivers and region borders around the player (`HeightMapRenderer`) |
 | `/mwg precompute` | Computes regions around the player ahead of time (`RegionPrecompute`) |
 | `/mwg benchmark` | Chunk generation time against vanilla (`GenerationBenchmark`) |

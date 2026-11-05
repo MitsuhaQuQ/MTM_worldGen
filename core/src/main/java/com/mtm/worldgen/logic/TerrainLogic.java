@@ -6,6 +6,7 @@ import com.mtm.worldgen.noise.Hashing;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiPredicate;
 
 /**
  * Entry point to the terrain logic of one world. Large-scale values live on the coarse grid and are
@@ -35,6 +36,8 @@ public final class TerrainLogic {
 
     /** Sink share at which an inland lake's basin and rim shape the land in full, where the basin starts to be dug. */
     private static final double SINK_RIM_FADE = 0.2;
+    /** How far off the coast /mwg locate ocean looks, in blocks, so it finds open water rather than the shallows. */
+    private static final double OCEAN_OFFSHORE = 64.0;
     private static final int FIELD_HEIGHT = 0;
     private static final int FIELD_COAST_DISTANCE = 1;
 
@@ -1725,6 +1728,42 @@ public final class TerrainLogic {
      * @return the first matching column found, or null if none within the radius
      */
     public BlockColumn findNearestAbove(double minHeight, int originX, int originZ, int step, int radius) {
+        return findNearest(originX, originZ, step, radius, (x, z) -> sampleOverviewHeight(x, z) >= minHeight);
+    }
+
+    /** Kinds of land {@link #findNearest(Feature, int, int, int, int)} looks for. */
+    public enum Feature {
+        /** Land above half the maximum surface height. */
+        MOUNTAIN,
+        PLAINS,
+        PLATEAU,
+        LAKE,
+        OCEAN
+    }
+
+    /**
+     * Nearest column of a kind of land, searching square rings outward from an origin. Mountains, plains, plateaus
+     * and oceans come from the skeleton alone, which needs no drainage or erosion, so the search can range across many
+     * regions. Lakes need the drainage and lake regions it passes, but still no erosion.
+     *
+     * @param step   ring spacing and sample spacing in blocks
+     * @param radius search radius in blocks
+     * @return the first matching column found, or null if none within the radius
+     */
+    public BlockColumn findNearest(Feature feature, int originX, int originZ, int step, int radius) {
+        return switch (feature) {
+            case MOUNTAIN -> findNearestAbove(settings.general.maxSurfaceHeight / 2.0, originX, originZ, step, radius);
+            case PLAINS -> findNearest(originX, originZ, step, radius, (x, z) -> sampleLandformKind(x, z) == Landform.PLAINS);
+            case PLATEAU -> findNearest(originX, originZ, step, radius, (x, z) -> sampleLandformKind(x, z) == Landform.PLATEAU);
+            // Real ocean, not the coastal shallows a step off the beach
+            case OCEAN -> findNearest(originX, originZ, step, radius, (x, z) -> sampleLandformKind(x, z) == Landform.OCEAN
+                    && sampleCoastDistance(x, z) < -OCEAN_OFFSHORE);
+            case LAKE -> findNearest(originX, originZ, step, radius, (x, z) -> !Double.isNaN(sampleLakeLevel(x, z))
+                    && sampleSmoothLand(x, z) < sampleLakeLevel(x, z));
+        };
+    }
+
+    private BlockColumn findNearest(int originX, int originZ, int step, int radius, BiPredicate<Integer, Integer> matches) {
         for (int ring = 0; ring * step <= radius; ring++) {
             BlockColumn best = null;
             double bestDistance = Double.MAX_VALUE;
@@ -1736,7 +1775,7 @@ public final class TerrainLogic {
                     int x = originX + dx * step;
                     int z = originZ + dz * step;
                     double distance = Math.hypot(dx, dz);
-                    if (distance < bestDistance && sampleOverviewHeight(x, z) >= minHeight) {
+                    if (distance < bestDistance && matches.test(x, z)) {
                         best = new BlockColumn(x, z);
                         bestDistance = distance;
                     }

@@ -3,6 +3,7 @@ package com.mtm.worldgen.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.benchmark.GenerationBenchmark;
@@ -65,15 +66,26 @@ public final class MtmCommands {
                                         IntegerArgumentType.getInteger(context, "blocksPerPixel")))))
                 .then(Commands.literal("benchmark")
                         .executes(context -> runBenchmark(context.getSource())))
-                .then(Commands.literal("locate")
-                        .then(Commands.literal("mountain")
-                                .executes(context -> locateMountain(context.getSource()))))
+                .then(locate())
                 .then(Commands.literal("precompute")
                         .then(Commands.literal("cancel")
                                 .executes(context -> cancelPrecompute(context.getSource())))
                         .then(Commands.argument("radius", IntegerArgumentType.integer(0, RegionPrecompute.MAX_RADIUS))
                                 .executes(context -> precompute(context.getSource(),
                                         IntegerArgumentType.getInteger(context, "radius"))))));
+    }
+
+    /** /mwg locate with one literal per kind of land: mountain, plains, plateau, lake, ocean. */
+    private static LiteralArgumentBuilder<CommandSourceStack> locate() {
+        LiteralArgumentBuilder<CommandSourceStack> locate = Commands.literal("locate");
+        for (TerrainLogic.Feature feature : TerrainLogic.Feature.values()) {
+            locate.then(Commands.literal(name(feature)).executes(context -> locate(context.getSource(), feature)));
+        }
+        return locate;
+    }
+
+    private static String name(TerrainLogic.Feature feature) {
+        return feature.name().toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -121,10 +133,10 @@ public final class MtmCommands {
     }
 
     /**
-     * Finds the nearest surface above half the maximum height (a real mountain) around the source, off the server
-     * thread, and reports it with clickable coordinates like vanilla /locate.
+     * Finds the nearest land of a kind around the source, off the server thread, and reports it with clickable
+     * coordinates like vanilla /locate. The coordinates stand above the water of lakes and oceans.
      */
-    private static int locateMountain(CommandSourceStack source) {
+    private static int locate(CommandSourceStack source, TerrainLogic.Feature feature) {
         TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel());
         if (logic == null) {
             source.sendFailure(Component.translatable("commands.mtm_worldgen.not_mtm_world"));
@@ -132,15 +144,17 @@ public final class MtmCommands {
         }
         MinecraftServer server = source.getServer();
         Vec3 position = source.getPosition();
-        double minHeight = logic.settings().general.maxSurfaceHeight / 2.0;
-        CompletableFuture.supplyAsync(() -> logic.findNearestAbove(minHeight, (int) Math.floor(position.x),
+        String key = "commands.mtm_worldgen.locate." + name(feature);
+        CompletableFuture.supplyAsync(() -> logic.findNearest(feature, (int) Math.floor(position.x),
                         (int) Math.floor(position.z), LOCATE_STEP, LOCATE_RADIUS), Util.backgroundExecutor())
                 .whenComplete((found, error) -> server.execute(() -> {
                     if (error != null || found == null) {
-                        source.sendFailure(Component.translatable("commands.mtm_worldgen.locate.mountain.none", LOCATE_RADIUS));
+                        source.sendFailure(Component.translatable(key + ".none", LOCATE_RADIUS));
                         return;
                     }
-                    int y = (int) Math.ceil(logic.sampleSurfaceHeight(found.x(), found.z())) + 2;
+                    double water = logic.sampleWaterLevel(found.x(), found.z());
+                    double ground = Math.max(logic.sampleSurfaceHeight(found.x(), found.z()), logic.settings().general.seaLevel - 1);
+                    int y = (int) Math.ceil(Double.isNaN(water) ? ground : Math.max(ground, water)) + 2;
                     int distance = (int) Math.round(Math.hypot(found.x() - position.x, found.z() - position.z));
                     Component coordinates = ComponentUtils.wrapInSquareBrackets(
                                     Component.translatable("chat.coordinates", found.x(), y, found.z()))
@@ -149,7 +163,7 @@ public final class MtmCommands {
                                             "/tp @s " + found.x() + " " + y + " " + found.z()))
                                     .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                                             Component.translatable("chat.coordinates.tooltip"))));
-                    source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.locate.mountain.found",
+                    source.sendSuccess(() -> Component.translatable(key + ".found",
                             coordinates, distance), false);
                 }));
         return 1;

@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Commands
+
+- `/mwg locate` also finds the nearest `plains`, `plateau`, `lake` and `ocean`, besides `mountain`
+
 ## v0.7.1
 
 The first release since v0.5.2: v0.6.0 and v0.7.0 were tagged, but their release failed to package Amidst for Windows and published nothing. This release includes the 26.3 support of v0.6.0.
