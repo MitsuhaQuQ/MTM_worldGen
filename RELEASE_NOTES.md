@@ -1,6 +1,8 @@
 # Release notes
 
-## v0.7.0
+## v0.7.1
+
+The first release since v0.5.2: v0.6.0 and v0.7.0 were tagged, but their release failed to package Amidst for Windows and published nothing. This release includes the 26.3 support of v0.6.0.
 
 The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so existing worlds, configs and servers keep working.
 
@@ -24,6 +26,7 @@ The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so e
 
 ### Development
 
+- The release packages Amidst for Windows again: Gradle 9 removed the call it used to run jpackage
 - Regression tests cover the erosion creek and raised lake shore from seed `7701471443861534004`, the water level of a wide channel beside a high stream, and agreement between overlapping water-placement windows including their border columns
 - A new unit test follows rivers into lakes along their actual courses and checks that the water stays continuous and never climbs on the way in
 
