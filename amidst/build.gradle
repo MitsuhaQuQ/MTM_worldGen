@@ -60,6 +60,13 @@ def runtimeModules = [
 def modJar = provider { project(":1.20.1:fabric").tasks.named("remapJar").get().archiveFile.get() }
 def appImage = layout.buildDirectory.dir("app-image")
 
+// Gradle 9 removed Project.exec; scripts get the process service by injection instead
+interface InjectedExecOperations {
+    @javax.inject.Inject
+    ExecOperations getExecOperations()
+}
+def execOperations = objects.newInstance(InjectedExecOperations).execOperations
+
 // AMIDST-MTM.exe with its own Java runtime and the Fabric jar of the mod, which it shows unless told otherwise
 def windowsAppImage = tasks.register("windowsAppImage") {
     group = "distribution"
@@ -83,7 +90,7 @@ def windowsAppImage = tasks.register("windowsAppImage") {
         def mod = modJar.get().asFile
         // jpackage takes digits only, so 0.3.0-beta packages as 0.3.0
         def appVersion = (project.version =~ /^[0-9.]+/)[0].replaceAll(/\.$/, "")
-        project.exec {
+        execOperations.exec {
             commandLine launcher.get().metadata.installationPath.file("bin/jpackage.exe").asFile,
                     "--type", "app-image", "--name", "AMIDST-MTM", "--app-version", appVersion,
                     "--input", stage, "--main-jar", jar.archiveFileName.get(),
