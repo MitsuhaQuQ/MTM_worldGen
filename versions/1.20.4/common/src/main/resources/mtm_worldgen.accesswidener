@@ -1,0 +1,10 @@
+accessWidener v2 named
+
+# Decoded generators wrap density functions in holders; MTM generators are recognized by unwrapping them
+accessible class net/minecraft/world/level/levelgen/DensityFunctions$HolderHolder
+
+# Custom surface rule conditions implement the package-private Condition and read the current column
+accessible class net/minecraft/world/level/levelgen/SurfaceRules$Condition
+accessible field net/minecraft/world/level/levelgen/SurfaceRules$Context blockX I
+accessible field net/minecraft/world/level/levelgen/SurfaceRules$Context blockY I
+accessible field net/minecraft/world/level/levelgen/SurfaceRules$Context blockZ I

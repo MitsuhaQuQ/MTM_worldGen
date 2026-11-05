@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### Minecraft versions
+
+- Builds for Minecraft 1.20.4, 1.21.1 and 1.21.4, each for Fabric and NeoForge. Terrain is the same block for block as on 1.20.1 and 26.3; 1.21.4 also places the pale garden on temperate plateaus
+
 ## v0.7.4
 
 ### Upgrades

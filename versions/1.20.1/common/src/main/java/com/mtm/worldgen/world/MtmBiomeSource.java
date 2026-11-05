@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mojang.datafixers.util.Pair;
@@ -28,7 +29,7 @@ import java.util.stream.Stream;
  * is the placeholder of the world preset, replaced from the config file when a world is created.
  */
 public final class MtmBiomeSource extends BiomeSource {
-    public static final Codec<MtmBiomeSource> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    public static final MapCodec<MtmBiomeSource> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
             RegistryOps.retrieveGetter(Registries.BIOME),
             RegistryOps.retrieveGetter(Registries.DIMENSION_TYPE),
             RegistryOps.retrieveGetter(Registries.DENSITY_FUNCTION),
@@ -36,6 +37,9 @@ public final class MtmBiomeSource extends BiomeSource {
             Codec.STRING.optionalFieldOf("settings", "").forGetter(source -> source.settingsJson)
     ).apply(instance, (biomes, dimensionTypes, densityFunctions, noises, settings) ->
             new MtmBiomeSource(new MtmGenerators.Lookups(biomes, dimensionTypes, densityFunctions, noises), settings)));
+
+    /** What the registry holds: vanilla finds a source's type by this very codec, so loaders register this one. */
+    public static final Codec<MtmBiomeSource> DISPATCH_CODEC = CODEC.codec();
 
     private final MtmGenerators.Lookups lookups;
     private final String settingsJson;
@@ -64,7 +68,7 @@ public final class MtmBiomeSource extends BiomeSource {
     private static Map<String, Holder<Biome>> resolve(HolderGetter<Biome> biomes, WorldgenSettings settings) {
         Map<String, Holder<Biome>> holders = new LinkedHashMap<>();
         for (String id : settings.biomes.allBiomes()) {
-            ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, new ResourceLocation(id));
+            ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, VersionApi.parse(id));
             holders.put(id, biomes.get(key).orElseThrow(() -> new IllegalStateException("Unknown biome in config: " + id)));
         }
         return holders;
@@ -72,7 +76,7 @@ public final class MtmBiomeSource extends BiomeSource {
 
     @Override
     protected Codec<? extends BiomeSource> codec() {
-        return CODEC;
+        return DISPATCH_CODEC;
     }
 
     @Override

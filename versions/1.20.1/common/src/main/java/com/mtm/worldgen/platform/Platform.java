@@ -14,6 +14,14 @@ public interface Platform {
 
     boolean isDevelopmentEnvironment();
 
+    /**
+     * Whether Minecraft runs recompiled from decompiled sources rather than as Mojang built it, as in NeoForge's
+     * development environment. Floats in vanilla code can then come out a bit apart; only tests ask.
+     */
+    default boolean recompilesMinecraft() {
+        return false;
+    }
+
     static Platform get() {
         return Holder.INSTANCE;
     }

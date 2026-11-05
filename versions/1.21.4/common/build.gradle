@@ -1,0 +1,2 @@
+// The 1.20.1 common module, built for 1.21.4 with the files under src of its own, 1.21.1 and 1.20.4
+apply from: rootProject.file("versions/1.20.1/common/build.gradle")

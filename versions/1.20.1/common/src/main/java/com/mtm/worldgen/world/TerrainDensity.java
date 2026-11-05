@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
@@ -13,11 +14,12 @@ import net.minecraft.world.level.levelgen.DensityFunction;
  * the seed is bound when vanilla maps the router during chunk generator construction.
  */
 public final class TerrainDensity implements DensityFunction.SimpleFunction {
-    public static final Codec<TerrainDensity> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    public static final MapCodec<TerrainDensity> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
             Codec.BOOL.optionalFieldOf("initial", false).forGetter(density -> density.initial),
             Codec.STRING.fieldOf("settings").forGetter(density -> density.settingsJson)
     ).apply(instance, (initial, settings) -> new TerrainDensity(null, initial, settings)));
-    private static final KeyDispatchDataCodec<TerrainDensity> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
+    /** What the registry holds: vanilla finds a function's type by this very codec, so loaders register this one. */
+    public static final KeyDispatchDataCodec<TerrainDensity> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final double FALLOFF = 8.0;
     /**

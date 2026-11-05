@@ -84,16 +84,24 @@ configure(subprojects.findAll { it.parent != null && it.parent.parent == rootPro
         options.compilerArgs += ["-Xmaxerrs", "1000"]
     }
 
-    // A version close to another one, such as a snapshot, builds on that version's sources (<version>.base_version):
-    // the module compiles the base module's files, except those it has a file of its own for at the same path
+    // A version close to another one builds on that version's sources (<version>.base_version), which may build on
+    // another version in turn: the module compiles the files of its bases, each file from the closest version that has
+    // it, its own sources first. Only files that changed between versions need a copy of their own
+    def bases = []
     def baseVersion = rootProject.findProperty("${project.parent.name}.base_version")
-    if (baseVersion != null) {
-        def baseSources = rootProject.file("versions/${baseVersion}/${project.name}/src/main")
+    while (baseVersion != null) {
+        bases << rootProject.file("versions/${baseVersion}/${project.name}/src/main")
+        baseVersion = rootProject.findProperty("${baseVersion}.base_version")
+    }
+    if (!bases.isEmpty()) {
         def ownSources = file("src/main")
         ["java", "resources"].each { kind ->
             def sync = tasks.register("syncBase${kind.capitalize()}", Sync) {
-                from(new File(baseSources, kind)) {
-                    exclude { element -> !element.directory && new File(ownSources, "${kind}/${element.relativePath.pathString}").exists() }
+                bases.eachWithIndex { base, i ->
+                    def closer = [ownSources] + bases.subList(0, i)
+                    from(new File(base, kind)) {
+                        exclude { element -> !element.directory && closer.any { new File(it, "${kind}/${element.relativePath.pathString}").exists() } }
+                    }
                 }
                 into layout.buildDirectory.dir("baseSources/${kind}")
             }

@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mtm.worldgen.logic.TerrainLogic;
 import net.minecraft.util.KeyDispatchDataCodec;
 import net.minecraft.world.level.levelgen.SurfaceRules;
@@ -35,10 +36,11 @@ public record TerrainCondition(Kind kind) implements SurfaceRules.ConditionSourc
         }
     }
 
-    public static final Codec<TerrainCondition> CODEC = Codec.STRING.fieldOf("kind").xmap(
+    public static final MapCodec<TerrainCondition> CODEC = Codec.STRING.fieldOf("kind").xmap(
             name -> new TerrainCondition(Kind.valueOf(name.toUpperCase(Locale.ROOT))),
-            condition -> condition.kind.name().toLowerCase(Locale.ROOT)).codec();
-    private static final KeyDispatchDataCodec<TerrainCondition> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
+            condition -> condition.kind.name().toLowerCase(Locale.ROOT));
+    /** What the registry holds: vanilla finds a function's type by this very codec, so loaders register this one. */
+    public static final KeyDispatchDataCodec<TerrainCondition> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final ThreadLocal<TerrainLogic> CURRENT = new ThreadLocal<>();
 

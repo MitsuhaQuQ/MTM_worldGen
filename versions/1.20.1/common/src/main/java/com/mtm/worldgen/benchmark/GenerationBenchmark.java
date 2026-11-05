@@ -1,5 +1,6 @@
 package com.mtm.worldgen.benchmark;
 
+import com.mtm.worldgen.world.VersionApi;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.world.MtmGenerators;
@@ -28,7 +29,6 @@ import net.minecraft.world.level.levelgen.structure.StructureStart;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 
 /**
@@ -44,8 +44,6 @@ public final class GenerationBenchmark {
     private static final int MEASURED_PASSES = 3;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_HEIGHT = 384;
-
-    private static final Executor SAME_THREAD = Runnable::run;
 
     private GenerationBenchmark() {
     }
@@ -76,15 +74,15 @@ public final class GenerationBenchmark {
     public static Result run(ServerLevel level) {
         RegistryAccess access = level.registryAccess();
         StructureManager structures = noStructures(level);
-        Holder<NoiseGeneratorSettings> overworld = access.registryOrThrow(Registries.NOISE_SETTINGS)
-                .getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD);
+        Holder<NoiseGeneratorSettings> overworld = VersionApi.holder(VersionApi.registry(access, Registries.NOISE_SETTINGS),
+                NoiseGeneratorSettings.OVERWORLD);
         LevelHeightAccessor vanillaHeight = LevelHeightAccessor.create(VANILLA_MIN_Y, VANILLA_HEIGHT);
         WorldgenSettings settings = WorldgenSettings.DEFAULT;
         LevelHeightAccessor mtmHeight = LevelHeightAccessor.create(settings.minBuildY(), settings.buildHeight());
 
-        ChunkGenerator vanilla = new NoiseBasedChunkGenerator(MultiNoiseBiomeSource.createFromPreset(access
-                .registryOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST)
-                .getHolderOrThrow(MultiNoiseBiomeSourceParameterLists.OVERWORLD)), overworld);
+        ChunkGenerator vanilla = new NoiseBasedChunkGenerator(MultiNoiseBiomeSource.createFromPreset(VersionApi.holder(
+                VersionApi.registry(access, Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST),
+                MultiNoiseBiomeSourceParameterLists.OVERWORLD)), overworld);
         StageTimes vanillaTimes = measure(vanilla, MtmGenerators.randomState(access, vanilla, SEED), vanillaHeight, access, structures);
 
         TerrainLogic.forget(SEED, settings);
@@ -133,7 +131,7 @@ public final class GenerationBenchmark {
     /** Generates every sample chunk once and returns milliseconds per chunk for each stage. */
     private static StageTimes pass(ChunkGenerator generator, RandomState random, LevelHeightAccessor height,
                                    RegistryAccess access, StructureManager structures) {
-        Registry<Biome> biomes = access.registryOrThrow(Registries.BIOME);
+        Registry<Biome> biomes = VersionApi.registry(access, Registries.BIOME);
         long biomeNanos = 0L;
         long noiseNanos = 0L;
         for (int cx = 0; cx < CHUNKS_PER_AXIS; cx++) {
@@ -141,9 +139,9 @@ public final class GenerationBenchmark {
                 ChunkPos pos = new ChunkPos(cx * CHUNK_STRIDE, cz * CHUNK_STRIDE);
                 ChunkAccess chunk = new ProtoChunk(pos, UpgradeData.EMPTY, height, biomes, null);
                 long start = System.nanoTime();
-                generator.createBiomes(SAME_THREAD, random, Blender.empty(), structures, chunk).join();
+                VersionApi.createBiomes(generator, random, Blender.empty(), structures, chunk).join();
                 long afterBiomes = System.nanoTime();
-                generator.fillFromNoise(SAME_THREAD, Blender.empty(), random, structures, chunk).join();
+                VersionApi.fillFromNoise(generator, Blender.empty(), random, structures, chunk).join();
                 biomeNanos += afterBiomes - start;
                 noiseNanos += System.nanoTime() - afterBiomes;
             }

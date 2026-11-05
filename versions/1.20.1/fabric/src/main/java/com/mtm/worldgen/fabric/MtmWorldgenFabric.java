@@ -17,11 +17,11 @@ public final class MtmWorldgenFabric implements ModInitializer {
     @Override
     public void onInitialize() {
         MtmWorldgen.init();
-        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.TERRAIN_DENSITY_ID, TerrainDensity.CODEC);
-        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.CLIMATE_DENSITY_ID, TerrainClimate.CODEC);
-        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.CAVES_DENSITY_ID, TerrainCaves.CODEC);
-        Registry.register(BuiltInRegistries.MATERIAL_CONDITION, MtmGenerators.TERRAIN_CONDITION_ID, TerrainCondition.CODEC);
-        Registry.register(BuiltInRegistries.BIOME_SOURCE, MtmGenerators.BIOME_SOURCE_ID, MtmBiomeSource.CODEC);
+        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.TERRAIN_DENSITY_ID, TerrainDensity.DISPATCH_CODEC.codec());
+        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.CLIMATE_DENSITY_ID, TerrainClimate.DISPATCH_CODEC.codec());
+        Registry.register(BuiltInRegistries.DENSITY_FUNCTION_TYPE, MtmGenerators.CAVES_DENSITY_ID, TerrainCaves.DISPATCH_CODEC.codec());
+        Registry.register(BuiltInRegistries.MATERIAL_CONDITION, MtmGenerators.TERRAIN_CONDITION_ID, TerrainCondition.DISPATCH_CODEC.codec());
+        Registry.register(BuiltInRegistries.BIOME_SOURCE, MtmGenerators.BIOME_SOURCE_ID, MtmBiomeSource.DISPATCH_CODEC);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> MtmCommands.register(dispatcher));
     }
 }

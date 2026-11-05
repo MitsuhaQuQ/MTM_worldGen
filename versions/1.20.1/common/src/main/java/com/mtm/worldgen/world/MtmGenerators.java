@@ -1,6 +1,5 @@
 package com.mtm.worldgen.world;
 
-import com.mojang.serialization.Lifecycle;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
@@ -39,15 +38,15 @@ public final class MtmGenerators {
      * Density function type of {@link TerrainDensity}. Each loader registers {@link TerrainDensity#CODEC} under
      * this id itself, because Forge freezes vanilla registries before mod construction.
      */
-    public static final ResourceLocation TERRAIN_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+    public static final ResourceLocation TERRAIN_DENSITY_ID = VersionApi.id(MtmWorldgen.MOD_ID, "terrain");
     /** Density function type of {@link TerrainCaves}, registered by each loader like the terrain density. */
-    public static final ResourceLocation CAVES_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "caves");
+    public static final ResourceLocation CAVES_DENSITY_ID = VersionApi.id(MtmWorldgen.MOD_ID, "caves");
     /** Density function type of {@link TerrainClimate}, registered by each loader like the terrain density. */
-    public static final ResourceLocation CLIMATE_DENSITY_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "climate");
+    public static final ResourceLocation CLIMATE_DENSITY_ID = VersionApi.id(MtmWorldgen.MOD_ID, "climate");
     /** Biome source type of {@link MtmBiomeSource}, registered by each loader like the density types. */
-    public static final ResourceLocation BIOME_SOURCE_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+    public static final ResourceLocation BIOME_SOURCE_ID = VersionApi.id(MtmWorldgen.MOD_ID, "terrain");
     /** Surface rule condition type of {@link TerrainCondition}, registered by each loader like the density type. */
-    public static final ResourceLocation TERRAIN_CONDITION_ID = new ResourceLocation(MtmWorldgen.MOD_ID, "terrain");
+    public static final ResourceLocation TERRAIN_CONDITION_ID = VersionApi.id(MtmWorldgen.MOD_ID, "terrain");
 
     /** The registries that building an MTM world reads. */
     public record Lookups(HolderGetter<Biome> biomes, HolderGetter<DimensionType> dimensionTypes,
@@ -114,18 +113,18 @@ public final class MtmGenerators {
      * the same for every world, so each possible height has its own type and a world keeps its height in its level.dat.
      */
     private static ResourceKey<DimensionType> dimensionType(int buildHeight) {
-        return ResourceKey.create(Registries.DIMENSION_TYPE, new ResourceLocation(MtmWorldgen.MOD_ID, "overworld_" + buildHeight));
+        return ResourceKey.create(Registries.DIMENSION_TYPE, VersionApi.id(MtmWorldgen.MOD_ID, "overworld_" + buildHeight));
     }
 
     /** Adds the vanilla overworld type with every possible MTM build height to a registry being loaded. */
     public static void registerDimensionTypes(WritableRegistry<DimensionType> registry) {
-        DimensionType overworld = registry.getOrThrow(BuiltinDimensionTypes.OVERWORLD);
+        DimensionType overworld = VersionApi.value(registry, BuiltinDimensionTypes.OVERWORLD);
         for (int height : WorldgenSettings.possibleBuildHeights()) {
-            registry.register(dimensionType(height), new DimensionType(overworld.fixedTime(), overworld.hasSkyLight(),
+            VersionApi.register(registry, dimensionType(height), new DimensionType(overworld.fixedTime(), overworld.hasSkyLight(),
                     overworld.hasCeiling(), overworld.ultraWarm(), overworld.natural(), overworld.coordinateScale(),
                     overworld.bedWorks(), overworld.respawnAnchorWorks(), overworld.minY(), height, height,
                     overworld.infiniburn(), overworld.effectsLocation(), overworld.ambientLight(),
-                    overworld.monsterSettings()), Lifecycle.stable());
+                    overworld.monsterSettings()));
         }
     }
 
@@ -172,7 +171,7 @@ public final class MtmGenerators {
 
     private static DensityFunction vanillaCave(Lookups lookups, String name) {
         return new DensityFunctions.HolderHolder(lookups.densityFunctions().getOrThrow(
-                ResourceKey.create(Registries.DENSITY_FUNCTION, new ResourceLocation("overworld/caves/" + name))));
+                ResourceKey.create(Registries.DENSITY_FUNCTION, VersionApi.parse("overworld/caves/" + name))));
     }
 
     private static ChunkGenerator create(Lookups lookups, Holder<NoiseGeneratorSettings> vanillaSettings, WorldgenSettings worldSettings) {

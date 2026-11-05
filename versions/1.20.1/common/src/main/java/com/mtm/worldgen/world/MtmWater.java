@@ -40,7 +40,7 @@ public final class MtmWater {
             return;
         }
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        int bottom = chunk.getMinBuildHeight();
+        int bottom = VersionApi.minY(chunk);
         for (int z = 0; z < SIZE; z++) {
             for (int x = 0; x < SIZE; x++) {
                 int ground = chunk.getHeight(Heightmap.Types.WORLD_SURFACE_WG, x, z);

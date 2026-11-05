@@ -22,7 +22,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
-import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import net.minecraft.world.level.chunk.storage.ChunkStorage;
 import net.minecraft.world.level.chunk.storage.RegionFileVersion;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -334,7 +333,7 @@ public final class ForeignChunks {
     }
 
     private ChunkStorage openStorage() {
-        return new ChunkStorage(regions, level.getServer().getFixerUpper(), false);
+        return VersionApi.chunkStorage(level, regions);
     }
 
     private void scanFile(Path file, Map<Long, ForeignMap.Chunk> chunks, Map<Long, Found> foreign, Map<Long, ForeignMap.Chunk> plain, Set<Long> present) {
@@ -411,7 +410,7 @@ public final class ForeignChunks {
             replaceFile(file, locations.array(), Arrays.copyOfRange(bytes, SECTOR, 2 * SECTOR), body);
             // Chunks too big for a region file go to files of their own, which the storage takes care of
             for (Found found : oversized) {
-                storage.write(found.pos, found.tag);
+                VersionApi.store(storage, found.pos, found.tag);
                 found.tag = null;
             }
             storage.flushWorker();
@@ -843,12 +842,12 @@ public final class ForeignChunks {
         // A short chunk ends the noise at the map, which saves most of the work of a full column
         LevelHeightAccessor below = LevelHeightAccessor.create(LOWEST_SECTION * SECTION_BLOCKS, (floor - LOWEST_SECTION) * SECTION_BLOCKS);
         ProtoChunk proto = new ProtoChunk(found.pos, UpgradeData.EMPTY, below,
-                level.registryAccess().registryOrThrow(Registries.BIOME), null);
-        generator.fillFromNoise(Runnable::run, Blender.empty(), randomState, noStructures, proto).join();
+                VersionApi.registry(level.registryAccess(), Registries.BIOME), null);
+        VersionApi.fillFromNoise(generator, Blender.empty(), randomState, noStructures, proto).join();
         int center = found.pos.getMinBlockX() + 8;
         int centerZ = found.pos.getMinBlockZ() + 8;
         int land = Mth.floor(logic.sampleSmoothLand(center, centerZ) / SECTION_BLOCKS) - STONE_SECTIONS_ABOVE_LAND;
-        ListTag generated = ChunkSerializer.write(level, proto).getList("sections", Tag.TAG_COMPOUND);
+        ListTag generated = VersionApi.writeChunk(level, proto).getList("sections", Tag.TAG_COMPOUND);
         for (int i = 0; i < generated.size(); i++) {
             CompoundTag section = generated.getCompound(i);
             int y = section.getByte("Y");
@@ -888,7 +887,7 @@ public final class ForeignChunks {
         if (!Files.exists(snapshotFile)) {
             return;
         }
-        CompoundTag tag = NbtIo.readCompressed(snapshotFile.toFile());
+        CompoundTag tag = NbtFiles.read(snapshotFile);
         // Chunks this world made before an upgrade still carry the older version, but their files have not changed
         // since they were last looked at: all of them have to be read again to find those chunks
         boolean sameAlgorithm = tag.getInt("algorithm") == TerrainLogic.ALGORITHM_VERSION;
@@ -957,7 +956,7 @@ public final class ForeignChunks {
         tag.put("files", known);
         Files.createDirectories(snapshotFile.getParent());
         Path temporary = snapshotFile.resolveSibling("legacy.dat.tmp");
-        NbtIo.writeCompressed(tag, temporary.toFile());
+        NbtFiles.write(tag, temporary);
         Files.move(temporary, snapshotFile, StandardCopyOption.REPLACE_EXISTING);
     }
 

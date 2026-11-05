@@ -17,7 +17,8 @@
 
 - Minecraft 版本从 1.20.1 开始支持，按向上兼容扩展原则：新版本新增的群系，在该版本对应的 mod 构建中增加支持
   - 主开发版本为 1.20.1，后续向上更新扩展；1.18.2 的版本只保留在 git 历史中，其存档不能直接升级
-  - 当前构建（2026-11）：1.20.1（Fabric、Forge）；26.3，即最新正式版（Fabric、Forge、NeoForge）。版本号从 26.1 起按年份编号，且不再混淆
+  - 当前构建（2026-11）：1.20.1（Fabric、Forge）；1.20.4、1.21.1、1.21.4（Fabric、NeoForge）；26.3，即最新正式版（Fabric、Forge、NeoForge）。版本号从 26.1 起按年份编号，且不再混淆
+  - 1.20.4、1.21.1、1.21.4 依次以前一个版本为基础（`base_version` 链：1.21.4 → 1.21.1 → 1.20.4 → 1.20.1），只覆盖变了的小文件：版本间写法不同的原版调用集中在 `world/VersionApi`（id、区块存储、填充、注册表查询、高度范围、区块写出）和 `NbtFiles`，各版本一份；其余覆盖的是签名变了的 Mixin（`ServerLevelMixin` 1.20.3 改为 `tickPrecipitation`；`RegistryDataLoaderMixin`、`NoiseBasedChunkGeneratorMixin` 1.20.5 起；`ChunkGeneratorMixin`、`ChunkSerializerMixin` 1.21.2 起，后者改成 `SerializableChunkData` 加 `ChunkStamp`，类名不变，因为基础版本的文件删不掉）、`MtmBiomeSource`（1.20.5 起 `codec()` 返回 `MapCodec`）和加载器入口。density function、材质条件、群系源的编解码器都是 `MapCodec`；1.20.5 以前注册表要 `Codec`，注册的必须是 `DISPATCH_CODEC.codec()` 这一个对象（原版按对象查类型，每次 `.codec()` 都是新对象，查不到就无法序列化）。1.21 起 GameTest 结构目录是 `structure`（原为 `structures`），1.21.1 另放一份。NeoForge 不读 access widener，`versions/1.20.4/neoforge` 带一份等价的 `META-INF/accesstransformer.cfg`，在 mods.toml 里声明；开发环境由 Loom 应用 AW，测试测不出它，改 AW 时要同步改它。NeoForge 1.20.4 起运行时就是 Mojang 名，不需要 refmap。1.21.4 的 `version_biomes.properties` 加入苍白之园
   - 最新快照 26.4-snapshot-7 尚未支持（不在 `minecraft_versions` 里）：只有 Fabric 支持快照，且快照把填充、地表、雕刻合成按列一次完成（`ChunkTerrainBuilder.fillChunk`：`NoiseChunk.prepareColumn` 得到 `NoiseColumn` 后直接套材质规则），`MtmWater` 放水（要在噪声之后、地表规则之前）、`TerrainCondition`、雕刻保护、只填到地表的体积都要重新接；另有 `DensityFunctions.interpolated` 换成 `*Upscale`、`NoiseGeneratorSettings` 去掉 `defaultBlock`、`RandomState.create` 改名、`WorldGenerationContext` 去掉、`Mth.clamp` 去掉等。`versions/26.4` 已按 `base_version` 搭好（只覆盖 `MtmBiomeSource`、`BaseColumn`、`fabric.mod.json`、`version_biomes.properties`），可从这里继续
   - 新版本新增的群系由该版本 common 的资源 `mtm_worldgen/version_biomes.properties` 加进默认群系列表（`VersionBiomes`，每行 `<气候带>.<列表>` 或 `caves` = 群系）；core 和 1.20.1 没有这个资源，默认列表保持不变。26.3：苍白之园进温带高地（和樱花林一起，原版放在高原），斑驳森林进温带中湿度低地，硫磺洞穴进洞穴；26.4 快照的资源里再加了冰洞
   - 1.20.1 的存档可以直接在 26.x 打开，地形逐方块不变，只有新版本新增的群系加入：26.x 读世界生成设置时（`LevelStorageSourceMixin`），MTM 主世界的生成器按其中锁定的配置重建（`MtmGenerators.rebuildStoredGenerator`），不读存下来的写法。1.20.1 存的噪声路由槽位和字段 26.x 不认，原版读不出来时会换成默认设置和随机种子，整个世界变成原版地形；生成器只由配置决定，重建不丢任何东西。GameTest `worlds_from_older_versions_keep_their_terrain` 用一个真实 1.20.1 世界的 level.dat 验证；已在开发服务端上打开真实 1.20.1 存档
@@ -372,7 +373,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
 - 构建工具：Architectury Loom（仅为构建插件，不引入运行时依赖）
 - 模块结构（按 Minecraft 版本分模块，由用户选定）：`core` 是纯 Java 地形逻辑（`logic`、`noise`、`preview` 和全部单元测试），不单独出 jar，作为源码目录编进每个版本的 common；`versions/<版本>/` 下是该版本的 `common`（接入原版生成器的代码与资源）和每个加载器一个模块，Gradle 项目名为 `:<版本>:<模块>`，如 `:26.3:neoforge`
   - 构建哪些版本、各版本的加载器及版本号都在 `gradle.properties`（`minecraft_versions`，`<版本>.<键>`）；根 `build.gradle` 按版本给模块套上 Loom、Java 版本、Shadow
-  - 接近另一版本的版本（快照）用 `<版本>.base_version`：模块编译基础版本同名模块的源码和资源，只有自己 `src` 里同路径的文件替换掉基础版本的（`syncBase*` 任务），构建脚本用 `apply from` 复用基础版本的；26.4（尚未构建）目前覆盖了 `MtmBiomeSource`（`NoiseBiomeResolver`）、`gametest/BaseColumn`（`NoiseColumn` 换了包）、`fabric.mod.json` 和 `version_biomes.properties`。会随版本变化的类型尽量收进这样的小文件，不要复制大文件
+  - 接近另一版本的版本用 `<版本>.base_version`，基础版本可以再有基础版本：模块编译整条链上同名模块的源码和资源，同一路径取最近的版本的文件，自己 `src` 里的优先（`syncBase*` 任务），构建脚本用 `apply from` 复用基础版本的；26.4（尚未构建）目前覆盖了 `MtmBiomeSource`（`NoiseBiomeResolver`）、`gametest/BaseColumn`（`NoiseColumn` 换了包）、`fabric.mod.json` 和 `version_biomes.properties`。会随版本变化的类型尽量收进这样的小文件，不要复制大文件
   - 同一处修改要在每个版本的 common 里各做一遍（core 只有一份）；GameTest 的期望哈希各版本相同
 - 地图查看器 `amidst`：MTM 版 Amidst 的源码副本（来自 MitsuhaQuQ/amidst 的 `mtm-on-latest` 分支，原版 Amidst 及其最新 Minecraft 支持在那个仓库单独发布），随 mod 一起构建和发布
   - 许可证为 GPLv3（`amidst/LICENSE.txt`），其余仍是 MIT；不要把 Amidst 的代码搬进 mod 模块

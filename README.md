@@ -59,11 +59,14 @@ Measured with `/mwg benchmark` on the same machine, single threaded, over the sa
 | Minecraft | Java | Fabric | Forge | NeoForge |
 |---|---|---|---|---|
 | 1.20.1 | 17 | Loader 0.16.10, Fabric API 0.92.2 | 47.3.0 | |
+| 1.20.4 | 17 | Loader 0.16.10, Fabric API 0.97.3 | | 20.4.253 |
+| 1.21.1 | 21 | Loader 0.16.10, Fabric API 0.116.17 | | 21.1.265 |
+| 1.21.4 | 21 | Loader 0.16.10, Fabric API 0.119.4 | | 21.4.161 |
 | 26.3 | 25 | Loader 0.20.1, Fabric API 0.165.2 | 66.1.5 | 26.3.0.101 |
 
 No other mods are required. Each jar is built for one Minecraft version, as its name says: `mtm_worldgen-fabric-<version>-26.3.jar`. The 26.4 snapshots are not supported yet.
 
-26.3 also places the vanilla biomes 1.20.1 does not have: the pale garden, the dappled forest and sulfur caves. Worlds cannot be moved from 1.20.1 to 26.x yet.
+Newer versions also place the vanilla biomes 1.20.1 does not have: the pale garden from 1.21.4, and the dappled forest and sulfur caves in 26.3. Terrain is the same block for block on every version.
 
 ## Getting started
 

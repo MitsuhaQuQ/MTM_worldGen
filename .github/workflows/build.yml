@@ -25,6 +25,12 @@ jobs:
         task:
           - ":1.20.1:fabric:runGametest"
           - ":1.20.1:forge:runGameTestServer"
+          - ":1.20.4:fabric:runGametest"
+          - ":1.20.4:neoforge:runGameTestServer"
+          - ":1.21.1:fabric:runGametest"
+          - ":1.21.1:neoforge:runGameTestServer"
+          - ":1.21.4:fabric:runGametest"
+          - ":1.21.4:neoforge:runGameTestServer"
           - ":26.3:fabric:runGametest"
           - ":26.3:forge:runGameTestServer"
           - ":26.3:neoforge:runGameTestServer"

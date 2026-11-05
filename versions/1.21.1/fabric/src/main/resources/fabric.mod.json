@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "mtm_worldgen",
+  "version": "${version}",
+  "name": "Realistic Landforms",
+  "description": "Realistic terrain generation: continuous landforms, river networks and climate zones.",
+  "authors": [],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.mtm.worldgen.fabric.MtmWorldgenFabric"
+    ],
+    "fabric-gametest": [
+      "com.mtm.worldgen.gametest.MtmGameTests"
+    ]
+  },
+  "mixins": [
+    "mtm_worldgen.mixins.json"
+  ],
+  "accessWidener": "mtm_worldgen.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}

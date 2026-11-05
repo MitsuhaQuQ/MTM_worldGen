@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
@@ -27,11 +28,12 @@ public final class TerrainClimate implements DensityFunction.SimpleFunction {
         }
     }
 
-    public static final Codec<TerrainClimate> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    public static final MapCodec<TerrainClimate> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
             Codec.STRING.fieldOf("kind").forGetter(climate -> climate.kind.serializedName()),
             Codec.STRING.fieldOf("settings").forGetter(climate -> climate.settingsJson)
     ).apply(instance, (kind, settings) -> new TerrainClimate(null, Kind.byName(kind), settings)));
-    private static final KeyDispatchDataCodec<TerrainClimate> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
+    /** What the registry holds: vanilla finds a function's type by this very codec, so loaders register this one. */
+    public static final KeyDispatchDataCodec<TerrainClimate> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     private static final double DEPTH_LIMIT = 4.0;
 

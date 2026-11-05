@@ -33,11 +33,11 @@ public final class MtmWorldgenForge {
             DeferredRegister.create(Registries.BIOME_SOURCE, MtmWorldgen.MOD_ID);
 
     static {
-        DENSITY_FUNCTION_TYPES.register(MtmGenerators.TERRAIN_DENSITY_ID.getPath(), () -> TerrainDensity.CODEC);
-        DENSITY_FUNCTION_TYPES.register(MtmGenerators.CLIMATE_DENSITY_ID.getPath(), () -> TerrainClimate.CODEC);
-        DENSITY_FUNCTION_TYPES.register(MtmGenerators.CAVES_DENSITY_ID.getPath(), () -> TerrainCaves.CODEC);
-        SURFACE_CONDITIONS.register(MtmGenerators.TERRAIN_CONDITION_ID.getPath(), () -> TerrainCondition.CODEC);
-        BIOME_SOURCES.register(MtmGenerators.BIOME_SOURCE_ID.getPath(), () -> MtmBiomeSource.CODEC);
+        DENSITY_FUNCTION_TYPES.register(MtmGenerators.TERRAIN_DENSITY_ID.getPath(), () -> TerrainDensity.DISPATCH_CODEC.codec());
+        DENSITY_FUNCTION_TYPES.register(MtmGenerators.CLIMATE_DENSITY_ID.getPath(), () -> TerrainClimate.DISPATCH_CODEC.codec());
+        DENSITY_FUNCTION_TYPES.register(MtmGenerators.CAVES_DENSITY_ID.getPath(), () -> TerrainCaves.DISPATCH_CODEC.codec());
+        SURFACE_CONDITIONS.register(MtmGenerators.TERRAIN_CONDITION_ID.getPath(), () -> TerrainCondition.DISPATCH_CODEC.codec());
+        BIOME_SOURCES.register(MtmGenerators.BIOME_SOURCE_ID.getPath(), () -> MtmBiomeSource.DISPATCH_CODEC);
     }
 
     public MtmWorldgenForge() {

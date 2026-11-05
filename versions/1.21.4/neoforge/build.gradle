@@ -1,0 +1,2 @@
+// The 1.20.4 NeoForge module, built for 1.21.4 with the files under src of its own and 1.21.1
+apply from: rootProject.file("versions/1.20.4/neoforge/build.gradle")

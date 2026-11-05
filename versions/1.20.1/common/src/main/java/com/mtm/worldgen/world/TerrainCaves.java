@@ -1,6 +1,7 @@
 package com.mtm.worldgen.world;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
@@ -13,11 +14,12 @@ import net.minecraft.world.level.levelgen.DensityFunction;
  * lake beds never open up, and caves fade in further down. Bound to the world seed the same way as {@link TerrainDensity}.
  */
 public final class TerrainCaves implements DensityFunction {
-    public static final Codec<TerrainCaves> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    public static final MapCodec<TerrainCaves> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
             DensityFunction.HOLDER_HELPER_CODEC.fieldOf("caves").forGetter(caves -> caves.caves),
             Codec.STRING.fieldOf("settings").forGetter(caves -> caves.settingsJson)
     ).apply(instance, (caves, settings) -> new TerrainCaves(null, caves, settings, WorldgenSettings.fromJson(settings))));
-    private static final KeyDispatchDataCodec<TerrainCaves> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
+    /** What the registry holds: vanilla finds a function's type by this very codec, so loaders register this one. */
+    public static final KeyDispatchDataCodec<TerrainCaves> DISPATCH_CODEC = KeyDispatchDataCodec.of(CODEC);
 
     /** Blocks over which caves close toward the bottom of the world, like vanilla's bottom slide. */
     private static final double BOTTOM_FADE = 24.0;
