@@ -3,6 +3,7 @@ package com.mtm.worldgen.mixin;
 import com.mtm.worldgen.logic.BlockColumn;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.MtmGenerators;
+import com.mtm.worldgen.world.MtmWebMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -46,5 +47,11 @@ public abstract class MinecraftServerMixin {
         }
         BlockColumn spawn = logic.findSpawn();
         return new BlockPos(spawn.x(), 0, spawn.z());
+    }
+
+    /** The web map stops with the server, before a world it shows is closed. */
+    @Inject(method = "stopServer", at = @At("HEAD"))
+    private void mtm_worldgen$stopWebMap(CallbackInfo ci) {
+        MtmWebMap.stop();
     }
 }

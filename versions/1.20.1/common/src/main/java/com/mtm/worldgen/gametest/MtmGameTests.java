@@ -10,6 +10,7 @@ import com.mtm.worldgen.logic.ForeignMap;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.platform.Platform;
+import com.mtm.worldgen.webmap.WebMap;
 import com.mtm.worldgen.world.ForeignChunks;
 import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.VersionApi;
@@ -416,7 +417,7 @@ public final class MtmGameTests {
         Path root;
         try {
             root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             try (ChunkStorage storage = VersionApi.chunkStorage(level, regions)) {
                 CompoundTag chunk = VersionApi.writeChunk(level, level.getChunk(pos.x, pos.z));
@@ -467,7 +468,7 @@ public final class MtmGameTests {
         ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_upgrade");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag own = VersionApi.writeChunk(level, level.getChunk(pos.x, pos.z));
             own.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION - 1);
@@ -499,6 +500,41 @@ public final class MtmGameTests {
     }
 
     /**
+     * The web map serves its page under this loader: it uses the JDK's own HTTP server, which a loader's module layer
+     * must let mods reach.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public static void webMapServesItsPage(GameTestHelper helper) {
+        try {
+            Path root = Files.createTempDirectory("mtm_webmap");
+            Path config = root.resolve("config");
+            Files.createDirectories(config);
+            Files.writeString(config.resolve("mtm_worldgen-webmap.json"), "{\"enabled\": true, \"bind\": \"127.0.0.1\", \"port\": 0}");
+            WebMap.start(root, root.resolve("region"), config, "GameTest", new WebMap.Log() {
+                @Override
+                public void info(String message) {
+                }
+
+                @Override
+                public void warn(String message, Throwable error) {
+                    MtmWorldgen.LOGGER.warn(message, error);
+                }
+            });
+            String address = WebMap.status();
+            assertTrue(address != null, "web map did not start; is jdk.httpserver missing from this loader?");
+            java.net.HttpURLConnection page = (java.net.HttpURLConnection) java.net.URI.create(address).toURL().openConnection();
+            assertTrue(page.getResponseCode() == 200, "web map page answered " + page.getResponseCode());
+            java.net.HttpURLConnection info = (java.net.HttpURLConnection) java.net.URI.create(address + "info.json").toURL().openConnection();
+            assertTrue(info.getResponseCode() == 200, "web map info answered " + info.getResponseCode());
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            WebMap.stop();
+        }
+        helper.succeed();
+    }
+
+    /**
      * Tags decide what a chunk is, whatever the snapshot holds: another MTM world's chunk is foreign even with this
      * algorithm version, and a new map merged in at a place already fitted gets fitted in turn.
      */
@@ -510,7 +546,7 @@ public final class MtmGameTests {
         ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag other = VersionApi.writeChunk(level, level.getChunk(pos.x, pos.z));
             other.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
@@ -551,7 +587,7 @@ public final class MtmGameTests {
         ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag chunk = VersionApi.writeChunk(level, level.getChunk(pos.x, pos.z));
             chunk.remove(ForeignChunks.VERSION_TAG);
@@ -588,7 +624,7 @@ public final class MtmGameTests {
         ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag chunk = VersionApi.writeChunk(level, level.getChunk(pos.x, pos.z));
             chunk.remove(ForeignChunks.VERSION_TAG);

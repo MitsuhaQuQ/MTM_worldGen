@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Realistic Landforms map</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e8e4dc; font: 13px system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+  #map.dragging { cursor: grabbing; }
+  #tiles { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #tiles img { position: absolute; user-select: none; -webkit-user-drag: none; }
+  #tiles.pixelated img { image-rendering: pixelated; }
+  .panel { position: absolute; background: rgba(255, 255, 255, 0.9); border-radius: 4px; padding: 4px 8px;
+           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+  #title { left: 8px; top: 8px; font-weight: 600; }
+  #status { left: 8px; bottom: 8px; font-variant-numeric: tabular-nums; }
+  #zoom { right: 8px; top: 8px; display: flex; flex-direction: column; padding: 0; }
+  #zoom button { width: 30px; height: 30px; border: 0; background: none; font-size: 18px; cursor: pointer; }
+  #zoom button + button { border-top: 1px solid #ccc; }
+  #scale { right: 8px; bottom: 8px; }
+  #scalebar { height: 4px; border: 1px solid #333; border-top: 0; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div id="map"><div id="tiles"></div></div>
+<div id="title" class="panel">Realistic Landforms</div>
+<div id="zoom" class="panel"><button id="in" title="Zoom in">+</button><button id="out" title="Zoom out">&minus;</button></div>
+<div id="status" class="panel">Loading&hellip;</div>
+<div id="scale" class="panel"><span id="scaletext"></span><div id="scalebar"></div></div>
+<script>
+"use strict";
+// A slippy map over the server's tiles. A tile of level k is 512 pixels covering 512 * 2^k blocks; zoom z draws
+// 2^z screen pixels per block, with tiles of level -z when zoomed out and level 0 stretched when zoomed in.
+const SIZE = 512;
+const MIN_ZOOM = -8, MAX_ZOOM = 3;
+const map = document.getElementById("map");
+const layer = document.getElementById("tiles");
+const status = document.getElementById("status");
+let centerX = 0, centerZ = 0, zoom = -2;
+let maxLevel = 8;
+const images = new Map();
+
+function scale() { return Math.pow(2, zoom); }
+
+function blockAt(px, py) {
+  const s = scale();
+  return [centerX + (px - map.clientWidth / 2) / s, centerZ + (py - map.clientHeight / 2) / s];
+}
+
+function draw() {
+  const s = scale();
+  const level = Math.min(maxLevel, Math.max(0, -zoom));
+  const blocks = SIZE * Math.pow(2, level);
+  const shown = blocks * s;
+  const [left, top] = blockAt(0, 0);
+  const [right, bottom] = blockAt(map.clientWidth, map.clientHeight);
+  const wanted = new Set();
+  for (let tx = Math.floor(left / blocks); tx <= Math.floor(right / blocks); tx++) {
+    for (let tz = Math.floor(top / blocks); tz <= Math.floor(bottom / blocks); tz++) {
+      const key = level + "/" + tx + "/" + tz;
+      wanted.add(key);
+      let img = images.get(key);
+      if (!img) {
+        img = new Image();
+        img.onerror = () => { img.style.visibility = "hidden"; };
+        img.src = "tiles/" + key + ".png";
+        images.set(key, img);
+        layer.appendChild(img);
+      }
+      img.style.left = ((tx * blocks - left) * s) + "px";
+      img.style.top = ((tz * blocks - top) * s) + "px";
+      img.style.width = img.style.height = shown + "px";
+    }
+  }
+  for (const [key, img] of images) {
+    if (!wanted.has(key)) { img.remove(); images.delete(key); }
+  }
+  layer.classList.toggle("pixelated", zoom > 0);
+  drawScale();
+  history.replaceState(null, "", "#" + Math.round(centerX) + "," + Math.round(centerZ) + "," + zoom);
+}
+
+function drawScale() {
+  // The longest round length up to 120 screen pixels
+  const perPixel = 1 / scale();
+  const raw = 120 * perPixel;
+  const step = Math.pow(10, Math.floor(Math.log10(raw)));
+  const length = [5, 2, 1].map(f => f * step).find(v => v <= raw);
+  document.getElementById("scalebar").style.width = (length / perPixel) + "px";
+  document.getElementById("scaletext").textContent = length >= 1000 ? (length / 1000) + " km" : length + " m";
+}
+
+function zoomAt(px, py, steps) {
+  const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + steps));
+  if (next === zoom) return;
+  const [bx, bz] = blockAt(px, py);
+  zoom = next;
+  const s = scale();
+  centerX = bx - (px - map.clientWidth / 2) / s;
+  centerZ = bz - (py - map.clientHeight / 2) / s;
+  draw();
+}
+
+// Dragging pans; a press and release without moving copies the position
+let drag = null;
+map.addEventListener("pointerdown", e => {
+  drag = { x: e.clientX, y: e.clientY, moved: false };
+  map.setPointerCapture(e.pointerId);
+});
+map.addEventListener("pointermove", e => {
+  const [bx, bz] = blockAt(e.clientX, e.clientY);
+  status.textContent = "x " + Math.floor(bx) + "  z " + Math.floor(bz) + "   click to copy";
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  if (drag.moved) {
+    map.classList.add("dragging");
+    centerX -= dx / scale();
+    centerZ -= dy / scale();
+    drag.x = e.clientX; drag.y = e.clientY;
+    draw();
+  }
+});
+map.addEventListener("pointerup", e => {
+  if (drag && !drag.moved) {
+    const [bx, bz] = blockAt(e.clientX, e.clientY);
+    copy(Math.floor(bx) + " " + Math.floor(bz));
+  }
+  drag = null;
+  map.classList.remove("dragging");
+});
+
+// Trackpads send many small amounts: they add up to whole steps, as in the terrain preview
+let gathered = 0;
+map.addEventListener("wheel", e => {
+  e.preventDefault();
+  const amount = e.deltaMode === 0 ? e.deltaY / 100 : e.deltaY / 3;
+  if (Math.sign(amount) !== Math.sign(gathered)) gathered = 0;
+  gathered += amount;
+  const steps = Math.trunc(gathered);
+  gathered -= steps;
+  if (steps !== 0) zoomAt(e.clientX, e.clientY, -steps);
+}, { passive: false });
+
+document.getElementById("in").onclick = () => zoomAt(map.clientWidth / 2, map.clientHeight / 2, 1);
+document.getElementById("out").onclick = () => zoomAt(map.clientWidth / 2, map.clientHeight / 2, -1);
+window.addEventListener("resize", draw);
+
+function copy(text) {
+  const done = () => { status.textContent = "Copied " + text; };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+// Pages served over plain HTTP from another computer have no clipboard API
+function fallbackCopy(text, done) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  document.body.appendChild(area);
+  area.select();
+  try { if (document.execCommand("copy")) done(); } finally { area.remove(); }
+}
+
+fetch("info.json").then(r => r.json()).then(info => {
+  maxLevel = info.maxLevel;
+  document.getElementById("title").textContent = info.name;
+  document.title = info.name + " map";
+  const hash = location.hash.slice(1).split(",").map(Number);
+  if (hash.length === 3 && hash.every(Number.isFinite)) {
+    [centerX, centerZ, zoom] = hash;
+  } else if (info.bounds) {
+    centerX = (info.bounds[0] + info.bounds[2]) / 2;
+    centerZ = (info.bounds[1] + info.bounds[3]) / 2;
+    const span = Math.max(info.bounds[2] - info.bounds[0], info.bounds[3] - info.bounds[1]);
+    zoom = Math.max(MIN_ZOOM, Math.min(0, Math.floor(Math.log2(Math.min(map.clientWidth, map.clientHeight) / span))));
+  }
+  status.textContent = info.bounds ? "Drag to move, scroll to zoom" : "Nothing has been generated yet";
+  draw();
+});
+</script>
+</body>
+</html>

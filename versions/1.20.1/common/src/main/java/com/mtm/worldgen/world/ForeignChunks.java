@@ -130,7 +130,12 @@ public final class ForeignChunks {
         this.settings = logic.settings();
         this.root = root;
         this.snapshotFile = root.resolve(MtmWorldgen.MOD_ID).resolve("legacy.dat");
-        this.regions = root.resolve("region");
+        this.regions = regionFolder(root);
+    }
+
+    /** Where the overworld of a world folder keeps its region files. */
+    public static Path regionFolder(Path root) {
+        return root.resolve("region");
     }
 
     /** Brings the snapshot of an MTM overworld up to date, before it generates anything. */
@@ -146,6 +151,8 @@ public final class ForeignChunks {
             // A world must still start, and a stale snapshot only costs a seam
             MtmWorldgen.LOGGER.error("Could not process foreign chunks", e);
         }
+        // After the region files have been fitted, which the map reads
+        MtmWebMap.start(level);
     }
 
     /** Runs on the world folder at a path, with the given terrain. For tests. */

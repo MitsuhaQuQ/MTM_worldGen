@@ -20,6 +20,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
@@ -135,7 +136,15 @@ public final class ForeignChunks {
         this.settings = logic.settings();
         this.root = root;
         this.snapshotFile = root.resolve(MtmWorldgen.MOD_ID).resolve("legacy.dat");
-        this.regions = root.resolve("region");
+        this.regions = regionFolder(root);
+    }
+
+    /**
+     * Where the overworld of a world folder keeps its region files. Since 26.1 each dimension has its own folder under
+     * dimensions, the overworld too.
+     */
+    public static Path regionFolder(Path root) {
+        return DimensionType.getStorageFolder(Level.OVERWORLD, root).resolve("region");
     }
 
     /** Brings the snapshot of an MTM overworld up to date, before it generates anything. */
@@ -151,6 +160,8 @@ public final class ForeignChunks {
             // A world must still start, and a stale snapshot only costs a seam
             MtmWorldgen.LOGGER.error("Could not process foreign chunks", e);
         }
+        // After the region files have been fitted, which the map reads
+        MtmWebMap.start(level);
     }
 
     /** Runs on the world folder at a path, with the given terrain. For tests. */

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Web map
+
+- Servers can show their world as a topographic web map, drawn from the generated chunks: real rivers, lakes and land, without buildings, with hill shading and contour lines. Off by default; turn it on in `config/mtm_worldgen-webmap.json`. `/mwg webmap` shows its address
+
+### Fixes
+
+- On Minecraft 26.x, merged maps and chunks of older versions were not found: 26.x keeps the overworld's region files under `dimensions/minecraft/overworld/region`, and the mod looked for them in `region`
+
 ### Minecraft versions
 
 - Builds for Minecraft 1.20.4, 1.21.1 and 1.21.4, each for Fabric and NeoForge. Terrain is the same block for block as on 1.20.1 and 26.3; 1.21.4 also places the pale garden on temperate plateaus

@@ -81,9 +81,21 @@ A world made in Minecraft 1.20.1 can be opened with the 26.x version of the mod.
 
 When an update of the mod changes the terrain, chunks that were already generated stay as they are. New chunks next to them keep their own shape and are only shifted to meet the old ground, where it differs. Rivers continue into the old chunks wherever those already hold water.
 
+## Web map
+
+A server can show its world as a topographic map in the browser, drawn from the chunks it has generated: rivers, lakes, coasts and the shape of the land as they really are, with hill shading and contour lines. Buildings, roads and rails are left out, so the map shows the land under them; trees show as forest. In single player the integrated server runs it.
+
+It is off by default, since it opens a port. Turn it on in `config/mtm_worldgen-webmap.json`, which is written the first time a world loads:
+
+```json
+{ "enabled": true, "bind": "0.0.0.0", "port": 8130, "threads": 2 }
+```
+
+Then open `http://<server address>:8130/`. Drag to move, scroll to zoom, click to copy the coordinates under the pointer. `/mwg webmap` shows the address. The map follows the region files, so new land appears after the game has saved it, every few minutes; tiles are cached under `<world>/mtm_worldgen/webmap/`, which is safe to delete.
+
 ## Merging other maps
 
-You can copy region files from other worlds, vanilla, superflat or older versions, into a Realistic Landforms world. They are detected when the world loads and fitted in: superflat maps are raised to normal ground height, missing ground below old maps is generated, and terrain generated around them afterwards blends toward their edges, with rivers ending in lakes before them. The original region files are backed up under `<world>/mtm_worldgen/backup/` before they are changed. Clear the chunks around a merged map to have them generate again with the blend.
+You can copy region files from other worlds, vanilla, superflat or older versions, into a Realistic Landforms world: into `<world>/region`, or on Minecraft 26.x into `<world>/dimensions/minecraft/overworld/region`. They are detected when the world loads and fitted in: superflat maps are raised to normal ground height, missing ground below old maps is generated, and terrain generated around them afterwards blends toward their edges, with rivers ending in lakes before them. The original region files are backed up under `<world>/mtm_worldgen/backup/` before they are changed. Clear the chunks around a merged map to have them generate again with the blend.
 
 ## Configuration
 

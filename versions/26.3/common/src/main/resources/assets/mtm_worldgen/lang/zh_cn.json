@@ -25,5 +25,7 @@
   "commands.mtm_worldgen.precompute.cancelled": "预先计算已停止，完成 %s / %s 个逻辑区域",
   "commands.mtm_worldgen.precompute.running": "已有预先计算在运行，可用 /mwg precompute cancel 停止",
   "commands.mtm_worldgen.precompute.none": "没有正在运行的预先计算",
-  "commands.mtm_worldgen.precompute.failed": "预先计算失败：%s"
+  "commands.mtm_worldgen.precompute.failed": "预先计算失败：%s",
+  "commands.mtm_worldgen.webmap.off": "网页地图未开启：在 config/mtm_worldgen-webmap.json 里开启后重新进入世界",
+  "commands.mtm_worldgen.webmap.running": "网页地图：%s"
 }

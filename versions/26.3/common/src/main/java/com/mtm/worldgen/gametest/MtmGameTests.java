@@ -9,6 +9,7 @@ import com.mtm.worldgen.logic.ForeignMap;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.platform.Platform;
+import com.mtm.worldgen.webmap.WebMap;
 import com.mtm.worldgen.world.ForeignChunks;
 import com.mtm.worldgen.world.MtmGenerators;
 import com.mtm.worldgen.world.MtmOres;
@@ -409,6 +410,7 @@ public final class MtmGameTests {
         registrar.accept("ores_can_be_turned_off", MtmGameTests::oresCanBeTurnedOff);
         registrar.accept("falling_ores_are_found", MtmGameTests::fallingOresAreFound);
         registrar.accept("caves_can_be_turned_off", MtmGameTests::cavesCanBeTurnedOff);
+        registrar.accept("web_map_serves_its_page", MtmGameTests::webMapServesItsPage);
     }
 
     private static World world(GameTestHelper helper) {
@@ -483,7 +485,7 @@ public final class MtmGameTests {
         Path root;
         try {
             root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             try (SimpleRegionStorage storage = storage(level, regions)) {
                 CompoundTag chunk = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
@@ -533,7 +535,7 @@ public final class MtmGameTests {
         ChunkPos pos = ChunkPos.containing(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag other = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
             other.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);
@@ -573,7 +575,7 @@ public final class MtmGameTests {
         ChunkPos pos = ChunkPos.containing(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_upgrade");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag own = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
             own.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION - 1);
@@ -615,7 +617,7 @@ public final class MtmGameTests {
         ChunkPos pos = ChunkPos.containing(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag chunk = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
             chunk.remove(ForeignChunks.VERSION_TAG);
@@ -651,7 +653,7 @@ public final class MtmGameTests {
         ChunkPos pos = ChunkPos.containing(helper.absolutePos(BlockPos.ZERO));
         try {
             Path root = Files.createTempDirectory("mtm_foreign");
-            Path regions = root.resolve("region");
+            Path regions = ForeignChunks.regionFolder(root);
             Files.createDirectories(regions);
             CompoundTag chunk = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
             chunk.remove(ForeignChunks.VERSION_TAG);
@@ -685,6 +687,40 @@ public final class MtmGameTests {
         assertTrue(MtmOres.placesFallingBlocks(placed.getValueOrThrow(OrePlacements.ORE_GRAVEL)), "gravel blobs not found");
         assertTrue(!MtmOres.placesFallingBlocks(placed.getValueOrThrow(OrePlacements.ORE_IRON_UPPER)), "iron taken for a falling block");
         assertTrue(!MtmOres.placesFallingBlocks(placed.getValueOrThrow(OrePlacements.ORE_DIRT)), "dirt taken for a falling block");
+        helper.succeed();
+    }
+
+    /**
+     * The web map serves its page under this loader: it uses the JDK's own HTTP server, which a loader's module layer
+     * must let mods reach.
+     */
+    public static void webMapServesItsPage(GameTestHelper helper) {
+        try {
+            Path root = Files.createTempDirectory("mtm_webmap");
+            Path config = root.resolve("config");
+            Files.createDirectories(config);
+            Files.writeString(config.resolve("mtm_worldgen-webmap.json"), "{\"enabled\": true, \"bind\": \"127.0.0.1\", \"port\": 0}");
+            WebMap.start(root, root.resolve("region"), config, "GameTest", new WebMap.Log() {
+                @Override
+                public void info(String message) {
+                }
+
+                @Override
+                public void warn(String message, Throwable error) {
+                    MtmWorldgen.LOGGER.warn(message, error);
+                }
+            });
+            String address = WebMap.status();
+            assertTrue(address != null, "web map did not start; is jdk.httpserver missing from this loader?");
+            java.net.HttpURLConnection page = (java.net.HttpURLConnection) java.net.URI.create(address).toURL().openConnection();
+            assertTrue(page.getResponseCode() == 200, "web map page answered " + page.getResponseCode());
+            java.net.HttpURLConnection info = (java.net.HttpURLConnection) java.net.URI.create(address + "info.json").toURL().openConnection();
+            assertTrue(info.getResponseCode() == 200, "web map info answered " + info.getResponseCode());
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            WebMap.stop();
+        }
         helper.succeed();
     }
 

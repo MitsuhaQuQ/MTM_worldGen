@@ -1,0 +1,243 @@
+package com.mtm.worldgen.webmap;
+
+import javax.imageio.ImageIO;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+
+/**
+ * The tile pyramid of a world's overworld. A tile of level 0 is one region file; a tile of level k covers 2^k by 2^k
+ * of them, merged from the four tiles of level k - 1 below it. Rasters and images are kept in a cache folder and
+ * stamped with the newest change of the region files under them, so a tile is drawn again only once the game has
+ * saved something new there.
+ */
+final class TileStore {
+    static final int MAX_LEVEL = 8;
+    /** How long a listing of the region folder is trusted. The game saves every few minutes anyway. */
+    private static final long LISTING_MILLIS = 15_000L;
+    private static final int MEMORY_RASTERS = 48;
+
+    private final Path regions;
+    private final Path cache;
+    private final Map<Long, CompletableFuture<Raster>> computing = new ConcurrentHashMap<>();
+    private final Map<Long, Raster> memory = new LinkedHashMap<>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Raster> eldest) {
+            return size() > MEMORY_RASTERS;
+        }
+    };
+    private volatile Map<Long, Long> listing = Map.of();
+    private volatile long listedAt;
+
+    TileStore(Path regions, Path cache) {
+        this.regions = regions;
+        this.cache = cache;
+    }
+
+    /** Region files by their key, with the time each was last changed. */
+    Map<Long, Long> regions() {
+        long now = System.currentTimeMillis();
+        if (now - listedAt > LISTING_MILLIS) {
+            Map<Long, Long> found = new HashMap<>();
+            if (Files.isDirectory(regions)) {
+                try (Stream<Path> files = Files.list(regions)) {
+                    files.forEach(file -> {
+                        String[] parts = file.getFileName().toString().split("\\.");
+                        if (parts.length == 4 && parts[0].equals("r") && parts[3].equals("mca")) {
+                            try {
+                                found.put(key(0, Integer.parseInt(parts[1]), Integer.parseInt(parts[2])), Files.getLastModifiedTime(file).toMillis());
+                            } catch (NumberFormatException | IOException ignored) {
+                                // Not a region file of the game's, or gone while listing
+                            }
+                        }
+                    });
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+            listing = found;
+            listedAt = now;
+        }
+        return listing;
+    }
+
+    static long key(int level, int x, int z) {
+        return ((long) level << 56) ^ (((long) x & 0xFFFFFFFL) << 28) ^ ((long) z & 0xFFFFFFFL);
+    }
+
+    /** Newest change of the region files under a tile, or 0 if there are none. */
+    long stamp(int level, int tileX, int tileZ) {
+        long newest = 0;
+        int span = 1 << level;
+        for (Map.Entry<Long, Long> region : regions().entrySet()) {
+            long k = region.getKey();
+            int x = signed28((int) (k >>> 28));
+            int z = signed28((int) k);
+            if (Math.floorDiv(x, span) == tileX && Math.floorDiv(z, span) == tileZ) {
+                newest = Math.max(newest, region.getValue());
+            }
+        }
+        return newest;
+    }
+
+    private static int signed28(int value) {
+        return (value << 4) >> 4;
+    }
+
+    /** The PNG of a tile, or null where nothing has been generated. */
+    byte[] image(int level, int tileX, int tileZ) throws IOException {
+        if (level < 0 || level > MAX_LEVEL) {
+            return null;
+        }
+        long stamp = stamp(level, tileX, tileZ);
+        if (stamp == 0) {
+            return null;
+        }
+        Path file = cache.resolve(Integer.toString(level)).resolve(tileX + "." + tileZ + ".png");
+        if (Files.exists(file) && Files.getLastModifiedTime(file).toMillis() == stamp) {
+            return Files.readAllBytes(file);
+        }
+        Raster raster = raster(level, tileX, tileZ);
+        if (raster == null) {
+            return null;
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        ImageIO.write(TileRenderer.render(raster, level), "png", bytes);
+        byte[] png = bytes.toByteArray();
+        save(file, stamp, out -> out.write(png));
+        return png;
+    }
+
+    /** A tile's raster, from memory, the cache folder or the tiles below; null where nothing has been generated. */
+    Raster raster(int level, int tileX, int tileZ) throws IOException {
+        long stamp = stamp(level, tileX, tileZ);
+        if (stamp == 0) {
+            return null;
+        }
+        long key = key(level, tileX, tileZ);
+        // Tiles asked for at once, as a browser does, are computed once; the stamp keeps a newer save from being missed
+        CompletableFuture<Raster> mine = new CompletableFuture<>();
+        CompletableFuture<Raster> running = computing.putIfAbsent(key, mine);
+        if (running != null) {
+            try {
+                return running.join();
+            } catch (RuntimeException e) {
+                throw new IOException(e);
+            }
+        }
+        try {
+            Raster raster = computeRaster(level, tileX, tileZ, key, stamp);
+            mine.complete(raster);
+            return raster;
+        } catch (IOException | RuntimeException e) {
+            mine.completeExceptionally(e);
+            throw e;
+        } finally {
+            computing.remove(key);
+        }
+    }
+
+    private Raster computeRaster(int level, int tileX, int tileZ, long key, long stamp) throws IOException {
+        synchronized (memory) {
+            Raster known = memory.get(key ^ stamp);
+            if (known != null) {
+                return known;
+            }
+        }
+        Path file = cache.resolve(Integer.toString(level)).resolve(tileX + "." + tileZ + ".bin");
+        Raster raster = null;
+        if (Files.exists(file) && Files.getLastModifiedTime(file).toMillis() == stamp) {
+            try (InputStream in = new GZIPInputStream(Files.newInputStream(file))) {
+                raster = Raster.read(in);
+            } catch (IOException e) {
+                // A damaged cache file is only made again
+            }
+        }
+        if (raster == null) {
+            raster = level == 0 ? readRegion(tileX, tileZ) : mergeChildren(level, tileX, tileZ);
+            if (raster == null) {
+                return null;
+            }
+            Raster written = raster;
+            save(file, stamp, out -> {
+                try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
+                    written.write(gzip);
+                }
+            });
+        }
+        synchronized (memory) {
+            memory.put(key ^ stamp, raster);
+        }
+        return raster;
+    }
+
+    private Raster readRegion(int regionX, int regionZ) throws IOException {
+        Path file = regions.resolve("r." + regionX + "." + regionZ + ".mca");
+        return Files.exists(file) ? RegionScan.read(file, regionX, regionZ) : null;
+    }
+
+    private Raster mergeChildren(int level, int tileX, int tileZ) throws IOException {
+        Raster merged = new Raster();
+        boolean any = false;
+        for (int dz = 0; dz < 2; dz++) {
+            for (int dx = 0; dx < 2; dx++) {
+                Raster child = raster(level - 1, 2 * tileX + dx, 2 * tileZ + dz);
+                if (child != null) {
+                    merged.merge(child, dx, dz);
+                    any = true;
+                }
+            }
+        }
+        return any ? merged : null;
+    }
+
+    private interface Writer {
+        void write(OutputStream out) throws IOException;
+    }
+
+    /** Writes a cache file in one piece and stamps it, so a half-written file is never taken for a finished one. */
+    private static void save(Path file, long stamp, Writer writer) throws IOException {
+        Files.createDirectories(file.getParent());
+        Path temporary = file.resolveSibling(file.getFileName() + ".tmp" + Thread.currentThread().getId());
+        try (OutputStream out = Files.newOutputStream(temporary)) {
+            writer.write(out);
+        }
+        Files.setLastModifiedTime(temporary, FileTime.fromMillis(stamp));
+        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /** Bounds of the region files, in blocks: min x, min z, max x, max z, or null if there are none. */
+    int[] bounds() {
+        Map<Long, Long> all = regions();
+        if (all.isEmpty()) {
+            return null;
+        }
+        int minX = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        for (long k : all.keySet()) {
+            int x = signed28((int) (k >>> 28));
+            int z = signed28((int) k);
+            minX = Math.min(minX, x);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxZ = Math.max(maxZ, z);
+        }
+        return new int[]{minX * Raster.SIZE, minZ * Raster.SIZE, (maxX + 1) * Raster.SIZE, (maxZ + 1) * Raster.SIZE};
+    }
+}

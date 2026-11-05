@@ -8,6 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mtm.worldgen.MtmWorldgen;
 import com.mtm.worldgen.benchmark.GenerationBenchmark;
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.webmap.WebMap;
 import com.mtm.worldgen.logic.debug.HeightMapRenderer;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.ChatFormatting;
@@ -67,6 +68,7 @@ public final class MtmCommands {
                 .then(Commands.literal("benchmark")
                         .executes(context -> runBenchmark(context.getSource())))
                 .then(locate())
+                .then(Commands.literal("webmap").executes(context -> webMap(context.getSource())))
                 .then(Commands.literal("precompute")
                         .then(Commands.literal("cancel")
                                 .executes(context -> cancelPrecompute(context.getSource())))
@@ -92,6 +94,16 @@ public final class MtmCommands {
      * Computes the logic regions within a radius, counted in regions, around the source in the background, so that
      * exploring there later does not wait for them.
      */
+    private static int webMap(CommandSourceStack source) {
+        String address = WebMap.status();
+        if (address == null) {
+            source.sendFailure(Component.translatable("commands.mtm_worldgen.webmap.off"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.translatable("commands.mtm_worldgen.webmap.running", address), false);
+        return 1;
+    }
+
     private static int precompute(CommandSourceStack source, int radius) {
         TerrainLogic logic = MtmGenerators.terrainLogic(source.getLevel());
         if (logic == null) {
