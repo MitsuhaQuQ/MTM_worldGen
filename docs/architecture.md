@@ -1,6 +1,6 @@
 # Architecture
 
-How Realistic Landforms is laid out and how it runs: the modules and packages, what each part is for, and how a world and its chunks are generated. The diagrams are UML in Mermaid, which GitHub renders in place. For the design ideas behind the terrain, see [How it works](how-it-works.md); for building and tests, see [Building and development](development.md).
+How Realistic Landforms is laid out and how it runs, as of v0.7.1: the modules and packages, what each part is for, and how a world and its chunks are generated. The diagrams are UML in Mermaid, which GitHub renders in place. For the design ideas behind the terrain, see [How it works](how-it-works.md); for building and tests, see [Building and development](development.md).
 
 ## Code structure
 
@@ -65,7 +65,7 @@ It is built from layers that follow the generation pipeline. Each layer is a pur
 |---|---|---|
 | `ContinentLayer` | 1 | Jittered Voronoi plates grouped into continents, coastlines, islands. Plate drift and character, and mountain belts along plate borders (`belt`) |
 | `ClimateLayer` | 2 | Temperature zones and humidity |
-| `SkeletonLayer` | 3 | Tier field (plains, hills, mountains), mountain ranges, plateaus, hills, isolated peaks, cliff bands |
+| `SkeletonLayer` | 3 | Tier field (plains, hills, mountains) from the plates or, with `mountains.plateTectonics` off, from noise alone; mountain ranges, plateaus, hills, isolated peaks, cliff bands |
 | `ErosionLayer` | 3 | Stream power erosion simulation per region; branching gullies and creeks |
 | `FlowLayer` → `FlowRegion` | 4 | Priority flood routing on a 256 block grid, catchments, river classes, lakes and sinks |
 | `LakeLayer` | 5 | Lake shapes and levels on the real ground |
@@ -256,6 +256,42 @@ In code this is `sampleSurfaceHeight`, which calls `sampleShapedLand` (creeks), 
 
 River fitting has an independent first pass on eroded ground. The final pass uses the valleys of wider rivers from that first pass when lowering small tributaries; it never reads its own final result. Oxbow levels are fitted lazily to the carved terrain along both banks of their crescent, before any oxbow excavation. Those bank queries use final rivers but never query oxbows, so the dependency remains acyclic. Every region holding the same oxbow samples the same global positions and obtains the same flat level.
 
+### The tier field and plate tectonics
+
+Which land is plains, hills or mountains, and where plateaus lie, comes from two fields that `SkeletonLayer` builds. With `mountains.plateTectonics` on (the default), the plates lay them out; off, they are noise alone, as before plates came in, and the belt, plate and plateau settings have no effect. Either way, thresholds are quantiles of the finished field, so the shares of each tier stay as configured.
+
+```mermaid
+flowchart TD
+    Switch{"mountains.plateTectonics"}
+    Noise["tier noise<br/>zoneWavelength"]
+    Great["great plains field<br/>lowers the tier"]
+    subgraph Plates["ContinentLayer.belt: every pair of nearby plates"]
+        Conv["convergence along borders<br/>closing speed × closeness"]
+        Relief["plate character<br/>lowland to upland"]
+        High["highland plates<br/>plateChance"]
+        Wide["wide convergence<br/>beltReach"]
+    end
+    Switch -- on --> Tier1["tier = zoneNoise × noise<br/>+ plateRelief × character<br/>+ beltStrength × convergence (rift below 0)<br/>− great plains"]
+    Switch -- off --> Tier0["tier = noise − great plains"]
+    Noise --> Tier1
+    Noise --> Tier0
+    Great --> Tier1
+    Great --> Tier0
+    Conv --> Tier1
+    Relief --> Tier1
+    Switch -- on --> P1["plateau field = zoneNoise × noise<br/>+ plateHighland × highland<br/>+ beltShare × wide convergence"]
+    Switch -- off --> P0["plateau field = plateau noise"]
+    High --> P1
+    Wide --> P1
+    Tier1 --> Q["quantile thresholds:<br/>plains, hills, mountains"]
+    Tier0 --> Q
+    P1 --> QP["quantile threshold:<br/>plateau coverage"]
+    P0 --> QP
+    Conv -. ranges follow borders,<br/>belts lean igneous .-> Ranges["mountain sites and links"]
+```
+
+Coasts still hold the tier down to the middle of the hills within `coastBand`, which turns mountains into hills along the sea.
+
 ## Connecting to Minecraft (`versions/<mc>/common`)
 
 The mod keeps vanilla's chunk generator and replaces what it reads:
@@ -445,7 +481,9 @@ sequenceDiagram
         D-->>NG: density (+ vanilla aquifers, ore veins, caves)
     end
     V->>NG: buildSurface
-    NG->>W: fill(logic, chunk): river and lake water
+    NG->>W: fill(logic, chunk)
+    W->>L: sampleWaterLevel for the chunk and two columns around it
+    Note over W: WaterSurface rounds the outline,<br/>water and bank blocks are placed
     NG->>SC: begin(logic)
     Note over SC: surface rules ask for beach,<br/>snow, bare rock, strata
     NG->>SC: end()
@@ -480,6 +518,26 @@ sequenceDiagram
     L-->>Q: height
 ```
 
+### Placing water
+
+Water is placed column by column before the surface rules, at the levels the terrain was carved with. `WaterSurface` in `core` decides the outline, the same way on every version:
+
+```mermaid
+flowchart TD
+    A["sampleWaterLevel for the chunk<br/>plus 2 columns on every side"] --> B["floor each level to a block,<br/>NaN is dry"]
+    B --> C{"column and its<br/>4 neighbors"}
+    C -- "wet, at most 1 wet neighbor" --> D["dry: a one-column spike"]
+    C -- "dry, 3 or more wet neighbors" --> E["filled at the lowest neighbor:<br/>a one-column notch"]
+    C -- otherwise --> F["kept at its own level"]
+    D --> G["outline of the chunk plus 1 column"]
+    E --> G
+    F --> G
+    G --> H["MtmWater: water from the bed up to the level,<br/>beds breaking the surface dug out (at most 4)"]
+    G --> I["dry columns beside water: banks raised<br/>to the water, only where at most 4 blocks short"]
+```
+
+Levels are never smoothed afterwards. Falls come from the river logic, which already splits steep streams into level pools. Reading two columns around the chunk and returning one means both chunks along a border judge their shared columns from the same neighborhood, so the outline agrees across borders whatever order chunks generate in.
+
 ### Threads
 
 Chunk generation runs on vanilla's worker threads, often many at once (and more with mods like C2ME). The logic is safe for that:
@@ -499,6 +557,49 @@ stateDiagram-v2
     Held --> Cached: release()
     Cached --> Missing: evicted (least recently used, not held)
 ```
+
+## Settings
+
+```mermaid
+sequenceDiagram
+    participant File as config/mtm_worldgen.json
+    participant Config as MtmConfig
+    participant Settings as WorldgenSettings
+    participant Level as level.dat
+    participant Logic as TerrainLogic
+    Config->>File: read (written with defaults and comments if missing)
+    Config->>Settings: fromJson: missing fields take defaults, invalid values fail
+    Note over Settings: resolved() scales the ranges by logicRange
+    Settings->>Level: written with the generator when a world is created
+    Level->>Logic: every later load reads the locked settings,<br/>never the config file
+```
+
+The config file only decides the settings of new worlds. A world keeps the settings it was created with, so editing the file never puts seams into it. Switches such as `general.caves`, `general.ores` and `mountains.plateTectonics` are locked the same way.
+
+## Build, tests and release
+
+```mermaid
+flowchart LR
+    subgraph Build["gradlew build"]
+        Core["core sources"] --> C1["1.20.1 common"]
+        Core --> C2["26.3 common"]
+        C1 --> J1["fabric, forge jars<br/>(remapped, with refmap)"]
+        C2 --> J2["fabric, forge, neoforge jars<br/>(not obfuscated)"]
+        J1 --> Amidst["amidst jar and<br/>Windows app (jpackage)"]
+    end
+    subgraph CI["build.yml: every push"]
+        UT["unit tests"]
+        GT["GameTests: each version and loader"]
+        PK["packaging"]
+    end
+    subgraph Release["release.yml: tag v&lt;mod_version&gt;"]
+        CT["check-tag:<br/>tag matches mod_version"] --> AW["amidst-windows:<br/>Windows zip"]
+        CT --> RL["release: jars, Amidst,<br/>notes from RELEASE_NOTES.md"]
+        AW --> RL
+    end
+```
+
+A release only publishes once every job has passed: when the Windows packaging failed after the move to Gradle 9, the tags for v0.6.0 and v0.7.0 published nothing, and v0.7.1 was the first release after v0.5.2.
 
 ## Debugging and tools
 
