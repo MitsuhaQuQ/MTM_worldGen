@@ -6,6 +6,11 @@ import com.mtm.worldgen.logic.WorldgenSettings;
 import com.mtm.worldgen.mixin.NoiseFillAccess;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.core.RegistrationInfo;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.WritableRegistry;
@@ -133,6 +138,37 @@ public final class MtmGenerators {
         return new WorldDimensions(WorldDimensions.withOverworld(dimensions.dimensions(),
                 source.lookups().dimensionTypes().getOrThrow(dimensionType(settings.buildHeight())),
                 create(source.lookups(), generator.generatorSettings(), settings)));
+    }
+
+    /**
+     * World generation settings as a world folder keeps them, with an MTM overworld generator built again from the
+     * settings locked into it. The generator is a function of those settings, so nothing is lost; what changes is only
+     * how vanilla writes it down, which differs between Minecraft versions: a world made in 1.20.1 stores a noise router
+     * with more slots and settings 26.x no longer reads, and vanilla falls back to default settings with a random seed
+     * when it cannot read them. Terrain stays the same block for block, and only biomes new to this version join in.
+     * Anything else is returned as it is.
+     */
+    public static Tag rebuildStoredGenerator(Tag data, HolderLookup.Provider registries) {
+        if (!(data instanceof CompoundTag root)) {
+            return data;
+        }
+        CompoundTag overworld = root.getCompoundOrEmpty("dimensions").getCompoundOrEmpty(Level.OVERWORLD.identifier().toString());
+        CompoundTag source = overworld.getCompoundOrEmpty("generator").getCompoundOrEmpty("biome_source");
+        String json = source.getStringOr("settings", "");
+        if (!BIOME_SOURCE_ID.toString().equals(source.getStringOr("type", "")) || json.isEmpty()) {
+            return data;
+        }
+        WorldgenSettings settings = WorldgenSettings.fromJson(json);
+        Lookups lookups = new Lookups(registries.lookupOrThrow(Registries.BIOME), registries.lookupOrThrow(Registries.DIMENSION_TYPE),
+                registries.lookupOrThrow(Registries.DENSITY_FUNCTION), registries.lookupOrThrow(Registries.NOISE));
+        Holder<NoiseGeneratorSettings> vanilla = registries.lookupOrThrow(Registries.NOISE_SETTINGS).getOrThrow(NoiseGeneratorSettings.OVERWORLD);
+        Tag generator = ChunkGenerator.CODEC.encodeStart(RegistryOps.create(NbtOps.INSTANCE, registries), create(lookups, vanilla, settings))
+                .getOrThrow(message -> new IllegalStateException("Cannot write the MTM generator: " + message));
+        CompoundTag rebuilt = root.copy();
+        CompoundTag stem = rebuilt.getCompoundOrEmpty("dimensions").getCompoundOrEmpty(Level.OVERWORLD.identifier().toString());
+        stem.put("generator", generator);
+        stem.putString("type", dimensionType(settings.buildHeight()).identifier().toString());
+        return rebuilt;
     }
 
     /**

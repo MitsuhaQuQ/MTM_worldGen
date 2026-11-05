@@ -151,7 +151,7 @@ public final class TerrainLogic {
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         LakeLayer lakes = new LakeLayer(settings, this::flowRegion, this::sampleSmoothLand);
         this.lakeRegions = new RegionCache<>(lakes::compute, settings.general.regionCacheSize);
-        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.covers(x, z));
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.cuts(x, z));
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
         RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false);
         this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize);
@@ -392,6 +392,7 @@ public final class TerrainLogic {
 
     /** Takes on the foreign chunks of a world. Called before it generates anything. */
     public void setForeign(ForeignMap map) {
+        map.bind(this::unblendedHeight);
         foreign = map;
         riverRegions.clear();
         fittedRiverRegions.clear();
@@ -418,6 +419,9 @@ public final class TerrainLogic {
         if (influence == null) {
             return land;
         }
+        if (influence.upgraded()) {
+            return upgradedBlend(x, z, land, influence);
+        }
         double share = foreignShare(x, z, influence);
         double blended = closeIn(smooth, land, influence.ground(), share);
         double[] held = heldWater(x, z, influence);
@@ -440,6 +444,38 @@ public final class TerrainLogic {
     }
 
     /**
+     * Land around chunks of an older MTM. Both sides came from the same seed, so instead of heading for the edge, the
+     * land keeps all its shape and is only shifted by how much the older ground differs, which is nothing wherever the
+     * algorithm has not changed. Rivers run on into the old chunks where those hold water, and are shifted with their
+     * valleys; where they are dry, rivers end before them as before any foreign chunk. Water on the edge that this side
+     * has nothing of is banked in.
+     */
+    private double upgradedBlend(double x, double z, double land, ForeignMap.Influence influence) {
+        double shifted = land + influence.offset() * influence.share();
+        double pond = influence.wetLevel();
+        if (Double.isNaN(pond) || hasOwnWater(x, z, settings.foreign.pondReach)) {
+            return shifted;
+        }
+        double reach = settings.foreign.pondReach;
+        return bankedUp(shifted, pond + 1.0, 1.0 - smooth((influence.wetDistance() - reach) / ((ForeignMap.WET_REACH - 1.0) * reach)));
+    }
+
+    /** Whether this world has a river or lake within a distance of a position, found without its surface height. */
+    private boolean hasOwnWater(double x, double z, double reach) {
+        double[] lake = sampleLake(x, z);
+        if (lake != null && lake[0] > 0.0) {
+            return true;
+        }
+        RiverRegion.Hit river = sampleRiver(x, z);
+        return river != null && river.distance() < river.halfWidth(settings.rivers.minChannelWidth) + reach;
+    }
+
+    /** Height of this world at a position as if no foreign chunks were near: what upgraded chunks are measured against. */
+    private double unblendedHeight(double x, double z) {
+        return sinkholes.lower(x, z, stacks.raise(x, z, sampleShapedLand(x, z)));
+    }
+
+    /**
      * Water of this world that a blend would leave standing above the land, as its level and how close it is, from 0
      * to 1, or null. Rivers and lakes on high ground next to lower foreign land would lose their banks to the blend and
      * pour out over the slope. Water that meets a foreign sea at its own level needs nothing.
@@ -459,8 +495,12 @@ public final class TerrainLogic {
         } else {
             return null;
         }
-        double edgeTop = Double.isNaN(influence.water()) || influence.water() == ForeignMap.NO_WATER ? influence.ground()
-                : Math.max(influence.ground(), influence.water());
+        boolean dry = Double.isNaN(influence.water()) || influence.water() == ForeignMap.NO_WATER;
+        if (influence.upgraded()) {
+            // The land keeps its banks, and rivers either run on into the water of the old chunks or end before them
+            return null;
+        }
+        double edgeTop = dry ? influence.ground() : Math.max(influence.ground(), influence.water());
         return near > 0.0 && level > edgeTop + 1.0 ? new double[]{level, near} : null;
     }
 
@@ -739,7 +779,8 @@ public final class TerrainLogic {
      */
     double oasisGround(double x, double z, double reach) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        if (desertShare(x, z, sampleSmoothLand(x, z), base) < settings.deserts.oasisMinShare || foreignNear(x, z)) {
+        // From the distance alone: the ground of upgraded chunks is measured against land that may hold oases
+        if (desertShare(x, z, sampleSmoothLand(x, z), base) < settings.deserts.oasisMinShare || foreign.near(x, z)) {
             return Double.NaN;
         }
         RiverRegion.Hit river = sampleRiver(x, z);
@@ -1360,16 +1401,27 @@ public final class TerrainLogic {
      */
     private double foreignWaterLevel(double x, double z, double smooth, ForeignMap.Influence influence) {
         double pond = influence.wetLevel();
-        if (!Double.isNaN(pond) && influence.wetDistance() < settings.foreign.pondReach && sampleSurfaceHeight(x, z) < pond) {
+        // Around old chunks, water of their own that this side also has runs on as this side's
+        if (!Double.isNaN(pond) && influence.wetDistance() < settings.foreign.pondReach && sampleSurfaceHeight(x, z) < pond
+                && !(influence.upgraded() && hasOwnWater(x, z, settings.foreign.pondReach))) {
             return pond;
         }
         double level = plainWaterLevel(x, z);
-        if (Double.isNaN(level) || sampleSurfaceHeight(x, z) >= level) {
+        if (Double.isNaN(level)) {
             return Double.NaN;
         }
         double[] held = heldWater(x, z, influence);
         if (held != null) {
-            return influence.distance() < damFoot(held[0], influence) ? Double.NaN : level;
+            return influence.distance() < damFoot(held[0], influence) || sampleSurfaceHeight(x, z) >= level ? Double.NaN : level;
+        }
+        if (influence.upgraded()) {
+            // Rivers move with the land they run in; lakes stay level, and their shore follows the shifted land
+            double[] lake = sampleLake(x, z);
+            double shifted = lake != null && lake[0] > LAKE_EDGE ? level : level + influence.offset() * influence.share();
+            return sampleSurfaceHeight(x, z) >= shifted ? Double.NaN : shifted;
+        }
+        if (sampleSurfaceHeight(x, z) >= level) {
+            return Double.NaN;
         }
         return Math.min(level, closeIn(smooth, level, influence.ground(), foreignShare(x, z, influence)));
     }

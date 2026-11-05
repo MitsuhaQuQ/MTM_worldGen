@@ -1,5 +1,13 @@
 # Release notes
 
+## Unreleased
+
+### Upgrades
+
+- Worlds made in Minecraft 1.20.1 open in 26.x with their terrain unchanged, block for block; only the biomes new to that version join in. Their stored generator is rebuilt from the settings locked into the world, since 26.x cannot read the way 1.20.1 wrote it down and would otherwise fall back to vanilla settings with a random seed
+- After an update that changes the terrain algorithm, new chunks next to the ones generated before keep their own shape and are only shifted by the height difference along the old edge, which is nothing where the algorithm did not change. Rivers continue into the old chunks wherever those hold water, instead of ending in a lake before them
+- Chunks of an older version stay recognized as such when they are saved again. The first time a world loads with this version, all its region files are scanned once more
+
 ## v0.7.3
 
 ### Preview

@@ -556,8 +556,13 @@ public final class WorldgenSettings {
         public double grade = 0.3;
         public double minWidth = 64.0;
         public double maxWidth = 1000.0;
-        /** Chunks of an older MTM can blend further, since both sides are the same kind of terrain. */
+        /**
+         * Chunks of an older MTM: the land around them keeps its shape and is only shifted by how far the older ground
+         * differs, over this width at most. The width is the largest difference along the edge divided by the grade,
+         * gentler than for other foreign chunks because the shift comes on top of the slopes already there.
+         */
         public double upgradeMaxWidth = 2000.0;
+        public double upgradeGrade = 0.15;
         /** Height superflat maps are raised to, moved in whole sections of 16 blocks. */
         public int flatGround = 67;
         /** Water and rock of foreign rivers and lakes spread this far past the edge, closed in by banks. */

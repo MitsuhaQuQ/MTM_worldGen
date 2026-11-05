@@ -459,6 +459,49 @@ public final class MtmGameTests {
     }
 
     /**
+     * After an update of the terrain algorithm, chunks the world made before are found although their files have not
+     * changed since the snapshot was taken: a snapshot of an older algorithm has all files read again.
+     */
+    @GameTest(template = TEMPLATE, timeoutTicks = TIMEOUT_TICKS)
+    public static void chunksOfOlderVersionsAreFoundAgain(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        long seed = SEED + 3;
+        TerrainLogic logic = TerrainLogic.forWorld(seed, SETTINGS);
+        ChunkPos pos = new ChunkPos(helper.absolutePos(BlockPos.ZERO));
+        try {
+            Path root = Files.createTempDirectory("mtm_upgrade");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            CompoundTag own = ChunkSerializer.write(level, level.getChunk(pos.x, pos.z));
+            own.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION - 1);
+            own.putLong(ForeignChunks.WORLD_TAG, logic.worldId());
+            writeChunk(level, regions, pos, own);
+            // The snapshot an older version took of this file, back when the chunk was its own
+            Path file = regions.resolve("r." + Math.floorDiv(pos.x, 32) + "." + Math.floorDiv(pos.z, 32) + ".mca");
+            CompoundTag files = new CompoundTag();
+            files.putLongArray(file.getFileName().toString(), new long[]{Files.getLastModifiedTime(file).toMillis(), Files.size(file)});
+            CompoundTag snapshot = new CompoundTag();
+            snapshot.putInt("format", 1);
+            snapshot.putInt("algorithm", TerrainLogic.ALGORITHM_VERSION - 1);
+            snapshot.put("chunks", new ListTag());
+            snapshot.put("files", files);
+            Path snapshotFile = root.resolve(MtmWorldgen.MOD_ID).resolve("legacy.dat");
+            Files.createDirectories(snapshotFile.getParent());
+            net.minecraft.nbt.NbtIo.writeCompressed(snapshot, snapshotFile.toFile());
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
+            ForeignMap.Chunk found = logic.foreign().chunk(pos.x, pos.z);
+            assertTrue(found != null && found.upgraded(), "chunk of the older version not found");
+            CompoundTag kept = readChunk(level, regions, pos);
+            assertTrue(!kept.contains(ForeignChunks.FITTED_TAG), "chunk of the older version fitted like a foreign one");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
+    /**
      * Tags decide what a chunk is, whatever the snapshot holds: another MTM world's chunk is foreign even with this
      * algorithm version, and a new map merged in at a place already fitted gets fitted in turn.
      */

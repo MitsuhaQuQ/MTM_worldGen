@@ -22,6 +22,8 @@ public final class ForeignMap {
     public static final ForeignMap EMPTY = new ForeignMap(Map.of(), new WorldgenSettings());
     /** A chunk with foreign chunks on all sides. Nothing blends toward it, so it needs no detail. */
     public static final Chunk INNER = new Chunk(null, null, null, false);
+    /** The same for a chunk of an older MTM, which rivers still run into. */
+    public static final Chunk UPGRADED_INNER = new Chunk(null, null, null, true);
 
     private static final int CHUNK = 16;
     /** Influence is computed on a lattice of this spacing and interpolated. */
@@ -36,9 +38,30 @@ public final class ForeignMap {
     /** Distance standing for no water in reach. */
     private static final double DRY = 1.0E5;
     private static final Point NOTHING = new Point(Double.MAX_VALUE, 0.0, Double.NaN, 0.0, null, false, DRY, Double.NaN);
+    /** Offset and its largest size nearby, where no chunk of an older MTM is in reach. */
+    private static final double[] NO_OFFSET = {0.0, 0.0};
 
-    /** One foreign chunk. Upgraded chunks came from an older MTM, and blend further because more is known about them. */
+    /** Ground of this world at a position as it would be without foreign chunks. */
+    public interface Ground {
+        double at(double x, double z);
+    }
+
+    /**
+     * One foreign chunk. Upgraded chunks came from an older MTM: the same seed laid them out, so they differ from this
+     * world only where the algorithm has changed, and the land around them shifts by that difference instead of
+     * closing in on them, with rivers running on into them.
+     */
     public record Chunk(short[] ground, short[] water, String biome, boolean upgraded) {
+    }
+
+    /** Whether a chunk only stands for its position, with foreign chunks all around it. */
+    public static boolean isInner(Chunk chunk) {
+        return chunk == INNER || chunk == UPGRADED_INNER;
+    }
+
+    /** The detail-free stand-in for a chunk with foreign chunks all around it. */
+    public static Chunk inner(Chunk chunk) {
+        return chunk.upgraded ? UPGRADED_INNER : INNER;
     }
 
     /**
@@ -46,10 +69,37 @@ public final class ForeignMap {
      * distance and level belong to the nearest water that stands above the sea at an edge; the level is NaN out of reach.
      */
     public record Influence(double share, double distance, double ground, double water, String biome, boolean upgraded,
-                            double wetDistance, double wetLevel) {
+                            double wetDistance, double wetLevel, double offset) {
     }
 
-    private record Edge(double x, double z, double ground, double water, String biome, boolean upgraded) {
+    /** A sample on an open edge. The ground of this world there is found once, when an upgraded blend first needs it. */
+    private static final class Edge {
+        final double x;
+        final double z;
+        final double ground;
+        final double water;
+        final String biome;
+        final boolean upgraded;
+        private volatile double natural = Double.NaN;
+
+        Edge(double x, double z, double ground, double water, String biome, boolean upgraded) {
+            this.x = x;
+            this.z = z;
+            this.ground = ground;
+            this.water = water;
+            this.biome = biome;
+            this.upgraded = upgraded;
+        }
+
+        /** How far the ground of the older MTM stands above that of this world. */
+        double offset(Ground world) {
+            double here = natural;
+            if (Double.isNaN(here)) {
+                here = world.at(x, z);
+                natural = here;
+            }
+            return ground - here;
+        }
     }
 
     private record Point(double distance, double ground, double water, double peak, String biome, boolean upgraded,
@@ -69,7 +119,9 @@ public final class ForeignMap {
     private final double highWater;
     private final Map<Long, List<Edge>> buckets = new HashMap<>();
     private final Map<Long, Point> lattice = new ConcurrentHashMap<>();
+    private final Map<Long, double[]> offsets = new ConcurrentHashMap<>();
     private final int bucketReach;
+    private volatile Ground world;
 
     public ForeignMap(Map<Long, Chunk> chunks, WorldgenSettings settings) {
         WorldgenSettings.Foreign config = settings.foreign;
@@ -113,6 +165,14 @@ public final class ForeignMap {
         return size == 0;
     }
 
+    /**
+     * Gives the map the ground of its world, which blends toward upgraded chunks are measured against. It must not
+     * depend on this map's influence, or measuring would need itself.
+     */
+    void bind(Ground world) {
+        this.world = world;
+    }
+
     /** The foreign chunk at a position, or null. */
     public Chunk chunk(int chunkX, int chunkZ) {
         return tableChunks[slot(key(chunkX, chunkZ))];
@@ -138,8 +198,53 @@ public final class ForeignMap {
         return contains((int) Math.floor(x / CHUNK), (int) Math.floor(z / CHUNK));
     }
 
+    /**
+     * Whether a river reaching a position in foreign chunks ends before them. It runs on into chunks of an older MTM
+     * when they hold water around it: the same seed laid out the same river there, unless the algorithm moved it. The
+     * samples lie 5 blocks apart, which a narrow stream can slip through, so the chunks around count too; chunks with
+     * foreign chunks all around keep no samples, and rivers run on through them.
+     */
+    boolean cuts(double x, double z) {
+        int chunkX = (int) Math.floor(x / CHUNK);
+        int chunkZ = (int) Math.floor(z / CHUNK);
+        Chunk chunk = chunk(chunkX, chunkZ);
+        if (chunk == null || !chunk.upgraded) {
+            return chunk != null;
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                Chunk around = chunk(chunkX + dx, chunkZ + dz);
+                if (around != null && (isInner(around) || hasWater(around))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasWater(Chunk chunk) {
+        for (short level : chunk.water) {
+            if (level != NO_WATER) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a blend may reach a position, from its distance alone: as far as the widest blend, or near water on an
+     * edge. Unlike {@link #influence}, it never needs the ground of this world.
+     */
+    boolean near(double x, double z) {
+        int cellX = Math.floorDiv((int) Math.floor(x), LATTICE);
+        int cellZ = Math.floorDiv((int) Math.floor(z), LATTICE);
+        Point a = point(cellX, cellZ);
+        return a != NOTHING && (a.distance < Math.max(config.maxWidth, config.upgradeMaxWidth) + LATTICE
+                || a.wetDistance < WET_REACH * config.pondReach + LATTICE);
+    }
+
     private void addEdges(long key, Chunk chunk) {
-        if (chunk == INNER) {
+        if (isInner(chunk)) {
             return;
         }
         int chunkX = (int) (key >> 32);
@@ -182,9 +287,21 @@ public final class ForeignMap {
         double distance = bilinear(a.distance, b.distance, c.distance, d.distance, tx, tz);
         double peak = bilinear(a.peak, b.peak, c.peak, d.peak, tx, tz);
         double ground = bilinear(a.ground, b.ground, c.ground, d.ground, tx, tz);
-        double most = a.upgraded ? config.upgradeMaxWidth : config.maxWidth;
-        double step = Math.max(Math.abs(peak - land), Math.abs(ground - land));
-        double width = Math.max(config.minWidth, Math.min(most, step / config.grade));
+        double offset = 0.0;
+        double width;
+        if (a.upgraded) {
+            // Both sides are the same terrain, apart from what has changed: the blend only has to make up for that
+            double[] oa = offset(cellX, cellZ);
+            double[] ob = offset(cellX + 1, cellZ);
+            double[] oc = offset(cellX, cellZ + 1);
+            double[] od = offset(cellX + 1, cellZ + 1);
+            offset = bilinear(oa[0], ob[0], oc[0], od[0], tx, tz);
+            double step = bilinear(oa[1], ob[1], oc[1], od[1], tx, tz);
+            width = Math.max(config.minWidth, Math.min(config.upgradeMaxWidth, step / config.upgradeGrade));
+        } else {
+            double step = Math.max(Math.abs(peak - land), Math.abs(ground - land));
+            width = Math.max(config.minWidth, Math.min(config.maxWidth, step / config.grade));
+        }
         double wetDistance = bilinear(a.wetDistance, b.wetDistance, c.wetDistance, d.wetDistance, tx, tz);
         boolean wet = wetDistance < WET_REACH * config.pondReach;
         if (distance >= width && !wet) {
@@ -192,7 +309,69 @@ public final class ForeignMap {
         }
         double t = Math.max(0.0, 1.0 - distance / width);
         double wetLevel = wet ? firstLevel(a, b, c, d) : Double.NaN;
-        return new Influence(t * t * (3.0 - 2.0 * t), distance, ground, a.water, a.biome, a.upgraded, wetDistance, wetLevel);
+        return new Influence(t * t * (3.0 - 2.0 * t), distance, ground, a.water, a.biome, a.upgraded, wetDistance, wetLevel, offset);
+    }
+
+    /**
+     * Offset of the upgraded edges around a lattice point, weighted like their ground, and the largest offset along the
+     * nearest piece of edge, which sets the width of the blend. Computed outside the cache's lock: measuring the ground
+     * of this world may come back here for other points.
+     */
+    private double[] offset(int cellX, int cellZ) {
+        Long key = mixedKey(cellX, cellZ);
+        double[] known = offsets.get(key);
+        if (known != null) {
+            return known;
+        }
+        double[] computed = computeOffset(cellX * LATTICE, cellZ * LATTICE);
+        double[] raced = offsets.putIfAbsent(key, computed);
+        return raced != null ? raced : computed;
+    }
+
+    private double[] computeOffset(double x, double z) {
+        Ground ground = world;
+        if (ground == null) {
+            return NO_OFFSET;
+        }
+        int bucketX = Math.floorDiv((int) x, BUCKET);
+        int bucketZ = Math.floorDiv((int) z, BUCKET);
+        double nearest = Double.MAX_VALUE;
+        Edge closest = null;
+        double sum = 0.0;
+        double weightSum = 0.0;
+        List<Edge> upgraded = new ArrayList<>();
+        for (int dx = -bucketReach; dx <= bucketReach; dx++) {
+            for (int dz = -bucketReach; dz <= bucketReach; dz++) {
+                List<Edge> edges = buckets.get(mixedKey(bucketX + dx, bucketZ + dz));
+                if (edges == null) {
+                    continue;
+                }
+                for (Edge edge : edges) {
+                    if (!edge.upgraded) {
+                        continue;
+                    }
+                    double distance = Math.hypot(edge.x - x, edge.z - z);
+                    double weight = 1.0 / (Math.pow(distance + SOFTEN, 4.0));
+                    sum += weight * edge.offset(ground);
+                    weightSum += weight;
+                    upgraded.add(edge);
+                    if (distance < nearest) {
+                        nearest = distance;
+                        closest = edge;
+                    }
+                }
+            }
+        }
+        if (closest == null) {
+            return NO_OFFSET;
+        }
+        double step = 0.0;
+        for (Edge edge : upgraded) {
+            if (Math.hypot(edge.x - closest.x, edge.z - closest.z) < PEAK_REACH) {
+                step = Math.max(step, Math.abs(edge.offset(ground)));
+            }
+        }
+        return new double[]{sum / weightSum, step};
     }
 
     /** The water level of the lattice points around a position; they may lie on different sides of a shore. */

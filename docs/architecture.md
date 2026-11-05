@@ -405,6 +405,8 @@ classDiagram
 
 26.x versions have the same roles with different hooks, because vanilla rewrote its world generation in 26.1: filling, surface and carving happen together in `buildTerrain`, surface rules are material rules, and chunks are marked in `SerializableChunkData`. See CLAUDE.md for the details.
 
+26.x has one more: `LevelStorageSourceMixin` on `readExistingSavedData` builds the MTM generator of a stored world again from its locked settings. Worlds from another Minecraft version, such as 1.20.1, stored their generator in a form 26.x cannot read, and vanilla would fall back to default settings with a random seed.
+
 ## Runtime flows
 
 ### Starting the game and creating a world

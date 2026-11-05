@@ -1,5 +1,6 @@
 package com.mtm.worldgen.mixin;
 
+import com.mtm.worldgen.logic.ForeignMap;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.ChunkStamp;
 import com.mtm.worldgen.world.ForeignChunks;
@@ -35,9 +36,15 @@ abstract class SerializableChunkDataMixin implements ChunkStamp {
             return;
         }
         long world = logic.worldId();
-        boolean fitted = logic.foreign().contains(chunk.getPos().x(), chunk.getPos().z());
+        ForeignMap.Chunk foreign = logic.foreign().chunk(chunk.getPos().x(), chunk.getPos().z());
+        boolean upgraded = foreign != null && foreign.upgraded();
+        boolean fitted = foreign != null && !upgraded;
         ((ChunkStamp) (Object) cir.getReturnValue()).mtm$setStamp(tag -> {
-            if (fitted) {
+            if (upgraded) {
+                // Still this world's own, from an older version: it stays one when saved again
+                tag.putInt(ForeignChunks.VERSION_TAG, ForeignChunks.OLDER_VERSION);
+                tag.putLong(ForeignChunks.WORLD_TAG, world);
+            } else if (fitted) {
                 tag.putLong(ForeignChunks.FITTED_TAG, world);
             } else {
                 tag.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);

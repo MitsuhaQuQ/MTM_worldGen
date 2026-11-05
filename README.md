@@ -72,6 +72,12 @@ No other mods are required. Each jar is built for one Minecraft version, as its 
 
 On a server, set `level-type=mtm_worldgen:realistic` in `server.properties`.
 
+## Updating
+
+A world made in Minecraft 1.20.1 can be opened with the 26.x version of the mod. Its terrain stays the same block for block, and new chunks may use the biomes added since.
+
+When an update of the mod changes the terrain, chunks that were already generated stay as they are. New chunks next to them keep their own shape and are only shifted to meet the old ground, where it differs. Rivers continue into the old chunks wherever those already hold water.
+
 ## Merging other maps
 
 You can copy region files from other worlds, vanilla, superflat or older versions, into a Realistic Landforms world. They are detected when the world loads and fitted in: superflat maps are raised to normal ground height, missing ground below old maps is generated, and terrain generated around them afterwards blends toward their edges, with rivers ending in lakes before them. The original region files are backed up under `<world>/mtm_worldgen/backup/` before they are changed. Clear the chunks around a merged map to have them generate again with the blend.

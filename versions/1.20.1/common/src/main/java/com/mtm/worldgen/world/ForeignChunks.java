@@ -69,6 +69,8 @@ import java.util.stream.Stream;
 public final class ForeignChunks {
     /** Chunk tag with the algorithm version of the MTM that generated the chunk. */
     public static final String VERSION_TAG = "mtm_version";
+    /** Version a chunk from an older MTM is saved with again, when what it was is no longer known: any older one. */
+    public static final int OLDER_VERSION = 0;
     /**
      * Chunk tag with the {@link TerrainLogic#worldId} of the world that generated the chunk. These tags travel with
      * region files, so a version alone would take the chunks of another MTM world for this one's.
@@ -195,7 +197,7 @@ public final class ForeignChunks {
         for (Map.Entry<Long, ForeignMap.Chunk> entry : chunks.entrySet()) {
             int x = (int) (entry.getKey() >> 32);
             int z = (int) (long) entry.getKey();
-            if (entry.getValue() == ForeignMap.INNER && !isInner(chunks, x, z)) {
+            if (ForeignMap.isInner(entry.getValue()) && !isInner(chunks, x, z)) {
                 Path file = regions.resolve("r." + Math.floorDiv(x, 32) + "." + Math.floorDiv(z, 32) + ".mca");
                 exposed.computeIfAbsent(file, f -> new HashSet<>()).add(entry.getKey());
             }
@@ -216,7 +218,10 @@ public final class ForeignChunks {
         });
         chunks.putAll(read);
         // Anything that could not be read is no use as an edge
-        exposed.values().forEach(keys -> keys.forEach(key -> chunks.remove(key, ForeignMap.INNER)));
+        exposed.values().forEach(keys -> keys.forEach(key -> {
+            chunks.remove(key, ForeignMap.INNER);
+            chunks.remove(key, ForeignMap.UPGRADED_INNER);
+        }));
     }
 
     private static boolean isInner(Map<Long, ForeignMap.Chunk> chunks, int x, int z) {
@@ -884,6 +889,13 @@ public final class ForeignChunks {
             return;
         }
         CompoundTag tag = NbtIo.readCompressed(snapshotFile.toFile());
+        // Chunks this world made before an upgrade still carry the older version, but their files have not changed
+        // since they were last looked at: all of them have to be read again to find those chunks
+        boolean sameAlgorithm = tag.getInt("algorithm") == TerrainLogic.ALGORITHM_VERSION;
+        if (!sameAlgorithm) {
+            MtmWorldgen.LOGGER.info("Terrain algorithm is now version {}: reading all region files again for chunks of older versions",
+                    TerrainLogic.ALGORITHM_VERSION);
+        }
         ListTag list = tag.getList("chunks", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag chunk = list.getCompound(i);
@@ -893,8 +905,11 @@ public final class ForeignChunks {
         for (long key : tag.getLongArray("inner")) {
             chunks.put(key, ForeignMap.INNER);
         }
+        for (long key : tag.getLongArray("upgraded_inner")) {
+            chunks.put(key, ForeignMap.UPGRADED_INNER);
+        }
         CompoundTag known = tag.getCompound("files");
-        for (String name : known.getAllKeys()) {
+        for (String name : sameAlgorithm ? known.getAllKeys() : Set.<String>of()) {
             files.put(name, known.getLongArray(name));
         }
     }
@@ -909,15 +924,16 @@ public final class ForeignChunks {
                 inner.add(key);
             }
         }
-        inner.forEach(key -> chunks.put(key, ForeignMap.INNER));
+        inner.forEach(key -> chunks.put(key, ForeignMap.inner(chunks.get(key))));
     }
 
     private void writeSnapshot(Map<Long, ForeignMap.Chunk> chunks, Map<String, long[]> files) throws IOException {
         ListTag list = new ListTag();
         List<Long> inner = new ArrayList<>();
+        List<Long> upgradedInner = new ArrayList<>();
         for (Map.Entry<Long, ForeignMap.Chunk> entry : new TreeMap<>(chunks).entrySet()) {
-            if (entry.getValue() == ForeignMap.INNER) {
-                inner.add(entry.getKey());
+            if (ForeignMap.isInner(entry.getValue())) {
+                (entry.getValue().upgraded() ? upgradedInner : inner).add(entry.getKey());
                 continue;
             }
             CompoundTag chunk = new CompoundTag();
@@ -934,8 +950,10 @@ public final class ForeignChunks {
         files.forEach(known::putLongArray);
         CompoundTag tag = new CompoundTag();
         tag.putInt("format", 1);
+        tag.putInt("algorithm", TerrainLogic.ALGORITHM_VERSION);
         tag.put("chunks", list);
         tag.putLongArray("inner", inner.stream().mapToLong(Long::longValue).toArray());
+        tag.putLongArray("upgraded_inner", upgradedInner.stream().mapToLong(Long::longValue).toArray());
         tag.put("files", known);
         Files.createDirectories(snapshotFile.getParent());
         Path temporary = snapshotFile.resolveSibling("legacy.dat.tmp");

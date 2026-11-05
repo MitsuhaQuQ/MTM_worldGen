@@ -16,6 +16,7 @@ import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -357,6 +358,99 @@ class TerrainLogicTest {
         }
         assertTrue(steepest < 1.5, "blend grade " + steepest);
         int far = edge + (int) SETTINGS.foreign.maxWidth + 64;
+        assertEquals(plain.sampleSurfaceHeight(far, z), logic.sampleSurfaceHeight(far, z));
+    }
+
+    /**
+     * Chunks of an older MTM, made by a block of this world's own chunks, with their ground raised by a shift: what the
+     * snapshot would hold if the algorithm had changed by that much there.
+     */
+    private static Map<Long, ForeignMap.Chunk> upgradedBlock(TerrainLogic plain, int chunkX, int chunkZ, int size, double shift) {
+        Map<Long, ForeignMap.Chunk> chunks = new HashMap<>();
+        for (int dx = 0; dx < size; dx++) {
+            for (int dz = 0; dz < size; dz++) {
+                short[] ground = new short[ForeignMap.SAMPLES];
+                short[] water = new short[ForeignMap.SAMPLES];
+                for (int j = 0; j < ForeignMap.SAMPLE_OFFSETS.length; j++) {
+                    for (int i = 0; i < ForeignMap.SAMPLE_OFFSETS.length; i++) {
+                        int x = (chunkX + dx) * 16 + ForeignMap.SAMPLE_OFFSETS[i];
+                        int z = (chunkZ + dz) * 16 + ForeignMap.SAMPLE_OFFSETS[j];
+                        int index = j * ForeignMap.SAMPLE_OFFSETS.length + i;
+                        ground[index] = (short) Math.floor(plain.sampleSurfaceHeight(x, z) + shift);
+                        double level = plain.sampleWaterLevel(x, z);
+                        water[index] = Double.isNaN(level) ? ForeignMap.NO_WATER : (short) Math.floor(level + shift);
+                    }
+                }
+                chunks.put(ForeignMap.key(chunkX + dx, chunkZ + dz), new ForeignMap.Chunk(ground, water, "minecraft:plains", true));
+            }
+        }
+        return chunks;
+    }
+
+    /**
+     * Where an upgrade has not changed the terrain, its old chunks leave the land around them as it is, rivers
+     * included: they run on into the old chunks instead of ending in a lake before them.
+     */
+    @Test
+    void unchangedUpgradedChunksLeaveTheLandAsItIs() {
+        TerrainLogic plain = SHARED;
+        Random random = new Random(11);
+        int tried = 0;
+        for (int i = 0; i < 20000 && tried < 4; i++) {
+            int x = random.nextInt(16000) - 8000;
+            int z = random.nextInt(16000) - 8000;
+            RiverRegion.Hit river = plain.sampleRiver(x, z);
+            if (river == null || river.distance() > 0.5 * river.halfWidth(SETTINGS.rivers.minChannelWidth)
+                    || Double.isNaN(plain.sampleWaterLevel(x, z)) || plain.sampleSurfaceHeight(x, z) < SETTINGS.general.seaLevel) {
+                continue;
+            }
+            tried++;
+            TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+            int chunkX = (x >> 4) + 2;
+            int chunkZ = (z >> 4) - 4;
+            logic.setForeign(new ForeignMap(upgradedBlock(plain, chunkX, chunkZ, 8, 0.0), SETTINGS));
+            for (int dz = -96; dz <= 96; dz += 4) {
+                for (int dx = -160; dx < 0; dx += 4) {
+                    int px = chunkX * 16 + dx;
+                    int pz = z + dz;
+                    assertEquals(plain.sampleSurfaceHeight(px, pz), logic.sampleSurfaceHeight(px, pz), 2.0, "land at " + px + "," + pz);
+                    double before = plain.sampleWaterLevel(px, pz);
+                    double after = logic.sampleWaterLevel(px, pz);
+                    if (!Double.isNaN(before) && !Double.isNaN(after)) {
+                        assertEquals(before, after, 2.0, "water at " + px + "," + pz);
+                    }
+                }
+            }
+            assertFalse(Double.isNaN(logic.sampleWaterLevel(x, z)), "river cut short at " + x + "," + z);
+            assertEquals(plain.sampleWaterLevel(x, z), logic.sampleWaterLevel(x, z), 2.0, "river level at " + x + "," + z);
+        }
+        assertTrue(tried > 0, "no river found");
+    }
+
+    /**
+     * Where an upgrade has changed the terrain, the land meets the old chunks at their height and keeps its own shape
+     * on the way: the difference it makes up is spread smoothly across the blend, and land past it stays as it was.
+     */
+    @Test
+    void landShiftsTowardChangedUpgradedChunks() {
+        TerrainLogic plain = SHARED;
+        TerrainLogic logic = new TerrainLogic(SEED, SETTINGS);
+        BlockColumn spot = logic.findSpawn();
+        int chunkX = spot.x() >> 4;
+        int chunkZ = spot.z() >> 4;
+        double shift = 30.0;
+        logic.setForeign(new ForeignMap(upgradedBlock(plain, chunkX, chunkZ, 8, shift), SETTINGS));
+        int edge = (chunkX + 8) * 16;
+        int z = (chunkZ + 4) * 16;
+        assertEquals(plain.sampleSurfaceHeight(edge + 1, z) + shift, logic.sampleSurfaceHeight(edge + 1, z), 4.0);
+        double previous = shift;
+        for (int x = edge + 9; x < edge + 400; x += 8) {
+            double added = logic.sampleSurfaceHeight(x, z) - plain.sampleSurfaceHeight(x, z);
+            assertTrue(added <= previous + 1.0, "shift grows again at " + x + "," + z);
+            assertTrue(previous - added < 8.0 * 0.3, "shift drops too fast at " + x + "," + z);
+            previous = added;
+        }
+        int far = edge + (int) SETTINGS.foreign.upgradeMaxWidth + 64;
         assertEquals(plain.sampleSurfaceHeight(far, z), logic.sampleSurfaceHeight(far, z));
     }
 

@@ -281,6 +281,50 @@ public final class MtmGameTests {
         helper.succeed();
     }
 
+    /**
+     * A world made in 1.20.1 keeps its terrain here: its level.dat (a real one, from a world made with the default
+     * config) stores a generator written down the 1.20.1 way, which is built again from the settings locked into it.
+     */
+    public static void worldsFromOlderVersionsKeepTheirTerrain(GameTestHelper helper) {
+        RegistryAccess access = helper.getLevel().registryAccess();
+        CompoundTag level;
+        try (java.io.InputStream in = MtmGameTests.class.getResourceAsStream("/mtm_worldgen/gametest/level_1.20.1.dat")) {
+            level = net.minecraft.nbt.NbtIo.readCompressed(in, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        CompoundTag data = level.getCompoundOrEmpty("Data");
+        CompoundTag stored = DataFixTypes.WORLD_GEN_SETTINGS.updateToCurrentVersion(net.minecraft.util.datafix.DataFixers.getDataFixer(),
+                data.getCompoundOrEmpty("WorldGenSettings"), data.getIntOr("DataVersion", 0));
+        String json = data.getCompoundOrEmpty("WorldGenSettings").getCompoundOrEmpty("dimensions").getCompoundOrEmpty("minecraft:overworld")
+                .getCompoundOrEmpty("generator").getCompoundOrEmpty("biome_source").getStringOr("settings", "");
+        net.minecraft.world.level.levelgen.WorldGenSettings settings = net.minecraft.world.level.levelgen.WorldGenSettings.CODEC
+                .parse(RegistryOps.create(net.minecraft.nbt.NbtOps.INSTANCE, access), MtmGenerators.rebuildStoredGenerator(stored, access))
+                .getOrThrow(message -> new IllegalStateException("Cannot read the 1.20.1 settings: " + message));
+        long seed = settings.options().seed();
+        if (seed != 20261105L) {
+            fail(helper, "Seed " + seed + " instead of the stored one");
+        }
+        TerrainLogic logic = MtmGenerators.terrainLogic(MtmGenerators.randomState(access, settings.dimensions().overworld(), seed));
+        if (logic == null) {
+            fail(helper, "The stored generator was not read as an MTM generator");
+        }
+        WorldgenSettings locked = WorldgenSettings.fromJson(json);
+        TerrainLogic expected = TerrainLogic.forWorld(seed, locked);
+        for (int i = 0; i < 64; i++) {
+            int x = i * 997 - 30000;
+            int z = i * 613 - 20000;
+            if (logic.surfaceHeight(x, z) != expected.surfaceHeight(x, z)) {
+                fail(helper, "Surface at " + x + "," + z + " differs from the locked settings");
+            }
+        }
+        DimensionType type = settings.dimensions().get(LevelStem.OVERWORLD).orElseThrow().type().value();
+        if (type.height() != locked.buildHeight()) {
+            fail(helper, "Dimension type height " + type.height() + " instead of " + locked.buildHeight());
+        }
+        helper.succeed();
+    }
+
     /** The world preset is a placeholder until the config applies; both world creation paths go through this. */
     public static void worldPresetBuildsMtmWorld(GameTestHelper helper) {
         RegistryAccess access = helper.getLevel().registryAccess();
@@ -354,10 +398,12 @@ public final class MtmGameTests {
         registrar.accept("biomes_follow_terrain", MtmGameTests::biomesFollowTerrain);
         registrar.accept("generator_is_recognized_after_save_and_load", MtmGameTests::generatorIsRecognizedAfterSaveAndLoad);
         registrar.accept("world_preset_builds_mtm_world", MtmGameTests::worldPresetBuildsMtmWorld);
+        registrar.accept("worlds_from_older_versions_keep_their_terrain", MtmGameTests::worldsFromOlderVersionsKeepTheirTerrain);
         registrar.accept("filled_chunks_match_columns", MtmGameTests::filledChunksMatchColumns);
         registrar.accept("report_generation_benchmark", MtmGameTests::reportGenerationBenchmark);
         registrar.accept("foreign_flat_chunk_is_fitted", MtmGameTests::foreignFlatChunkIsFitted);
         registrar.accept("foreign_chunks_are_told_by_their_tags", MtmGameTests::foreignChunksAreToldByTheirTags);
+        registrar.accept("chunks_of_older_versions_are_found_again", MtmGameTests::chunksOfOlderVersionsAreFoundAgain);
         registrar.accept("foreign_chunk_is_filled_without_the_server_thread", MtmGameTests::foreignChunkIsFilledWithoutTheServerThread);
         registrar.accept("cleared_foreign_chunks_leave_the_snapshot", MtmGameTests::clearedForeignChunksLeaveTheSnapshot);
         registrar.accept("ores_can_be_turned_off", MtmGameTests::oresCanBeTurnedOff);
@@ -508,6 +554,48 @@ public final class MtmGameTests {
             CompoundTag merged = readChunk(level, regions, pos);
             assertTrue(merged.getLongOr(ForeignChunks.FITTED_TAG, 0L) == logic.worldId(), "new map at a fitted place not fitted");
             assertTrue(logic.foreign().chunk(pos.x(), pos.z()).ground()[0] == before, "new map not in the snapshot");
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            TerrainLogic.forget(seed, SETTINGS);
+        }
+        helper.succeed();
+    }
+
+    /**
+     * After an update of the terrain algorithm, chunks the world made before are found although their files have not
+     * changed since the snapshot was taken: a snapshot of an older algorithm has all files read again.
+     */
+    public static void chunksOfOlderVersionsAreFoundAgain(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        long seed = SEED + 3;
+        TerrainLogic logic = TerrainLogic.forWorld(seed, SETTINGS);
+        ChunkPos pos = ChunkPos.containing(helper.absolutePos(BlockPos.ZERO));
+        try {
+            Path root = Files.createTempDirectory("mtm_upgrade");
+            Path regions = root.resolve("region");
+            Files.createDirectories(regions);
+            CompoundTag own = SerializableChunkData.copyOf(level, level.getChunk(pos.x(), pos.z())).write();
+            own.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION - 1);
+            own.putLong(ForeignChunks.WORLD_TAG, logic.worldId());
+            writeChunk(level, regions, pos, own);
+            // The snapshot an older version took of this file, back when the chunk was its own
+            Path file = regions.resolve("r." + Math.floorDiv(pos.x(), 32) + "." + Math.floorDiv(pos.z(), 32) + ".mca");
+            CompoundTag files = new CompoundTag();
+            files.putLongArray(file.getFileName().toString(), new long[]{Files.getLastModifiedTime(file).toMillis(), Files.size(file)});
+            CompoundTag snapshot = new CompoundTag();
+            snapshot.putInt("format", 1);
+            snapshot.putInt("algorithm", TerrainLogic.ALGORITHM_VERSION - 1);
+            snapshot.put("chunks", new ListTag());
+            snapshot.put("files", files);
+            Path snapshotFile = root.resolve(MtmWorldgen.MOD_ID).resolve("legacy.dat");
+            Files.createDirectories(snapshotFile.getParent());
+            net.minecraft.nbt.NbtIo.writeCompressed(snapshot, snapshotFile);
+            ForeignChunks.run(level, logic, root, level.getChunkSource().getGenerator(), level.getChunkSource().randomState());
+            ForeignMap.Chunk found = logic.foreign().chunk(pos.x(), pos.z());
+            assertTrue(found != null && found.upgraded(), "chunk of the older version not found");
+            CompoundTag kept = readChunk(level, regions, pos);
+            assertTrue(!kept.contains(ForeignChunks.FITTED_TAG), "chunk of the older version fitted like a foreign one");
         } catch (IOException e) {
             throw new IllegalStateException(e);
         } finally {

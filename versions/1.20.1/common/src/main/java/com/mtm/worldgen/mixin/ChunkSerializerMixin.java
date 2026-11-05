@@ -1,5 +1,6 @@
 package com.mtm.worldgen.mixin;
 
+import com.mtm.worldgen.logic.ForeignMap;
 import com.mtm.worldgen.logic.TerrainLogic;
 import com.mtm.worldgen.world.ForeignChunks;
 import com.mtm.worldgen.world.MtmGenerators;
@@ -23,7 +24,12 @@ abstract class ChunkSerializerMixin {
             return;
         }
         CompoundTag tag = cir.getReturnValue();
-        if (logic.foreign().contains(chunk.getPos().x, chunk.getPos().z)) {
+        ForeignMap.Chunk foreign = logic.foreign().chunk(chunk.getPos().x, chunk.getPos().z);
+        if (foreign != null && foreign.upgraded()) {
+            // Still this world's own, from an older version: it stays one when saved again
+            tag.putInt(ForeignChunks.VERSION_TAG, ForeignChunks.OLDER_VERSION);
+            tag.putLong(ForeignChunks.WORLD_TAG, logic.worldId());
+        } else if (foreign != null) {
             tag.putLong(ForeignChunks.FITTED_TAG, logic.worldId());
         } else {
             tag.putInt(ForeignChunks.VERSION_TAG, TerrainLogic.ALGORITHM_VERSION);

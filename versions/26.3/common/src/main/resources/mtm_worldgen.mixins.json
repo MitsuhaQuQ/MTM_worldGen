@@ -8,6 +8,7 @@
     "BlenderMixin",
     "ChunkGeneratorMixin",
     "HeightRangePlacementMixin",
+    "LevelStorageSourceMixin",
     "MinecraftServerMixin",
     "NoiseBasedChunkGeneratorMixin",
     "NoiseFillAccess",
