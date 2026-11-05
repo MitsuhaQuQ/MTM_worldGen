@@ -81,6 +81,7 @@ Support classes:
 | Class | What it does |
 |---|---|
 | `WorldgenSettings` | Every setting, grouped as in the config file; JSON in and out, validation, `resolved()` for `logicRange` |
+| `WaterSurface` | Water-column outlines shared by every version; reads a full two-column neighborhood so cleaned chunk borders agree, and preserves the levels used to carve the terrain |
 | `LogicRegion` | Coarse fields of one region (continent height, coast distance) on the 64 block grid |
 | `RegionCache` | LRU cache of computed regions: computes each region once, lets threads read without locks, and can hold regions in use |
 | `LogicThreads` | Small fork-join pool for the expensive steps, safe because they are pure functions |
@@ -138,7 +139,7 @@ classDiagram
     }
     class RiverRegion {
         +nearest(x, z) Hit
-        +lowered(ground, lake) RiverRegion
+        +lowered(ground, lake, oxbowBanks) RiverRegion
     }
     class ErosionStore
     class ClimateLayer
@@ -162,7 +163,7 @@ classDiagram
     TerrainLogic *-- OverhangLayer
     TerrainLogic *-- SeaStackLayer
     TerrainLogic o-- ForeignMap
-    TerrainLogic *-- "6" RegionCache : region caches
+    TerrainLogic *-- "7" RegionCache : region caches
     RegionCache ..> FlowLayer : computes with
     RegionCache ..> LakeLayer : computes with
     RegionCache ..> RiverLayer : computes with
@@ -184,6 +185,7 @@ flowchart TD
     RR["RiverRegion<br/>with foreign chunks cutting rivers off"]
     ER["Eroded region<br/>erosion on a 16 block grid<br/>window: region ± erosion.margin"]
     FT["fitted RiverRegion<br/>water lowered onto eroded ground,<br/>held up to lakes"]
+    VF["first fitting pass<br/>wide river valleys for tributaries"]
     DISK[("ErosionStore<br/>disk cache")]
     LR --> FR
     FR --> LK
@@ -194,6 +196,10 @@ flowchart TD
     LR --> ER
     ER -. read and write .-> DISK
     RR --> FT
+    RR --> VF
+    ER --> VF
+    LK --> VF
+    VF --> FT
     ER --> FT
     LK --> FT
 ```
@@ -247,6 +253,8 @@ flowchart TD
 ```
 
 In code this is `sampleSurfaceHeight`, which calls `sampleShapedLand` (creeks), `sampleCarvedLand` (skeleton, erosion and `carve`), and wraps them with sea stacks, sinkholes and foreign blending. Blocks above the height map, such as overhangs and sinkhole chambers, come from `solidHeight`, which density asks for. Results are memoized per column and thread (`ColumnCache`), because one column is asked many times.
+
+River fitting has an independent first pass on eroded ground. The final pass uses the valleys of wider rivers from that first pass when lowering small tributaries; it never reads its own final result. Oxbow levels are fitted lazily to the carved terrain along both banks of their crescent, before any oxbow excavation. Those bank queries use final rivers but never query oxbows, so the dependency remains acyclic. Every region holding the same oxbow samples the same global positions and obtains the same flat level.
 
 ## Connecting to Minecraft (`versions/<mc>/common`)
 

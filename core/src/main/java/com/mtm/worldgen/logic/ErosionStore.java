@@ -30,7 +30,7 @@ import java.util.zip.InflaterInputStream;
 final class ErosionStore {
     private static final int MAGIC = 0x4D544D45;
     /** Bump when the file layout or the erosion algorithm changes. */
-    private static final int FORMAT = 5;
+    private static final int FORMAT = 6;
 
     private final Path directory;
     private final long key;

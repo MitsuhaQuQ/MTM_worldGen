@@ -95,13 +95,13 @@ public final class MtmGameTests {
      * whenever terrain generation changes on purpose: update it then in every version's tests, together with
      * LogicRegion.ALGORITHM_VERSION if saved worlds are affected.
      */
-    private static final long EXPECTED_COLUMN_HASH = 0xd51e25e379d7fa56L;
+    private static final long EXPECTED_COLUMN_HASH = 0xdff764751e38eb50L;
     /**
      * The same hash for a world without caves, which leaves out vanilla's cave noise and so holds where Minecraft does
      * not run as Mojang built it: NeoForge's development environment recompiles it from decompiled sources, and floats
      * in vanilla's cave noise come out a bit apart, which moves a few cave walls by a block.
      */
-    private static final long EXPECTED_SOLID_COLUMN_HASH = 0x072ebb2d2dbe9343L;
+    private static final long EXPECTED_SOLID_COLUMN_HASH = 0x1207f9bed21f843dL;
     /** Settings of {@link #EXPECTED_SOLID_COLUMN_HASH}. */
     private static final WorldgenSettings SOLID_SETTINGS = WorldgenSettings.fromJson("{\"general\": {\"caves\": false}}");
 
@@ -139,12 +139,14 @@ public final class MtmGameTests {
     public void columnsMatchExpectedHash(GameTestHelper helper) {
         TerrainLogic.forget(SEED, SETTINGS);
         long solid = hashColumns(world(helper, SOLID_SETTINGS), samplePoints());
+        TerrainLogic.forget(SEED, SETTINGS);
+        long actual = hashColumns(world(helper), samplePoints());
+        MtmWorldgen.LOGGER.info("Column hashes: solid 0x{}, caves 0x{}", Long.toHexString(solid), Long.toHexString(actual));
         if (solid != EXPECTED_SOLID_COLUMN_HASH) {
             helper.fail("Column hash without caves 0x" + Long.toHexString(solid) + " != expected 0x"
                     + Long.toHexString(EXPECTED_SOLID_COLUMN_HASH) + " (terrain changed, or loaders disagree)");
         }
-        TerrainLogic.forget(SEED, SETTINGS);
-        long actual = hashColumns(world(helper), samplePoints());
+
         if (actual != EXPECTED_COLUMN_HASH) {
             helper.fail("Column hash 0x" + Long.toHexString(actual) + " != expected 0x"
                     + Long.toHexString(EXPECTED_COLUMN_HASH) + " (terrain changed, or loaders disagree)");

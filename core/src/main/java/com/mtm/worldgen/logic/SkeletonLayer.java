@@ -188,7 +188,8 @@ final class SkeletonLayer {
         this.plainsLow = zoneStats.quantile(settings.plains.coverage - settings.plains.fade / 2.0);
         this.plainsHigh = zoneStats.quantile(settings.plains.coverage + settings.plains.fade / 2.0);
         this.hillsMiddle = zoneStats.quantile(settings.plains.coverage + 0.5 * (1.0 - settings.plains.coverage - m.zoneCoverage));
-        NoiseStats plateauStats = new NoiseStats(this::plateauValue, STATS_SAMPLES_PER_AXIS, STATS_SPACING * GREAT_STATS_SPREAD);
+        // Plate highlands and belts are slow too; the plateau noise alone, as it was before plates, needs no wider grid
+        NoiseStats plateauStats = new NoiseStats(this::plateauValue, STATS_SAMPLES_PER_AXIS, m.plateTectonics ? STATS_SPACING * GREAT_STATS_SPREAD : STATS_SPACING);
         this.plateauLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.fade / 2.0);
         this.plateauHigh = plateauStats.quantile(1.0 - plateaus.coverage + plateaus.fade / 2.0);
         this.gentleLow = plateauStats.quantile(1.0 - plateaus.coverage - plateaus.gentleFade / 2.0);
@@ -335,6 +336,9 @@ final class SkeletonLayer {
     /** The terrain zone field, lowered toward plains where great plains lie. */
     private double zoneValue(double x, double z) {
         double great = smoothstep(greatLow, greatHigh, greatPlains.sample(x, z));
+        if (!m.plateTectonics) {
+            return zone.sample(x, z) - settings.plains.greatStrength * great;
+        }
         double[] plates = plates(x, z);
         double tectonic = plates[0];
         double belt = tectonic > 0.0 ? m.beltStrength * tectonic : m.riftStrength * tectonic;
@@ -343,6 +347,9 @@ final class SkeletonLayer {
 
     /** The plateau zone field: highland plates, the wide flanks of mountain belts, and noise. */
     private double plateauValue(double x, double z) {
+        if (!m.plateTectonics) {
+            return plateauZone.sample(x, z);
+        }
         double[] plates = plates(x, z);
         return plateaus.zoneNoise * plateauZone.sample(x, z) + plateaus.plateHighland * plates[5] + plateaus.beltShare * Math.max(0.0, plates[6]);
     }
@@ -620,7 +627,7 @@ final class SkeletonLayer {
         double dirX = Math.cos(angle);
         double dirZ = Math.sin(angle);
         // In a belt, ranges run along the plate border, as real ones do along the collision that raised them
-        double[] belt = m.beltAlignment > 0.0 ? plates(site.x, site.z) : null;
+        double[] belt = m.plateTectonics && m.beltAlignment > 0.0 ? plates(site.x, site.z) : null;
         if (belt != null && belt[0] > 0.0) {
             double along = m.beltAlignment * belt[3] * Math.min(1.0, belt[0] / BELT_FULL);
             double sign = belt[1] * dirX + belt[2] * dirZ >= 0.0 ? 1.0 : -1.0;
@@ -687,7 +694,7 @@ final class SkeletonLayer {
     /** How igneous a position is: 0 for smooth wind-worn ranges, 1 for steep igneous ones, blending between them. */
     private double style(double x, double z) {
         // Belts are young mountains, still steep and sharp; old ranges away from plate borders have worn down
-        double young = m.beltIgneous > 0.0 ? m.beltIgneous * Math.max(0.0, convergence(x, z)) : 0.0;
+        double young = m.plateTectonics && m.beltIgneous > 0.0 ? m.beltIgneous * Math.max(0.0, convergence(x, z)) : 0.0;
         return smoothstep(-STYLE_RANGE, STYLE_RANGE, style.sample(x, z) + young);
     }
 

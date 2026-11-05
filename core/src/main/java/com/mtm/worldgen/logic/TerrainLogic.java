@@ -21,7 +21,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 15;
+    public static final int ALGORITHM_VERSION = 16;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -99,6 +99,8 @@ public final class TerrainLogic {
     private final RegionCache<RiverRegion> naturalRiverRegions;
     /** Rivers with their water lowered onto the ground erosion left, where it lies lower than they were routed. */
     private final RegionCache<RiverRegion> fittedRiverRegions;
+    /** First fitting pass, used only for the valleys of wider rivers when fitting small tributaries. */
+    private final RegionCache<RiverRegion> valleyRiverRegions;
     private final ErosionLayer erosion;
     private final ThreadLocal<LogicRegion> lastRegion = new ThreadLocal<>();
     private final ThreadLocal<FlowRegion> lastFlow = new ThreadLocal<>();
@@ -150,6 +152,8 @@ public final class TerrainLogic {
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
         RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false);
         this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize);
+        this.valleyRiverRegions = new RegionCache<>((x, z) -> riverRegion(x, z).lowered(
+                this::riverGround, this::sampleLakeLevel, null), settings.general.regionCacheSize);
         this.fittedRiverRegions = new RegionCache<>(this::fitRivers, settings.general.regionCacheSize);
         this.erosion = new ErosionLayer(seed, settings, new ErosionLayer.HeightSampler() {
             @Override
@@ -301,7 +305,7 @@ public final class TerrainLogic {
         int regionZ = (int) Math.floorDiv((long) Math.floor(z), size);
         RiverRegion rivers = lastRivers.get();
         if (rivers == null || rivers.regionX() != regionX || rivers.regionZ() != regionZ) {
-            rivers = settings.erosion.enabled ? fittedRiverRegions.get(regionX, regionZ) : riverRegion(regionX, regionZ);
+            rivers = fittedRiverRegions.get(regionX, regionZ);
             lastRivers.set(rivers);
         }
         return rivers;
@@ -314,17 +318,34 @@ public final class TerrainLogic {
      * level, at the lowest ground under either end. Each point's level depends on that point alone, so neighboring regions agree.
      */
     private RiverRegion fitRivers(int regionX, int regionZ) {
-        // Lakes keep the rivers through them at their own level: their beds lie below it, and a river lowered onto the
-        // bed would run under the lake, which then leaves no channel for it and walls it in at the shore. Nor do they
-        // stay above it: a river skirting a lake on higher ground dropped into it and came out again four blocks up
+        if (!settings.erosion.enabled) {
+            return riverRegion(regionX, regionZ).withOxbowBanks(this::sampleOxbowBank);
+        }
         return riverRegion(regionX, regionZ).lowered((x, z) -> {
-            double[] lake = sampleLake(x, z);
-            if (lake != null && lake[0] > LAKE_EDGE) {
-                return lake[1];
+            double land = riverGround(x, z);
+            RiverRegion.Hit natural = naturalRiver(x, z);
+            if (natural != null && natural.width() < settings.rivers.tributaryWidth) {
+                int size = settings.general.regionSize;
+                RiverRegion wider = valleyRiverRegions.get((int) Math.floor(x / size), (int) Math.floor(z / size));
+                RiverRegion.Hit valley = wider.nearest(x, z, settings.rivers.tributaryWidth);
+                if (valley != null) {
+                    // Fit onto the valley that already exists, not the original hillside above it. Otherwise a
+                    // tributary's pools and banks hold up the side of a lower trunk or lake as a broad terrace.
+                    land = Math.min(land, Math.max(valley.level(), carveValley(x, z, valley, land)));
+                }
             }
-            double land = sampleLandform(x, z);
-            return lake == null ? land : Math.max(land, lake[1]);
-        }, this::sampleLakeLevel);
+            return land;
+        }, this::sampleLakeLevel, this::sampleOxbowBank);
+    }
+
+    /** Ground used by the independent first fitting pass; lakes hold rivers at their surface rather than their bed. */
+    private double riverGround(double x, double z) {
+        double[] lake = sampleLake(x, z);
+        if (lake != null && lake[0] > LAKE_EDGE) {
+            return lake[1];
+        }
+        double land = sampleLandform(x, z);
+        return lake == null ? land : Math.max(land, lake[1]);
     }
 
     /** Coarse surface height at a cell center, by global cell index. */
@@ -371,6 +392,7 @@ public final class TerrainLogic {
         foreign = map;
         riverRegions.clear();
         fittedRiverRegions.clear();
+        valleyRiverRegions.clear();
     }
 
     public ForeignMap foreign() {
@@ -963,7 +985,9 @@ public final class TerrainLogic {
         land = fanned(x, z, river, land);
         double[] oxbow = oxbowAt(x, z, river);
         if (oxbow != null) {
-            land = Math.min(land, oxbow[0] - settings.rivers.oxbowDepth * oxbow[1]);
+            // A lowered pond must not cut a vertical step around its entire footprint. The excavation fades into
+            // the existing bank; water only occupies the part of this hollow that really lies below its flat level.
+            land = Math.min(land, land + (oxbow[0] - settings.rivers.oxbowDepth - land) * oxbow[1]);
         }
         double[] lake = sampleLake(x, z);
         if (lake == null) {
@@ -1033,6 +1057,16 @@ public final class TerrainLogic {
             return null;
         }
         return riversAt(x, z).oxbow(x, z);
+    }
+
+    /** Ground containing an oxbow, without its excavation. This never queries oxbows, so fitted levels stay acyclic. */
+    private double sampleOxbowBank(double x, double z) {
+        RiverRegion.Hit river = sampleRiver(x, z);
+        if (river == null || river.distance() < river.halfWidth(settings.rivers.minChannelWidth) + 0.5 * settings.rivers.oxbowGap) {
+            return Double.NaN;
+        }
+        double ground = sampleLandform(x, z) + cliffHeight(x, z);
+        return barred(x, z, river, duned(x, z, river, carveValley(x, z, river, ground)));
     }
 
     /**
@@ -1347,7 +1381,7 @@ public final class TerrainLogic {
             return river.level();
         }
         double[] oxbow = oxbowAt(x, z, river);
-        if (oxbow != null) {
+        if (oxbow != null && sampleSurfaceHeight(x, z) < oxbow[0]) {
             return oxbow[0];
         }
         DesertLayer.Site oasis = deserts.oasis(x, z);

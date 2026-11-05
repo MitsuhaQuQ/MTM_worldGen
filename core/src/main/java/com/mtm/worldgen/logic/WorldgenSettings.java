@@ -264,6 +264,12 @@ public final class WorldgenSettings {
         /** Wavelength of the tier field that divides land into plains, hills and mountains. */
         public double zoneWavelength = 11264.0;
         /**
+         * Whether plate tectonics lay out the land, as described below. Off, the tier field and the plateau zones are
+         * noise alone, as before plates came in: the mountains, plains and plateaus of a seed come back where they were
+         * then, in smaller patches, and the belt, plate and plateau settings below have no effect.
+         */
+        public boolean plateTectonics = true;
+        /**
          * Plate tectonics: every plate drifts its own way. Where two plates move together, the tier field rises along
          * their border into a mountain belt by up to beltStrength (the tier noise spans about -1 to 1); where they move
          * apart, it sinks toward plains by up to riftStrength. Belts reach beltWidth blocks to either side of the border.

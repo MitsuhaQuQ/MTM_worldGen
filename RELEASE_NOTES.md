@@ -6,8 +6,13 @@ The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so e
 
 ### Terrain
 
+- Erosion creeks continue into both rivers and lakes until the receiving water takes over, including mouths whose routing cells still lie on a dry bank
+- A wide river keeps its own fitted water level beside a higher creek. Small tributaries fit onto the valleys already cut by wider rivers, instead of staying on the original hillside and holding up a broad terrace along a lower lake
+- Water placement keeps the levels used to carve the terrain. The former per-chunk smoothing could lower one side of a chunk boundary by over twenty blocks while leaving the other side high, exposing water walls and dry beds. Water outlines now use the same neighborhood on both sides of every chunk boundary, and interpolation repairs no longer build tall stone walls beside falls
+- Oxbow lakes keep one level fitted to their carved banks. They previously retained their river's original routing level after the river and floodplain were lowered, leaving water several blocks above the shallow rim
 - Plate tectonics now lay out the land. Every plate drifts its own way: where two plates move together, a mountain belt rises along their border, with ranges running along it; where they move apart, the land sinks into plains and basins. Each plate is lowland or upland country as a whole, and some are highland plates whose plateaus stay in one piece, with more plateaus flanking the belts. Plains, hills, plateaus and mountains each spread over areas tens of kilometres across instead of patches of noise. All worlds change
 - Belt mountains are young and steep, in the igneous style; ranges away from plate borders are older and worn down
+- `mountains.plateTectonics` switches plate tectonics off for new worlds, bringing back the earlier layout of plains, hills, mountains and plateaus from noise alone. The other terrain fixes stay on
 - Plateaus no longer end in a wall a hundred blocks high where they come near a wide river valley
 - Land around inland lakes is no longer cut flat along straight lines meeting at right angles, which left walls tens of blocks high where higher ground such as a sea cliff came near one
 - Creeks run on into the lakes they reach, instead of ending behind the dry rim along the shore
@@ -15,10 +20,11 @@ The mod is now called Realistic Landforms. Its mod id stays `mtm_worldgen`, so e
 - Trunk rivers widen with their catchment, from 100 blocks up to the 200 of major trunks, instead of keeping one width until they become a major trunk
 - Rivers no longer meet a lake a step below its surface. Where eroded ground near the shore lies below the lake, the river used to be fitted onto it, and the lake stood up to four blocks above the river at its mouth. Rivers are now held at the lake's level for the last nodes before it (`rivers.lakeBackwater`, 5 by default)
 - A river passing through a lake takes the lake's level, instead of staying above it on higher ground and dropping into the lake and out again
-- Terrain changes near lakes, so chunks generated after the update can meet older ones with a seam there
+- Terrain changes along rivers and near lakes, so chunks generated after the update can meet older ones with a seam there
 
 ### Development
 
+- Regression tests cover the erosion creek and raised lake shore from seed `7701471443861534004`, the water level of a wide channel beside a high stream, and agreement between overlapping water-placement windows including their border columns
 - A new unit test follows rivers into lakes along their actual courses and checks that the water stays continuous and never climbs on the way in
 
 ## v0.6.0

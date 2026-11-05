@@ -11,8 +11,9 @@ import java.util.function.DoubleBinaryOperator;
 public final class RiverRegion {
     /**
      * Rivers around a position. Distance, width and depth are those of the river whose channel the position is
-     * deepest in. The water level is a blend of all rivers in reach, weighted by closeness, so it does not jump
-     * between two rivers. Land must stay between low and high, the valley walls of all rivers in reach, and keeps
+     * deepest in. Inside a channel the water level is that channel's fitted level. Outside, levels blend by closeness.
+     * A higher creek cannot raise a lower river's channel above its fitted level. Land must stay
+     * between low and high, the valley walls of all rivers in reach, and keeps
      * this share of its ridge texture. Run is the distance from the nearest valley floor,
      * and floodplain how strongly the plain of a river in reach claims the land, from 0 to 1. Sand run is the distance
      * from the water of a river mouth or delta that leaves sand along its banks, infinite if there is none in reach.
@@ -98,6 +99,9 @@ public final class RiverRegion {
     private final AtomicLongArray grounded;
     /** Lake surface at a position, or NaN outside lakes; null when levels stay as routed. */
     private final DoubleBinaryOperator lake;
+    /** Terrain along an oxbow's banks after river valleys have been carved, without the oxbow itself. */
+    private final DoubleBinaryOperator oxbowBanks;
+    private final AtomicLongArray oxbowLevels;
     /** The segment below each one, or -1 where the river ends or leaves this region's segments; null when not lowered. */
     private final int[] downstream;
     /** Surface of the lake each segment runs into a bounded way downstream, as raw long bits, NaN until first needed. */
@@ -120,17 +124,22 @@ public final class RiverRegion {
      */
     RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
                 double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan) {
-        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan, null, null);
+        this(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan, null, null, null);
     }
 
     private RiverRegion(int originX, int originZ, int bucketSize, int buckets, WorldgenSettings.Rivers config, double fadeBase, double fadePerWidth,
                         double[] segments, byte[] classes, int[] upstream, int[][] index, double[] fans, double[] oxbows, double oxbowSpan,
-                        DoubleBinaryOperator ground, DoubleBinaryOperator lake) {
+                        DoubleBinaryOperator ground, DoubleBinaryOperator lake, DoubleBinaryOperator oxbowBanks) {
         this.fans = fans;
         this.oxbows = oxbows;
         this.oxbowSpan = oxbowSpan;
         this.ground = ground;
         this.lake = lake;
+        this.oxbowBanks = oxbowBanks;
+        this.oxbowLevels = new AtomicLongArray(oxbows.length / OXBOW_STRIDE);
+        for (int i = 0; i < oxbowLevels.length(); i++) {
+            oxbowLevels.set(i, NAN_BITS);
+        }
         this.lowered = ground == null ? null : new AtomicLongArray(2 * classes.length);
         this.grounded = ground == null ? null : new AtomicLongArray(2 * classes.length);
         this.floors = ground == null ? null : new AtomicLongArray(classes.length);
@@ -160,6 +169,11 @@ public final class RiverRegion {
 
     /** Nearest river within the index reach of a position inside the region, or null if there is none. */
     public Hit nearest(double x, double z) {
+        return nearest(x, z, 0.0);
+    }
+
+    /** Wider rivers alone, for fitting small tributaries onto the valleys those rivers have already cut. */
+    Hit nearest(double x, double z, double minimumWidth) {
         int bucketX = Math.max(0, Math.min(buckets - 1, (int) Math.floor((x - originX) / bucketSize)));
         int bucketZ = Math.max(0, Math.min(buckets - 1, (int) Math.floor((z - originZ) / bucketSize)));
         double best = Double.MAX_VALUE;
@@ -193,6 +207,9 @@ public final class RiverRegion {
             }
             double distance = Math.sqrt(squared);
             double width = segments[s + 4] + t * (segments[s + 5] - segments[s + 4]);
+            if (width < minimumWidth) {
+                continue;
+            }
             double start = level(segment, 0);
             double level = start + t * (level(segment, 1) - start);
             // Everything a river does grows with it from its source, so nothing jumps where it begins
@@ -234,7 +251,8 @@ public final class RiverRegion {
             // of a steep stream held up a dome tens of blocks above the slope beside them. Past its ends a pool holds
             // nothing up: the pools before and after it hold their own stretch, and below its end the stream falls
             double past = (classes[segment] & POOL) != 0 ? Math.max(0.0, Math.max(-along, along - 1.0)) * Math.sqrt(dx * dx + dz * dz) : 0.0;
-            double bankWall = Math.max(0.0, distance - half) * config.valleyWallMaxGrade + past * POOL_END_GRADE;
+            double bankRun = Math.max(0.0, distance - half);
+            double bankWall = bankRun * config.valleyWallMaxGrade + past * POOL_END_GRADE;
             low = Math.max(low, level + config.bankHeight - bankWall);
             double giving = Math.max(0.0, distance - (1.0 - REACH_FADE) * reach) * REACH_WALL_GRADE;
             high = Math.min(high, level + config.bankHeight + wall + giving);
@@ -260,7 +278,11 @@ public final class RiverRegion {
         if (bestDistance - bestHalf <= -config.barShallow) {
             bar = 0.0;
         }
-        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, weightSum > 0.0 ? levelSum / weightSum : bestLevel, low, high, texture, nearestRun, floodplain, sandRun, bestStrength, bar, coarse);
+        // Inside a channel its own water wins. Blending in a higher creek beside a wide river otherwise raises the
+        // wide river above its fitted lake level, even though its centerline was fitted correctly.
+        double blended = weightSum > 0.0 ? levelSum / weightSum : bestLevel;
+        double level = best < 1.0 ? bestLevel : blended;
+        return best == Double.MAX_VALUE ? null : new Hit(bestDistance, bestWidth, bestDepth, level, low, high, texture, nearestRun, floodplain, sandRun, bestStrength, bar, coarse);
     }
 
     /** Height a valley wall gains over a run: gentle at the floor, steepening up to the maximum wall grade. */
@@ -322,9 +344,14 @@ public final class RiverRegion {
      * was lowered onto low ground, such as a lake lower than its routing cells, does not climb back up over the higher
      * ground below it, which would leave it running on a ridge, but cuts through at the level it reached.
      */
-    RiverRegion lowered(DoubleBinaryOperator ground, DoubleBinaryOperator lake) {
+    RiverRegion lowered(DoubleBinaryOperator ground, DoubleBinaryOperator lake, DoubleBinaryOperator oxbowBanks) {
         return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan,
-                ground, lake);
+                ground, lake, oxbowBanks);
+    }
+
+    RiverRegion withOxbowBanks(DoubleBinaryOperator oxbowBanks) {
+        return new RiverRegion(originX, originZ, bucketSize, buckets, config, fadeBase, fadePerWidth, segments, classes, upstream, index, fans, oxbows, oxbowSpan,
+                null, null, oxbowBanks);
     }
 
     /**
@@ -384,10 +411,47 @@ public final class RiverRegion {
             double bent = radius * (1.0 + OXBOW_WOBBLE * Math.sin(2.0 * signed + phase) + 0.5 * OXBOW_WOBBLE * Math.sin(5.0 * signed + 2.0 * phase));
             double across = Math.abs(Math.sqrt(dx * dx + dz * dz) - bent) / (half * taper);
             if (across < 1.0) {
-                return new double[]{oxbows[o + 6], 1.0 - across * across};
+                return new double[]{oxbowLevel(o), 1.0 - across * across};
             }
         }
         return null;
+    }
+
+    /** One flat level for the whole crescent, low enough for its carved floodplain to contain it. */
+    private double oxbowLevel(int offset) {
+        double level = oxbows[offset + 6];
+        if (oxbowBanks == null) {
+            return level;
+        }
+        int index = offset / OXBOW_STRIDE;
+        long bits = oxbowLevels.get(index);
+        if (bits != NAN_BITS) {
+            return Double.longBitsToDouble(bits);
+        }
+        double span = Math.toRadians(oxbowSpan);
+        double phase = oxbows[offset] * PHASE_X + oxbows[offset + 1] * PHASE_Z;
+        double shortArm = span * (1.0 - OXBOW_SKEW * (0.5 + 0.5 * Math.sin(3.0 * phase)));
+        double radius = oxbows[offset + 4];
+        double half = 0.5 * oxbows[offset + 5];
+        int steps = Math.max(8, (int) Math.ceil((span + shortArm) * (radius + half) / 8.0));
+        for (int k = 0; k <= steps; k++) {
+            double angle = -shortArm + (shortArm + span) * k / steps;
+            double arm = angle < 0.0 ? shortArm : span;
+            double taper = Math.sqrt(Math.max(0.0, Math.min(1.0, (arm - Math.abs(angle)) / (OXBOW_TAPER * arm))));
+            double bent = radius * (1.0 + OXBOW_WOBBLE * Math.sin(2.0 * angle + phase)
+                    + 0.5 * OXBOW_WOBBLE * Math.sin(5.0 * angle + 2.0 * phase));
+            double nx = Math.cos(angle) * oxbows[offset + 2] - Math.sin(angle) * oxbows[offset + 3];
+            double nz = Math.cos(angle) * oxbows[offset + 3] + Math.sin(angle) * oxbows[offset + 2];
+            for (int side : new int[]{-1, 1}) {
+                double reach = bent + side * half * taper;
+                double bank = oxbowBanks.applyAsDouble(oxbows[offset] + reach * nx, oxbows[offset + 1] + reach * nz);
+                if (!Double.isNaN(bank)) {
+                    level = Math.min(level, bank - config.bankHeight);
+                }
+            }
+        }
+        oxbowLevels.set(index, Double.doubleToRawLongBits(level));
+        return level;
     }
 
     /**

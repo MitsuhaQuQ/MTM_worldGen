@@ -800,6 +800,32 @@ class TerrainLogicTest {
         return path;
     }
 
+    /** With plate tectonics off the plate settings change nothing, and the layout differs from the one plates give. */
+    @Test
+    void plateTectonicsCanBeSwitchedOff() {
+        WorldgenSettings off = WorldgenSettings.fromJson(SETTINGS.toJson());
+        off.mountains.plateTectonics = false;
+        WorldgenSettings offTuned = WorldgenSettings.fromJson(off.toJson());
+        offTuned.mountains.beltStrength = 0.1;
+        offTuned.mountains.plateRelief = 0.0;
+        offTuned.mountains.zoneNoise = 2.0;
+        offTuned.plateaus.plateChance = 0.9;
+        offTuned.plateaus.beltShare = 3.0;
+        TerrainLogic a = new TerrainLogic(SEED, off);
+        TerrainLogic b = new TerrainLogic(SEED, offTuned);
+        TerrainLogic plates = new TerrainLogic(SEED, SETTINGS);
+        Random random = new Random(23);
+        int differ = 0;
+        for (int i = 0; i < 3000; i++) {
+            double x = random.nextInt(120000) - 60000;
+            double z = random.nextInt(120000) - 60000;
+            assertEquals(a.sampleSmoothLand(x, z), b.sampleSmoothLand(x, z), "plate settings changed the land at " + x + "," + z);
+            assertEquals(a.sampleLandformKind(x, z), b.sampleLandformKind(x, z));
+            differ += a.sampleLandformKind(x, z) != plates.sampleLandformKind(x, z) ? 1 : 0;
+        }
+        assertTrue(differ > 300, "switching plates off changed only " + differ + " of 3000 samples");
+    }
+
     /** Where a river's route ends in the sea, the real surface there must be sea, with nothing closing off the mouth. */
     @Test
     void riversEndInOpenSea() {
