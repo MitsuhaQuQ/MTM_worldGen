@@ -694,9 +694,9 @@ public final class TerrainLogic {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
         double smooth = base + skeletonHeight(x, z, base, texture);
-        double ground = softCap(smooth);
+        double ground = softCap(x, z, base, smooth);
         DesertLayer.Site oasis = deserts.oasis(x, z);
-        double carved = carve(x, z, ground, softCap(smooth + texture[0]), duneHeight(x, z, ground, base, oasis));
+        double carved = carve(x, z, ground, softCap(x, z, base, smooth + texture[0]), duneHeight(x, z, ground, base, oasis));
         return oasis == null ? carved : deserts.pond(oasis, x, z, carved);
     }
 
@@ -705,7 +705,7 @@ public final class TerrainLogic {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
         double smooth = base + skeletonHeight(x, z, base, texture);
-        return carve(x, z, softCap(smooth), softCap(smooth + texture[0]), 0.0);
+        return carve(x, z, softCap(x, z, base, smooth), softCap(x, z, base, smooth + texture[0]), 0.0);
     }
 
     /** Height of the dunes at a position, where they grow in the desert, and none around lakes and oases. */
@@ -983,7 +983,7 @@ public final class TerrainLogic {
     /** The kind of land at a position, without anything rivers do to it: cheap enough to sample a whole map. */
     public Landform sampleLandformKind(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        if (softCap(base + skeletonHeight(x, z, base, null)) < seaSurface()) {
+        if (softCap(x, z, base, base + skeletonHeight(x, z, base, null)) < seaSurface()) {
             return Landform.OCEAN;
         }
         return skeleton.landform(x, z, base - seaSurface());
@@ -992,7 +992,7 @@ public final class TerrainLogic {
     public double sampleLandform(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
-        return softCap(base + skeletonHeight(x, z, base, texture) + texture[0]);
+        return softCap(x, z, base, base + skeletonHeight(x, z, base, texture) + texture[0]);
     }
 
     /**
@@ -1003,13 +1003,13 @@ public final class TerrainLogic {
     public double sampleOverviewHeight(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
         double[] texture = new double[1];
-        return softCap(base + skeletonHeight(x, z, base, texture, false) + texture[0]);
+        return softCap(x, z, base, base + skeletonHeight(x, z, base, texture, false) + texture[0]);
     }
 
     /** Surface height without ridge texture, which is the ground rivers run on. */
     public double sampleSmoothLand(double x, double z) {
         double base = interpolate(FIELD_HEIGHT, x, z);
-        return softCap(base + skeletonHeight(x, z, base, null));
+        return softCap(x, z, base, base + skeletonHeight(x, z, base, null));
     }
 
     /**
@@ -1535,13 +1535,27 @@ public final class TerrainLogic {
      */
     private double sampleDrainageHeight(double x, double z) {
         double base = continents.height(continents.value(x, z));
-        return softCap(base + skeletonHeight(x, z, base, null));
+        return softCap(x, z, base, base + skeletonHeight(x, z, base, null));
     }
 
-    /** Leaves heights below the cap band untouched and approaches the maximum asymptotically above it. */
-    private double softCap(double height) {
-        double band = settings.general.softCapFraction * settings.general.maxSurfaceHeight;
-        double start = settings.general.maxSurfaceHeight - band;
+    /**
+     * Leaves heights below the cap band untouched and approaches the cap asymptotically above it. The cap is the design
+     * height, rising toward the surface maximum with the plateau share, where the mountains standing on plateaus are
+     * the only land that rises above the design height.
+     */
+    private double softCap(double x, double z, double base, double height) {
+        WorldgenSettings.General general = settings.general;
+        double fraction = general.softCapFraction;
+        // Below the band of the design height, no cap reaches
+        if (height <= general.designHeight * (1.0 - fraction)) {
+            return height;
+        }
+        double cap = general.designHeight;
+        if (general.maxSurfaceHeight > general.designHeight) {
+            cap += (general.maxSurfaceHeight - general.designHeight) * skeleton.plateauShareAt(x, z, base - seaSurface());
+        }
+        double band = fraction * cap;
+        double start = cap - band;
         if (height <= start) {
             return height;
         }
@@ -1804,7 +1818,7 @@ public final class TerrainLogic {
      */
     public BlockColumn findNearest(Feature feature, int originX, int originZ, int step, int radius) {
         return switch (feature) {
-            case MOUNTAIN -> findNearestAbove(settings.general.maxSurfaceHeight / 2.0, originX, originZ, step, radius);
+            case MOUNTAIN -> findNearestAbove(settings.general.designHeight / 2.0, originX, originZ, step, radius);
             case PLAINS -> findNearest(originX, originZ, step, radius, (x, z) -> sampleLandformKind(x, z) == Landform.PLAINS);
             case PLATEAU -> findNearest(originX, originZ, step, radius, (x, z) -> sampleLandformKind(x, z) == Landform.PLATEAU);
             // Real ocean, not the coastal shallows a step off the beach

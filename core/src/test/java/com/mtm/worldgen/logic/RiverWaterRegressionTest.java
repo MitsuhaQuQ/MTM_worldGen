@@ -11,6 +11,7 @@ class RiverWaterRegressionTest {
     private static TerrainLogic screenshotWorld() {
         WorldgenSettings settings = WorldgenSettings.fromJson(WorldgenSettings.DEFAULT.toJson());
         settings.general.maxSurfaceHeight = 1024;
+        settings.general.designHeight = 1024;
         settings.rivers.flowLookAhead = 32768;
         return new TerrainLogic(7701471443861534004L, settings);
     }

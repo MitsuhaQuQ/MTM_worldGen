@@ -14,7 +14,7 @@ Formerly MTM Worldgen; the mod id is still `mtm_worldgen`. It adds a new world t
 - **Lakes that fill real basins.** Lake levels are set by where the basin spills, so lakes sit high in the mountains as well as by the sea, with outlets that feed rivers.
 - **Mountains carved by water.** An erosion simulation cuts mountain ranges and hills into branching gullies, ravines and spurs, with creeks running down them. Ranges blend between steep, jagged igneous peaks and broad, rounded worn-down ones.
 - **Landscapes that fit together.** Plains reach mountains through hills, snow lines follow the climate, and vegetation changes with altitude from forest to alpine meadow and snow. Biomes form large patches instead of a mosaic.
-- **Tall worlds.** The surface reaches Y=750 by default, up to 2032 if you configure it, and ores are spread over the taller range.
+- **Tall worlds.** The surface reaches Y=1600 by default, on mountain ranges standing on high plateaus, up to 2032 if you configure it, and ores are spread over the taller range.
 - **Fast and multithreaded.** See [Performance](#performance).
 - **The same world everywhere.** A seed gives exactly the same terrain on Fabric, Forge and NeoForge, on every supported Minecraft version, and in whatever order you explore it.
 
@@ -42,7 +42,7 @@ Most terrain mods build on vanilla's generator as it is, with data packs that re
 
 Realistic Landforms computes terrain as a height map instead. It knows the highest ground in a chunk before filling it, and stops just above it, so the air is never visited. The cost of a chunk follows the height of its ground, not the build limit: a world twice as tall hardly costs more. [How it works](docs/how-it-works.md#why-a-taller-world-costs-vanilla-more) explains this in detail.
 
-| Minecraft | Vanilla, -64 to 320 | Realistic Landforms, -64 to 800 |
+| Minecraft | Vanilla, -64 to 320 | Realistic Landforms, -64 to 1648 |
 |---|---|---|
 | 1.20.1 | about 12 ms per chunk | about 5.6 ms (47%) |
 | 26.3 | about 3.9 ms per chunk | about 3.6 ms (93%) |

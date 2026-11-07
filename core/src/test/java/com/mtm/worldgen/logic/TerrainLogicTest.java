@@ -894,6 +894,40 @@ class TerrainLogicTest {
         return path;
     }
 
+    /**
+     * Land is designed for designHeight, and only ranges on plateaus rise above it toward the surface maximum: away from
+     * them and their feet a world is the same as one whose maximum is the design height. Settings written before designHeight existed
+     * design their land for their maximum, as they did then.
+     */
+    @Test
+    void onlyRangesOnPlateausRiseAboveTheDesignHeight() {
+        WorldgenSettings written = WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": 1024}}");
+        assertEquals(1024, written.general.designHeight);
+        assertEquals(750, WorldgenSettings.fromJson("{\"general\": {\"caves\": false}}").general.designHeight);
+        TerrainLogic designed = new TerrainLogic(SEED, WorldgenSettings.fromJson("{\"general\": {\"maxSurfaceHeight\": "
+                + SETTINGS.general.designHeight + "}}"));
+        int land = 0;
+        int same = 0;
+        int high = 0;
+        for (int x = -60000; x < 60000; x += 600) {
+            for (int z = -60000; z < 60000; z += 600) {
+                double h = SHARED.sampleOverviewHeight(x, z);
+                if (h < SETTINGS.general.seaLevel) {
+                    continue;
+                }
+                land++;
+                double design = designed.sampleOverviewHeight(x, z);
+                same += h == design ? 1 : 0;
+                high += h > 1300 ? 1 : 0;
+                assertTrue(h < SETTINGS.general.maxSurfaceHeight, "land above the maximum at " + x + "," + z);
+            }
+        }
+        // Plateaus hold about a fifth of the land; ranges on them grow wider as they grow taller, and their feet reach a
+        // little past the plateaus
+        assertTrue(same > 0.7 * land, same + " of " + land + " samples as designed");
+        assertTrue(high > 0, "no range rises above 1300");
+    }
+
     /** /mwg locate finds each kind of land within its radius, and what it finds is that kind of land. */
     @Test
     void locateFindsEachKindOfLand() {
@@ -904,7 +938,7 @@ class TerrainLogicTest {
             int x = found.x();
             int z = found.z();
             switch (feature) {
-                case MOUNTAIN -> assertTrue(logic.sampleOverviewHeight(x, z) >= SETTINGS.general.maxSurfaceHeight / 2.0);
+                case MOUNTAIN -> assertTrue(logic.sampleOverviewHeight(x, z) >= SETTINGS.general.designHeight / 2.0);
                 case PLAINS -> assertEquals(TerrainLogic.Landform.PLAINS, logic.sampleLandformKind(x, z));
                 case PLATEAU -> assertEquals(TerrainLogic.Landform.PLATEAU, logic.sampleLandformKind(x, z));
                 case OCEAN -> assertTrue(logic.sampleLandformKind(x, z) == TerrainLogic.Landform.OCEAN && logic.sampleCoastDistance(x, z) < 0.0);

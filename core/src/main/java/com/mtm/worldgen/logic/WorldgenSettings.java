@@ -20,7 +20,7 @@ import java.util.Set;
  * Treat instances as immutable: {@link TerrainLogic} instances are shared by their JSON form.
  *
  * <p>Heights in {@link Mountains}, {@link Plateaus} and {@link Hills} are designed for a 300 block maximum surface
- * and scale with {@link General#maxSurfaceHeight}.
+ * and scale with {@link General#designHeight}.
  */
 public final class WorldgenSettings {
     public static final WorldgenSettings DEFAULT = new WorldgenSettings();
@@ -32,7 +32,17 @@ public final class WorldgenSettings {
         /** Everything that names a Gson type stays in here, or loading the settings would already need the library. */
         static WorldgenSettings read(String json) {
             try {
-                return GSON.fromJson(json, WorldgenSettings.class);
+                JsonElement tree = GSON.fromJson(json, JsonElement.class);
+                if (tree == null || !tree.isJsonObject()) {
+                    return GSON.fromJson(tree, WorldgenSettings.class);
+                }
+                // Settings written before designHeight existed designed all land for the surface maximum
+                JsonElement general = tree.getAsJsonObject().get("general");
+                if (general != null && general.isJsonObject() && general.getAsJsonObject().has("maxSurfaceHeight")
+                        && !general.getAsJsonObject().has("designHeight")) {
+                    general.getAsJsonObject().add("designHeight", general.getAsJsonObject().get("maxSurfaceHeight"));
+                }
+                return GSON.fromJson(tree, WorldgenSettings.class);
             } catch (JsonParseException e) {
                 throw new IllegalArgumentException(e.getMessage(), e);
             }
@@ -175,7 +185,14 @@ public final class WorldgenSettings {
         /** Vanilla sea level field; the top water block sits at seaLevel - 1 (y=62). */
         public int seaLevel = 63;
         /** Highest surface height terrain may reach. The build height of new worlds follows from it. */
-        public int maxSurfaceHeight = 750;
+        public int maxSurfaceHeight = 1600;
+        /**
+         * Height the land is designed for: plains, hills, ordinary mountains, plateaus, snow lines and everything else
+         * measured on the 300 block scale grow with it. Only mountains standing on plateaus rise above it, up to
+         * maxSurfaceHeight, as the highest ranges of the real world stand on its high plateaus. Settings that name a
+         * maxSurfaceHeight but no designHeight, as all did before it existed, design the land for the maximum.
+         */
+        public int designHeight = 750;
         /** Logic region edge length in blocks. */
         public int regionSize = 4096;
         /** Coarse grid cell edge length in blocks; regionSize must be a multiple of it. */
@@ -1297,7 +1314,7 @@ public final class WorldgenSettings {
 
     /** Multiplier for heights designed for a 300 block maximum surface. */
     public double heightScale() {
-        return general.maxSurfaceHeight / 300.0;
+        return general.designHeight / 300.0;
     }
 
     /** Throws IllegalArgumentException naming the first invalid value. */
@@ -1305,6 +1322,8 @@ public final class WorldgenSettings {
         require(general.cellSize > 0 && general.regionSize > 0 && general.regionSize % general.cellSize == 0,
                 "general.regionSize must be a positive multiple of general.cellSize");
         require(general.maxSurfaceHeight > general.seaLevel, "general.maxSurfaceHeight must be above general.seaLevel");
+        require(general.designHeight > general.seaLevel && general.designHeight <= general.maxSurfaceHeight,
+                "general.designHeight must be above general.seaLevel and not above general.maxSurfaceHeight");
         require(general.logicRange >= 1.0 && general.logicRange <= MAX_LOGIC_RANGE,
                 "general.logicRange must lie between 1 and " + MAX_LOGIC_RANGE);
         require(general.maxSurfaceHeight <= MAX_BUILD_TOP,

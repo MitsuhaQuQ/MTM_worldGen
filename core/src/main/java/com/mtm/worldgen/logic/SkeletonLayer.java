@@ -114,10 +114,16 @@ final class SkeletonLayer {
     private final WorldgenSettings.Hills hillSettings;
     /**
      * Heights above (and the hill wavelengths that keep their slopes) are designed for a 300 block maximum
-     * surface and scaled by maxSurfaceHeight / 300, as the design document specifies.
+     * surface and scaled by designHeight / 300, as the design document specifies.
      */
     private final double scale;
     private final double mountainGrade;
+    /**
+     * How much taller than designed ranges on a plateau grow, as a share of their height: enough for the tallest range
+     * to reach from the design height up to the surface maximum. None where the two are the same.
+     */
+    private final double plateauPeakGain;
+    private static final double PLATEAU_PEAK_REACH = 0.8;
     private final double halfHeightU;
     private final double zoneLow;
     private final double zoneHigh;
@@ -173,6 +179,9 @@ final class SkeletonLayer {
         this.cliffWarp = new Fbm(Hashing.derive(seed, CLIFF_SALT + 1), 2, CLIFF_WARP_WAVELENGTH);
         this.peakWarp = new Fbm(Hashing.derive(seed, ISOLATED_SALT + 1), 2, settings.isolated.peakWarpWavelength);
         this.mountainGrade = settings.slopes.mountain / 100.0 * m.profileSlopeShare;
+        // Full strength and a whole plateau beneath come together only rarely, so the gain counts on a range reaching
+        // PLATEAU_PEAK_REACH of the tallest design height
+        this.plateauPeakGain = (settings.general.maxSurfaceHeight - settings.general.designHeight) / (PLATEAU_PEAK_REACH * scale * m.peakMax * m.igneousHeight);
         this.halfHeightU = findHalfHeightU();
 
         WorldgenSettings.Plains plains = settings.plains;
@@ -291,6 +300,11 @@ final class SkeletonLayer {
         double steepness = smoothstep(steepEdge - EDGE_BLEND, steepEdge + EDGE_BLEND, plateauEdge.sample(x, z));
         double weight = smoothstep(mix(gentleLow, plateauLow, steepness), mix(gentleHigh, plateauHigh, steepness), zoneValue);
         return weight <= 0.0 ? 0.0 : weight * smoothstep(0.0, m.coastBand, continents.inlandDistance(baseAboveSea));
+    }
+
+    /** How much a plateau holds a position, from 0 to 1. */
+    double plateauShareAt(double x, double z, double baseAboveSea) {
+        return plateauShare(x, z, baseAboveSea);
     }
 
     /** The kind of land at a position: a plateau wherever one holds it, otherwise the tier it mostly belongs to. */
@@ -611,6 +625,11 @@ final class SkeletonLayer {
         }
         double strength = 0.4 + 0.6 * zoneWeight;
         double height = scale * strength * (m.peakMin + (m.peakMax - m.peakMin) * Hashing.unit(Hashing.derive(hash, 2)));
+        // Ranges standing on plateaus rise above the design height, the tallest of them up to the surface maximum. They
+        // widen with their height, as the slope limit sets their width
+        if (plateauPeakGain > 0.0) {
+            height *= 1.0 + plateauPeakGain * plateauShare(x, z, base);
+        }
         double width = settings.scale.mountains * (m.widthMin + (m.widthMax - m.widthMin) * Hashing.unit(Hashing.derive(hash, 3)));
         double style = style(x, z);
         height *= mix(m.erodedHeight, m.igneousHeight, style);

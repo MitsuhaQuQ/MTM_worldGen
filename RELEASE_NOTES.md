@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Taller mountains on plateaus
+
+- New worlds reach Y=1600 by default instead of 750, with a build height of -64 to 1648. Land is still designed for 750 (`general.designHeight`): plains, hills, ordinary mountains, plateau tables at about Y=375-440, rivers and snow lines are as before. Only mountain ranges standing on plateaus rise above it, the highest to about Y=1550, and grow wider as they grow taller
+- Existing worlds and existing config files keep their height: settings that name `maxSurfaceHeight` without `designHeight` design all land for the maximum, as before
+
 ### Web map
 
 - Servers can show their world as a topographic web map, drawn from the generated chunks: real rivers, lakes and land, without buildings, with hill shading and contour lines. Off by default; turn it on in `config/mtm_worldgen-webmap.json`. `/mwg webmap` shows its address
