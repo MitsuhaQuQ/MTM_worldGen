@@ -950,6 +950,30 @@ class TerrainLogicTest {
         assertTrue(onPlateau > 50, "only " + onPlateau + " river samples on plateaus");
     }
 
+    /**
+     * Past the shelf along the coasts the open ocean deepens: a good part of it lies more than 50 blocks deep, never
+     * down to the bottom of the world. Settings written before keep the shallow ocean they had.
+     */
+    @Test
+    void openOceansAreDeep() {
+        assertEquals(0.0, WorldgenSettings.fromJson(SETTINGS.toJson().replace("\"abyssDepth\"", "\"unknown\"")).continents.abyssDepth);
+        double sea = SETTINGS.general.seaLevel - 1;
+        int ocean = 0;
+        int deep = 0;
+        for (int x = -60000; x < 60000; x += 600) {
+            for (int z = -60000; z < 60000; z += 600) {
+                double floor = SHARED.sampleOverviewHeight(x, z);
+                if (floor >= sea) {
+                    continue;
+                }
+                ocean++;
+                deep += sea - floor > 50.0 ? 1 : 0;
+                assertTrue(floor > SETTINGS.minBuildY() + 8, "sea floor at " + floor + " at " + x + "," + z);
+            }
+        }
+        assertTrue(deep > 0.3 * ocean, deep + " of " + ocean + " ocean samples deeper than 50 blocks");
+    }
+
     /** /mwg locate finds each kind of land within its radius, and what it finds is that kind of land. */
     @Test
     void locateFindsEachKindOfLand() {

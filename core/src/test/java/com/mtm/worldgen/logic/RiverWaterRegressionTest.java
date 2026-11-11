@@ -92,4 +92,45 @@ class RiverWaterRegressionTest {
         assertEquals(100.0, rivers.nearest(0, 80).level(), 1e-9);
         assertEquals(180.0, rivers.nearest(0, 84).level(), 1e-9);
     }
+
+    /**
+     * A creek on a flat coast runs across the beach into the sea (seed 837238560036030884, 2176 -1664): the roughness
+     * erosion starts from put the beach a block or two below the water, the creek ended at that cell, and its water
+     * stopped on the sand tens of blocks short of the shore.
+     */
+    @Test
+    void coastalCreekRunsIntoTheSea() {
+        TerrainLogic logic = TerrainLogic.forWorld(837238560036030884L, WorldgenSettings.DEFAULT);
+        double sea = logic.seaSurface();
+        assertTrue(logic.sampleWaterLevel(2221, -1700) > logic.sampleSurfaceHeight(2221, -1700), "the creek holds water");
+        // Along the creek's water from there, until it meets the sea
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        ArrayDeque<int[]> open = new ArrayDeque<>();
+        open.add(new int[]{2221, -1700});
+        seen.add(key(2221, -1700));
+        boolean reachesSea = false;
+        while (!open.isEmpty() && !reachesSea) {
+            int[] at = open.poll();
+            for (int[] step : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                int x = at[0] + step[0];
+                int z = at[1] + step[1];
+                if (x < 2000 || x > 2300 || z < -1730 || z > -1500 || !seen.add(key(x, z))) {
+                    continue;
+                }
+                double surface = logic.sampleSurfaceHeight(x, z);
+                if (surface < sea - 1.0) {
+                    reachesSea = true;
+                    break;
+                }
+                if (logic.sampleWaterLevel(x, z) > surface) {
+                    open.add(new int[]{x, z});
+                }
+            }
+        }
+        assertTrue(reachesSea, "the creek's water ends before the sea");
+    }
+
+    private static long key(int x, int z) {
+        return ((long) x << 32) ^ (z & 0xFFFFFFFFL);
+    }
 }

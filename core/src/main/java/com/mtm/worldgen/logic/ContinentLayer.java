@@ -252,7 +252,11 @@ final class ContinentLayer {
         if (c >= threshold) {
             return sea + config.landRange * Math.min(1.0, (c - threshold) / (high - threshold));
         }
-        return sea - config.oceanDepth * Math.min(1.0, (threshold - c) / (threshold - low));
+        // Past the shelf the open ocean deepens: offshore distance comes from the value as inland distance does
+        double offshore = (threshold - c) * plateSpacing;
+        double abyss = Math.max(0.0, Math.min(1.0, (offshore - config.shelfWidth) / config.slopeWidth));
+        return sea - config.oceanDepth * Math.min(1.0, (threshold - c) / (threshold - low))
+                - config.abyssDepth * abyss * abyss * (3.0 - 2.0 * abyss);
     }
 
     /**

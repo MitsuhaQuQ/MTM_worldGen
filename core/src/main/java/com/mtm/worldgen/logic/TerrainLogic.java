@@ -22,7 +22,7 @@ public final class TerrainLogic {
     private static final long VALLEY_WALL_SALT = 0x57414C4CL;
     /** Block spacing of the finite difference used for the surface grade. */
     /** Marks the chunks of this version, so that chunks of another one can be told apart after an update. */
-    public static final int ALGORITHM_VERSION = 16;
+    public static final int ALGORITHM_VERSION = 17;
     private static final long WORLD_SALT = 0x574F524C44L;
     private static final double GRADE_STEP = 2.0;
     private static final double[] NO_OVERHANG = new double[0];
@@ -918,7 +918,8 @@ public final class TerrainLogic {
             double across = 0.5 * k * reach;
             level = Math.min(level, sampleCarvedLand(centerX - across * creek.hit.alongZ(), centerZ + across * creek.hit.alongX()));
         }
-        double cut = level - settings.erosion.creekIncision * creek.grown;
+        // Nor below the sea it runs into: on the shore its water meets the sea's
+        double cut = Math.max(level - settings.erosion.creekIncision * creek.grown, Math.min(level, seaSurface()));
         RiverRegion.Hit river = sampleRiver(centerX, centerZ);
         return river != null && river.strength() >= SOURCE_WATER ? Math.max(cut, Math.min(level, river.level())) : cut;
     }

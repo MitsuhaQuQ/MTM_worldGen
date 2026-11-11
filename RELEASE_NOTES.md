@@ -6,6 +6,7 @@
 
 - New worlds reach Y=1600 by default instead of 750, with a build height of -64 to 1648. Land is still designed for 750 (`general.designHeight`): plains, hills, ordinary mountains, plateau tables at about Y=375-440, rivers and snow lines are as before. Only mountain ranges standing on plateaus rise above it, the highest to about Y=1550, and grow wider as they grow taller
 - Rivers on plateaus stay narrow, at most 48 blocks wide (`rivers.plateauMaxWidth`), where the flat table used to spread them to their widest; existing worlds keep their rivers
+- Open oceans are deep: past a shelf of about 400 blocks along the coasts, the sea floor falls to about 100 blocks below the surface (`continents.abyssDepth`), where almost all of the ocean used to be less than 15 blocks deep. Coasts and their shallows stay as they were, and existing worlds keep their oceans
 - Ore attempts high above the ground are skipped, which saves work in a world whose build height reaches far above most land
 - `/mwg debugmap` colors heights up to the design height, so ordinary land no longer looks flat in a 1600 world
 - Existing worlds and existing config files keep their height: settings that name `maxSurfaceHeight` without `designHeight` design all land for the maximum, as before
@@ -17,6 +18,7 @@
 
 ### Fixes
 
+- Creeks on flat coasts run across the beach into the sea instead of ending on the sand tens of blocks short of it
 - On Minecraft 26.x, merged maps and chunks of older versions were not found: 26.x keeps the overworld's region files under `dimensions/minecraft/overworld/region`, and the mod looked for them in `region`
 
 ### Minecraft versions

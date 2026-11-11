@@ -54,6 +54,11 @@ final class ErosionLayer {
     private static final int CURVE_STEPS = 6;
     /** Side creeks no longer than this many cells before they join another are left out. */
     private static final int STUB_CELLS = 2;
+    /**
+     * Blocks a creek runs on into the sea as erosion sees it: as far as a beach reaches that the starting roughness put
+     * below the water. The query ends it where the land really meets the sea.
+     */
+    private static final double SHORE_REACH = 128.0;
 
     private final WorldgenSettings settings;
     private final WorldgenSettings.Erosion config;
@@ -212,6 +217,27 @@ final class ErosionLayer {
         curve[4] = 0.25 * startI + 0.5 * nextI + 0.25 * 0.5 * (nextI + after % size);
         curve[5] = 0.25 * startJ + 0.5 * nextJ + 0.25 * 0.5 * (nextJ + after / size);
         return true;
+    }
+
+    private boolean onEdge(int index) {
+        int col = index % size;
+        int row = index / size;
+        return col == 0 || row == 0 || col == size - 1 || row == size - 1;
+    }
+
+    /** The direction of the neighbor with the lowest land before erosion, without its starting roughness. */
+    private int lowestNeighbor(double[] start, double[] rough, int index) {
+        int best = 0;
+        double lowest = Double.MAX_VALUE;
+        for (int d = 0; d < 8; d++) {
+            int neighbor = index + offset[d];
+            double land = start[neighbor] - config.roughness * rough[neighbor];
+            if (land < lowest) {
+                lowest = land;
+                best = d;
+            }
+        }
+        return best;
     }
 
     /** The neighbor draining into a creek cell that brings it the most water, or -1 where the creek rises. */
@@ -642,25 +668,43 @@ final class ErosionLayer {
         // A fixed cell is a drainage target, not the actual shoreline. Its center can still lie on a dry bank after
         // interpolation and coordinate warping. Continue into both rivers and lakes; the fine terrain query stops
         // the creek where the receiving water really takes over. Include enough cells for the full warp displacement.
+        // The sea is the same: cells of a beach just above the water count as sea with the roughness erosion starts
+        // from, and a creek that stopped there ended on the sand tens of blocks short of the shore
         List<Integer> mouths = new ArrayList<>();
         for (int index = 0; index < n; index++) {
-            if (creek[index] > 0.0F && down[index] >= 0 && fixed[index + offset[down[index]]]) {
-                mouths.add(index);
+            if (creek[index] > 0.0F && down[index] >= 0) {
+                int next = index + offset[down[index]];
+                if (fixed[next] || height[next] < sea) {
+                    mouths.add(index);
+                }
             }
         }
+        int fixedReach = 2 + (int) Math.ceil(2.0 * config.warp / config.cellSize);
+        int shoreReach = fixedReach + (int) Math.ceil(SHORE_REACH / config.cellSize);
         for (int index : mouths) {
             int d = down[index];
             int next = index + offset[d];
-            int reach = 2 + (int) Math.ceil(2.0 * config.warp / config.cellSize);
-            for (int step = 0; step < reach && fixed[next] && creek[next] <= 0.0F; step++) {
-                int col = next % size;
-                int row = next / size;
-                if (col == 0 || row == 0 || col == size - 1 || row == size - 1) {
+            if (fixed[next]) {
+                // On into the river or lake along the way it entered
+                for (int step = 0; step < fixedReach && fixed[next] && creek[next] <= 0.0F && !onEdge(next); step++) {
+                    creek[next] = creek[index];
+                    down[next] = (byte) d;
+                    next += offset[d];
+                }
+                continue;
+            }
+            // On toward the sea down the land as it is, without the roughness that put the beach below the water: the
+            // way it entered can run along the shore instead
+            int at = index;
+            for (int step = 0; step < shoreReach && creek[next] <= 0.0F && !onEdge(next); step++) {
+                creek[next] = creek[index];
+                down[at] = (byte) d;
+                if (start[next] - config.roughness * rough[next] < sea) {
                     break;
                 }
-                creek[next] = creek[index];
-                down[next] = (byte) d;
-                next += offset[d];
+                at = next;
+                d = lowestNeighbor(start, rough, at);
+                next = at + offset[d];
             }
         }
         return new Eroded(change, creek, down);

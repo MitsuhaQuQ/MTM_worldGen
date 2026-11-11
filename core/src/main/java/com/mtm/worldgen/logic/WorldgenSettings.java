@@ -42,6 +42,11 @@ public final class WorldgenSettings {
                 if (general != null && general.has("maxSurfaceHeight") && !general.has("designHeight")) {
                     general.add("designHeight", general.get("maxSurfaceHeight"));
                 }
+                // Settings written before the open ocean deepened kept it as deep as vanilla's
+                JsonObject continents = group(root, "continents");
+                if (continents != null && continents.has("oceanDepth") && !continents.has("abyssDepth")) {
+                    continents.addProperty("abyssDepth", 0.0);
+                }
                 // Settings written before plateaus narrowed their rivers kept them as wide as anywhere
                 JsonObject rivers = group(root, "rivers");
                 if (rivers != null && rivers.has("plainWidthFactor") && !rivers.has("plateauMaxWidth")) {
@@ -281,7 +286,15 @@ public final class WorldgenSettings {
         public double detailAmplitude = 0.06;
         /** Land rises this far above the sea in continent interiors, before the skeleton. */
         public double landRange = 72.0;
+        /**
+         * The sea floor falls slowly from the coast, to oceanDepth below the sea far out. Past a shelf of shelfWidth
+         * blocks off the coast the open ocean deepens by abyssDepth more, over slopeWidth blocks, so coasts and their
+         * shallows stay as they were. An abyssDepth of 0 leaves the ocean as shallow as it used to be.
+         */
         public double oceanDepth = 36.0;
+        public double shelfWidth = 384.0;
+        public double slopeWidth = 1536.0;
+        public double abyssDepth = 66.0;
     }
 
     /**
@@ -1406,6 +1419,9 @@ public final class WorldgenSettings {
                 "river cell thresholds must rise from stream to trunk");
         require(general.softCapFraction > 0.0 && general.softCapFraction < 1.0, "general.softCapFraction must be in (0, 1)");
         require(continents.oceanRatio > 0.0 && continents.oceanRatio < 1.0, "continents.oceanRatio must be in (0, 1)");
+        require(continents.shelfWidth >= 0.0 && continents.slopeWidth > 0.0 && continents.abyssDepth >= 0.0
+                        && general.seaLevel - 1 - continents.oceanDepth - continents.abyssDepth > MIN_Y + 8,
+                "continents.shelfWidth must not be negative, slopeWidth must be positive, and the deepest sea floor above the bottom of the world");
         require(mountains.peakMin > 0.0 && mountains.peakMax >= mountains.peakMin,
                 "mountains.peakMin must be positive and not above mountains.peakMax");
         require(mountains.widthMin > 0.0 && mountains.widthMax >= mountains.widthMin,
