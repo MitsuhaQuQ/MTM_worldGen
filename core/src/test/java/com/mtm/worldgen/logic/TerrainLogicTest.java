@@ -928,6 +928,28 @@ class TerrainLogicTest {
         assertTrue(high > 0, "no range rises above 1300");
     }
 
+    /**
+     * Rivers keep to rivers.plateauMaxWidth wherever the land counts as plateau, up to the flare where a branch meets
+     * the river it leaves. Settings written before the limit existed keep them as wide as anywhere.
+     */
+    @Test
+    void riversOnPlateausStayNarrow() {
+        assertEquals(0.0, WorldgenSettings.fromJson(SETTINGS.toJson().replace("\"plateauMaxWidth\"", "\"unknown\"")).rivers.plateauMaxWidth);
+        double limit = SETTINGS.rivers.plateauMaxWidth * SETTINGS.rivers.mouthFlare + 1e-6;
+        int onPlateau = 0;
+        for (int x = -8000; x < 8000; x += 16) {
+            for (int z = -8000; z < 8000; z += 256) {
+                RiverRegion.Hit river = SHARED.sampleRiver(x, z);
+                if (river == null || river.distance() > 0.5 * river.width() || SHARED.plateauShare(x, z) < 0.5) {
+                    continue;
+                }
+                onPlateau++;
+                assertTrue(river.width() <= limit, "river " + river.width() + " wide on a plateau at " + x + "," + z);
+            }
+        }
+        assertTrue(onPlateau > 50, "only " + onPlateau + " river samples on plateaus");
+    }
+
     /** /mwg locate finds each kind of land within its radius, and what it finds is that kind of land. */
     @Test
     void locateFindsEachKindOfLand() {

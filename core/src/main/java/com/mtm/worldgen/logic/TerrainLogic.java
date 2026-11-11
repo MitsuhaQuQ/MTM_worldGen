@@ -151,9 +151,11 @@ public final class TerrainLogic {
         this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
         LakeLayer lakes = new LakeLayer(settings, this::flowRegion, this::sampleSmoothLand);
         this.lakeRegions = new RegionCache<>(lakes::compute, settings.general.regionCacheSize);
-        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.cuts(x, z));
+        RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.cuts(x, z),
+                this::plateauShare);
         this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
-        RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false);
+        RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false,
+                this::plateauShare);
         this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize);
         this.valleyRiverRegions = new RegionCache<>((x, z) -> riverRegion(x, z).lowered(
                 this::riverGround, this::sampleLakeLevel, null), settings.general.regionCacheSize);
@@ -1560,6 +1562,11 @@ public final class TerrainLogic {
             return height;
         }
         return start + band * (1.0 - Math.exp(-(height - start) / band));
+    }
+
+    /** How much a plateau holds a position, from the continents directly, as drainage reads them. */
+    double plateauShare(double x, double z) {
+        return skeleton.plateauShareAt(x, z, continents.height(continents.value(x, z)) - seaSurface());
     }
 
     /** Estimated distance to the coastline in blocks: positive inland, negative offshore. */

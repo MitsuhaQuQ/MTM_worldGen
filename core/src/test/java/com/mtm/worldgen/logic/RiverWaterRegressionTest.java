@@ -12,6 +12,8 @@ class RiverWaterRegressionTest {
         WorldgenSettings settings = WorldgenSettings.fromJson(WorldgenSettings.DEFAULT.toJson());
         settings.general.maxSurfaceHeight = 1024;
         settings.general.designHeight = 1024;
+        // The world these places come from predates narrow rivers on plateaus
+        settings.rivers.plateauMaxWidth = 0.0;
         settings.rivers.flowLookAhead = 32768;
         return new TerrainLogic(7701471443861534004L, settings);
     }

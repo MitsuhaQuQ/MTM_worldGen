@@ -27,6 +27,8 @@ final class RiverLayer {
     private static final double OXBOW_REACH = 0.3;
     /** Routing cells up and down a river over which the slopes on either side of an alluvial fan are measured. */
     private static final int FAN_STEPS = 2;
+    /** Plateau share from which rivers keep to the plateau width: where the land counts as plateau. */
+    private static final double PLATEAU_FULL_SHARE = 0.5;
 
     interface FlowSource {
         FlowRegion flowRegion(int regionX, int regionZ);
@@ -34,6 +36,11 @@ final class RiverLayer {
 
     interface ShoreTest {
         boolean isRocky(double x, double z);
+    }
+
+    interface PlateauTest {
+        /** How much a plateau holds a position, from 0 to 1. */
+        double share(double x, double z);
     }
 
     interface ForeignTest {
@@ -47,6 +54,7 @@ final class RiverLayer {
     private final FlowLayer.HeightSampler landform;
     private final ShoreTest shore;
     private final ForeignTest foreign;
+    private final PlateauTest plateau;
     private final long deltaSeed;
     private final long nodeSeed;
     private final long meanderSeed;
@@ -60,13 +68,15 @@ final class RiverLayer {
     /** A bend whose radius is this share of the river's width turns fully toward its bar. */
     private static final double BEND_WIDTHS = 0.5;
 
-    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore, ForeignTest foreign) {
+    RiverLayer(long seed, WorldgenSettings settings, FlowSource flows, FlowLayer.HeightSampler landform, ShoreTest shore, ForeignTest foreign,
+               PlateauTest plateau) {
         this.settings = settings;
         this.config = settings.rivers;
         this.flows = flows;
         this.landform = landform;
         this.shore = shore;
         this.foreign = foreign;
+        this.plateau = plateau;
         this.deltaSeed = Hashing.derive(seed, DELTA_SALT);
         this.nodeSeed = nodeSeed(seed);
         this.meanderSeed = Hashing.derive(seed, MEANDER_SALT);
@@ -663,6 +673,12 @@ final class RiverLayer {
         double[] position = node(cellX, cellZ);
         double variation = Math.max(-1.0, Math.min(1.0, 2.0 * widthNoise.sample(position[0], position[1])));
         double base = spread * width * (1.0 + config.widthVariation * variation);
+        // Rivers on plateaus stay narrow: the table is flat, where rivers would otherwise spread to their widest. They are
+        // narrow wherever the land counts as plateau, from half its share on, and widen as they leave it
+        if (config.plateauMaxWidth > 0.0 && base > config.plateauMaxWidth) {
+            double share = Math.min(1.0, plateau.share(position[0], position[1]) / PLATEAU_FULL_SHARE);
+            base += (config.plateauMaxWidth - base) * share * share * (3.0 - 2.0 * share);
+        }
         boolean opens = riverClass != FlowRegion.RiverClass.STREAM;
         int toSea = opens ? seaSteps(around, regionX, regionZ, cellX, cellZ) : -1;
         return new double[]{toSea < 0 ? base : opened(base, toSea), depth};

@@ -136,7 +136,9 @@ public final class HeightMapRenderer {
             double depth = Math.min(1.0, (sea - height) / 40.0);
             return blend(0x5AA0E0, 0x0B2E6B, depth);
         }
-        double t = Math.min(1.0, (height - sea) / (settings.general.maxSurfaceHeight - sea));
+        // The ramp spans the design height, which ordinary land is made for; the mountains on plateaus that rise above it
+        // are all white
+        double t = Math.min(1.0, (height - sea) / (settings.general.designHeight - sea));
         if (t < 0.3) {
             return blend(0x5DA040, 0xB0B050, t / 0.3);
         }

@@ -5,6 +5,9 @@
 ### Taller mountains on plateaus
 
 - New worlds reach Y=1600 by default instead of 750, with a build height of -64 to 1648. Land is still designed for 750 (`general.designHeight`): plains, hills, ordinary mountains, plateau tables at about Y=375-440, rivers and snow lines are as before. Only mountain ranges standing on plateaus rise above it, the highest to about Y=1550, and grow wider as they grow taller
+- Rivers on plateaus stay narrow, at most 48 blocks wide (`rivers.plateauMaxWidth`), where the flat table used to spread them to their widest; existing worlds keep their rivers
+- Ore attempts high above the ground are skipped, which saves work in a world whose build height reaches far above most land
+- `/mwg debugmap` colors heights up to the design height, so ordinary land no longer looks flat in a 1600 world
 - Existing worlds and existing config files keep their height: settings that name `maxSurfaceHeight` without `designHeight` design all land for the maximum, as before
 
 ### Web map

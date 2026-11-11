@@ -36,16 +36,27 @@ public final class WorldgenSettings {
                 if (tree == null || !tree.isJsonObject()) {
                     return GSON.fromJson(tree, WorldgenSettings.class);
                 }
+                JsonObject root = tree.getAsJsonObject();
                 // Settings written before designHeight existed designed all land for the surface maximum
-                JsonElement general = tree.getAsJsonObject().get("general");
-                if (general != null && general.isJsonObject() && general.getAsJsonObject().has("maxSurfaceHeight")
-                        && !general.getAsJsonObject().has("designHeight")) {
-                    general.getAsJsonObject().add("designHeight", general.getAsJsonObject().get("maxSurfaceHeight"));
+                JsonObject general = group(root, "general");
+                if (general != null && general.has("maxSurfaceHeight") && !general.has("designHeight")) {
+                    general.add("designHeight", general.get("maxSurfaceHeight"));
+                }
+                // Settings written before plateaus narrowed their rivers kept them as wide as anywhere
+                JsonObject rivers = group(root, "rivers");
+                if (rivers != null && rivers.has("plainWidthFactor") && !rivers.has("plateauMaxWidth")) {
+                    rivers.addProperty("plateauMaxWidth", 0.0);
                 }
                 return GSON.fromJson(tree, WorldgenSettings.class);
             } catch (JsonParseException e) {
                 throw new IllegalArgumentException(e.getMessage(), e);
             }
+        }
+
+        /** A group of written settings, or null where it is not written. */
+        private static JsonObject group(JsonObject root, String name) {
+            JsonElement group = root.get(name);
+            return group != null && group.isJsonObject() ? group.getAsJsonObject() : null;
         }
 
         private static final Gson COMPACT = new Gson();
@@ -1091,6 +1102,11 @@ public final class WorldgenSettings {
         public double steepRiverSlope = 0.12;
         public double plainWidthFactor = 2.0;
         public double steepWidthFactor = 0.5;
+        /**
+         * Rivers on plateaus are at most this wide, blending in with the plateau share: on the flat table they would
+         * otherwise spread to their widest. 0 leaves them as wide as anywhere.
+         */
+        public double plateauMaxWidth = 48.0;
         public double streamWidthMin = 4.0;
         public double streamWidthMax = 8.0;
         public double streamDepthMin = 1.0;
