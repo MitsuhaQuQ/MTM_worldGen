@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # MTM-Worldgen
 
 这是一个 Minecraft mod 项目，它会修改 Minecraft 地形生成逻辑，旨在生成更真实的地形。
@@ -7,6 +11,51 @@
 **地形目标**：混合型地形，配合 MTR 列车的现实比例（1 格 = 1 米）。大部分陆地接近日本式：山多，山可临海，平地集中在河口和盆地，河流短而急；同时保留连片的大平原给大城市。坡度不必达到铁路标准，线路靠隧道、桥梁和河谷穿行；视觉上山地仍向 JJThunder 靠拢。
 
 > 标记说明：**【待决定】** 表示尚未确定的事项，括号内为建议默认值；确定后删除标记。
+
+## 常用命令
+
+在 Claude Code 沙箱里，每条 Gradle 命令都要在沙箱外运行，并带上 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=F:\MC\MTM_worldgen\.gradle\uds`（见"开发约定"末尾）。
+
+```
+gradlew build -x test                        # 构建全部 jar，产物在 versions/<版本>/<加载器>/build/libs
+gradlew :core:test                           # 全部单元测试（并行，约 3 分钟）
+gradlew :core:test --tests '*TerrainLogicTest.slopesStayWithinLimits'   # 单个测试
+gradlew :core:updateSettingsDocs             # 改了 WorldgenSettings 的文档注释后重新生成配置注释
+gradlew :<版本>:fabric:runGametest           # GameTest；Forge、NeoForge 用 runGameTestServer
+java -jar <mod jar> <种子> <x> <z> <每像素格数> out.png   # 独立预览导出 PNG（只用默认配置）
+```
+
+- 1.20.1 Forge 的 `remapJar` 报 `mtm_worldgen.mixins.json names no refmap` 时，多半是增量编译留下的旧状态：先 `gradlew :1.20.1:common:clean :1.20.1:forge:clean :1.20.1:fabric:clean` 再构建
+- 有意改动地形后，GameTest 的期望哈希要在 1.20.1 和 26.3 两份 `MtmGameTests` 里一起更新（失败信息会打印新哈希）
+
+## 代码结构总览
+
+- 地形逻辑全在 `core/.../logic`（纯 Java，不引用 Minecraft 类），入口是 `TerrainLogic`（每个种子 + 配置一份，`forWorld` 共享）。一列地表 `sampleSurfaceHeight` 的组成顺序：
+  1. `ContinentLayer`：大陆、板块、海岸距离，给出基础高度
+  2. `SkeletonLayer`：地势三档、山脉站点与剖面、高原、丘陵、孤峰、断崖
+  3. `ErosionLayer`：侵蚀模拟替换顺坡纹理；结果按区域缓存，并有磁盘缓存 `ErosionStore`
+  4. `softCap`：软上限
+  5. `carve`：河谷（`FlowLayer` 路由 → `RiverLayer` 生成河段 → `RiverRegion` 查询）、湖（`LakeLayer`）、冲积扇、牛轭湖、沙丘与绿洲（`DesertLayer`）
+  6. 小溪（侵蚀结果里的 `creek`）
+  7. 海蚀柱（`SeaStackLayer`）、地陷（`SinkholeLayer`）
+  8. 外来区块融合（`ForeignMap`）
+- 大尺度结果按逻辑区域缓存在 `RegionCache` 里（地形、水系、湖、河道、侵蚀各一套），昂贵计算在 `LogicThreads` 上并行；配置是 `WorldgenSettings`，`TerrainLogic` 用的是 `resolved()` 后的副本
+- 各版本 common 的 `world` 包把这些接进原版生成器：
+  - `TerrainDensity`：密度函数，地表高度和填充上界 `highestBlockInChunk`
+  - `TerrainClimate`、`MtmBiomeSource`：群系
+  - `TerrainCaves`、`MtmCarving`：洞穴与雕刻保护
+  - `TerrainCondition`：地表规则
+  - `MtmWater`：放水
+  - `MtmOres`、`MtmSnow`、`MtmOasis`：矿物、积雪、甘蔗
+  - `ForeignChunks`：外来区块与升级
+  - `MtmGenerators`：生成器与维度类型
+  - 版本差异集中在 `VersionApi`、`NbtFiles` 和少量 Mixin
+- 加载器模块只做注册和平台适配
+- 其它 core 包：
+  - `noise`：确定性噪声
+  - `preview`：独立预览窗口
+  - `webmap`：网页地图
+  - `logic/debug`：调试图
 
 ## 语言
 
@@ -412,7 +461,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
   - `gradlew :1.20.1:fabric:runServer` 等：开发环境服务端（未验证）
 - 调试命令（common 中 `com.mtm.worldgen.command.MtmCommands`，需作弊权限）：
   - `/mwg flyspeed <倍数>`：飞行速度设为原版默认的 0.1–50 倍；`/mwg flyspeed reset` 恢复默认；`/mwg flyspeed` 查询当前倍数
-  - `/mwg locate <mountain|plains|plateau|lake|ocean>`：从玩家位置向外按方环搜索最近的高山（地表高于最大高度一半）、平原、高原、湖泊（地面低于湖面）、海洋（离岸 64 格以上），给出可点击传送的坐标，湖泊和海洋的坐标在水面以上（`TerrainLogic.findNearest`）；平原、高原、海洋和高山只看地形骨架，不算水系和侵蚀，湖泊要算经过区域的水系和湖形，仍不算侵蚀
+  - `/mwg locate <mountain|plains|plateau|lake|ocean>`：从玩家位置向外按方环搜索最近的高山（地表高于设计高度一半）、平原、高原、湖泊（地面低于湖面）、海洋（离岸 64 格以上），给出可点击传送的坐标，湖泊和海洋的坐标在水面以上（`TerrainLogic.findNearest`）；平原、高原、海洋和高山只看地形骨架，不算水系和侵蚀，湖泊要算经过区域的水系和湖形，仍不算侵蚀
   - `/mwg benchmark`：比较原版与 MTM 的区块生成耗时，结果显示在聊天栏和日志
   - `/mwg precompute <半径>`：在后台线程上由近及远预先计算玩家周围的逻辑区域（半径按区域数，0–5，最多 121 个），侵蚀结果写入磁盘缓存；聊天栏报告进度，`/mwg precompute cancel` 在当前区域算完后停止，同时只能运行一个（`RegionPrecompute`）。半径 5 超过内存缓存的 64 个区域，早算的区域会被挤出内存，靠磁盘缓存保留侵蚀
   - `/mwg debugmap [每像素格数]`：以玩家为中心把地形逻辑渲染成 1024×1024 PNG（默认 8 格/像素），保存到 `<存档>/mtm_worldgen/debug/`，品红细线为逻辑区域边界
