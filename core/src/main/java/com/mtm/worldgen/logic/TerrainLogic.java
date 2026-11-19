@@ -40,17 +40,19 @@ public final class TerrainLogic {
     private static final double OCEAN_OFFSHORE = 64.0;
     private static final int FIELD_HEIGHT = 0;
     /**
-     * Slots of the terrain region cache per slot of the other region caches. Planning that reads the smooth ground
-     * over thousands of regions (City Builder) regenerated the same terrain regions again and again with 64 slots,
-     * which took about twice the time; 1024 terrain regions hold about 32 MB.
+     * Slots of the terrain region cache per slot of the erosion cache (8192 by default, at most about 256 MB: two
+     * floats a cell, 32 KB a region). Planning that reads the smooth ground over thousands of regions (City Builder)
+     * regenerated the same regions again and again with 64 slots. The memory budget of all the caches together is
+     * about 1 GB (the user's call, 2026-11-20).
      */
-    private static final int TERRAIN_REGION_CACHE_FACTOR = 16;
+    private static final int TERRAIN_REGION_CACHE_FACTOR = 128;
     /**
-     * Slots of the drainage, lake and river region caches per slot of the erosion cache, which is the large one and
-     * has its disk store. Their regions are small (a drainage region about 5 KB); City Builder's planning reads rivers
-     * and lakes over hundreds of regions, and with 64 slots it took about a third longer (2026-11-20).
+     * Slots of the drainage, lake and river region caches per slot of the erosion cache (1024 by default; the water
+     * regions of one place take about 240 KB together, at most about 250 MB). City Builder reads rivers and lakes over
+     * hundreds of regions. Erosion keeps the base number: its regions take one to two megabytes, and it has its disk
+     * store.
      */
-    private static final int WATER_REGION_CACHE_FACTOR = 4;
+    private static final int WATER_REGION_CACHE_FACTOR = 16;
     private static final int FIELD_COAST_DISTANCE = 1;
 
     /** Share of lake cells around a position where a lake's water ends and its rim stands. */
