@@ -16,7 +16,17 @@ public final class Hashing {
     }
 
     public static long hash(long seed, int x, int z) {
-        return mix(seed ^ mix(x * 0x9E3779B97F4A7C15L ^ mix(z * 0xC2B2AE3D27D4EB4FL)));
+        return hashMixedZ(seed, x, mixZ(z));
+    }
+
+    /** The part of {@link #hash} that depends on z alone, for callers hashing several x at one z. */
+    public static long mixZ(int z) {
+        return mix(z * 0xC2B2AE3D27D4EB4FL);
+    }
+
+    /** {@link #hash} given {@link #mixZ} of its z. */
+    public static long hashMixedZ(long seed, int x, long mixedZ) {
+        return mix(seed ^ mix(x * 0x9E3779B97F4A7C15L ^ mixedZ));
     }
 
     /** Maps a hash to [0, 1). */

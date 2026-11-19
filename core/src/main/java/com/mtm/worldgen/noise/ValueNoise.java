@@ -11,10 +11,13 @@ public final class ValueNoise {
         double fx = smooth(x - x0);
         double fz = smooth(z - z0);
 
-        double v00 = lattice(seed, x0, z0);
-        double v10 = lattice(seed, x0 + 1, z0);
-        double v01 = lattice(seed, x0, z0 + 1);
-        double v11 = lattice(seed, x0 + 1, z0 + 1);
+        // The four corners share two rows: the z half of the hash is computed once per row
+        long row0 = Hashing.mixZ(z0);
+        long row1 = Hashing.mixZ(z0 + 1);
+        double v00 = lattice(seed, x0, row0);
+        double v10 = lattice(seed, x0 + 1, row0);
+        double v01 = lattice(seed, x0, row1);
+        double v11 = lattice(seed, x0 + 1, row1);
 
         double a = v00 + (v10 - v00) * fx;
         double b = v01 + (v11 - v01) * fx;
@@ -29,8 +32,8 @@ public final class ValueNoise {
         return below + (above - below) * smooth(y - y0);
     }
 
-    private static double lattice(long seed, int x, int z) {
-        return Hashing.unit(Hashing.hash(seed, x, z)) * 2.0 - 1.0;
+    private static double lattice(long seed, int x, long mixedZ) {
+        return Hashing.unit(Hashing.hashMixedZ(seed, x, mixedZ)) * 2.0 - 1.0;
     }
 
     private static double smooth(double t) {

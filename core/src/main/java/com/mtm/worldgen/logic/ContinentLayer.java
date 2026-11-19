@@ -278,9 +278,10 @@ final class ContinentLayer {
         double[] distances = new double[PLATE_WINDOW * PLATE_WINDOW];
         long[] groups = new long[PLATE_WINDOW * PLATE_WINDOW];
         int owner = 0;
+        Plate[] cache = plates.get();
         for (int du = -PLATE_SEARCH; du <= PLATE_SEARCH; du++) {
             for (int dv = -PLATE_SEARCH; dv <= PLATE_SEARCH; dv++) {
-                Plate plate = plate(cellU + du, cellV + dv);
+                Plate plate = plate(cache, cellU + du, cellV + dv);
                 distances[count] = Math.hypot(u - plate.u, v - plate.v);
                 groups[count] = plate.group;
                 if (distances[count] < distances[owner]) {
@@ -344,9 +345,10 @@ final class ContinentLayer {
         double[] distances = new double[near.length];
         int count = 0;
         double nearest = Double.MAX_VALUE;
+        Plate[] cache = plates.get();
         for (int du = -BELT_SEARCH; du <= BELT_SEARCH; du++) {
             for (int dv = -BELT_SEARCH; dv <= BELT_SEARCH; dv++) {
-                Plate plate = plate(cellU + du, cellV + dv);
+                Plate plate = plate(cache, cellU + du, cellV + dv);
                 near[count] = plate;
                 distances[count] = Math.hypot(u - plate.u, v - plate.v);
                 nearest = Math.min(nearest, distances[count]);
@@ -418,9 +420,12 @@ final class ContinentLayer {
         return Math.max(-1.0, Math.min(1.0, value));
     }
 
-    /** Center and group of a plate. Plates are far larger than any sampling step, so nearly every lookup is a repeat. */
-    private Plate plate(int cellU, int cellV) {
-        Plate[] cache = plates.get();
+    /**
+     * Center and group of a plate. Plates are far larger than any sampling step, so nearly every lookup is a repeat.
+     * The caller passes this thread's cache, fetched once for its whole window: looking the thread-local up for every
+     * plate was a tenth of the time of generating a region.
+     */
+    private Plate plate(Plate[] cache, int cellU, int cellV) {
         int slot = (cellU * 31 + cellV) & (PLATE_CACHE_SIZE - 1);
         Plate plate = cache[slot];
         if (plate == null || plate.cellU != cellU || plate.cellV != cellV) {

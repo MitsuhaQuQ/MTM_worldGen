@@ -39,6 +39,18 @@ public final class TerrainLogic {
     /** How far off the coast /mwg locate ocean looks, in blocks, so it finds open water rather than the shallows. */
     private static final double OCEAN_OFFSHORE = 64.0;
     private static final int FIELD_HEIGHT = 0;
+    /**
+     * Slots of the terrain region cache per slot of the other region caches. Planning that reads the smooth ground
+     * over thousands of regions (City Builder) regenerated the same terrain regions again and again with 64 slots,
+     * which took about twice the time; 1024 terrain regions hold about 32 MB.
+     */
+    private static final int TERRAIN_REGION_CACHE_FACTOR = 16;
+    /**
+     * Slots of the drainage, lake and river region caches per slot of the erosion cache, which is the large one and
+     * has its disk store. Their regions are small (a drainage region about 5 KB); City Builder's planning reads rivers
+     * and lakes over hundreds of regions, and with 64 slots it took about a third longer (2026-11-20).
+     */
+    private static final int WATER_REGION_CACHE_FACTOR = 4;
     private static final int FIELD_COAST_DISTANCE = 1;
 
     /** Share of lake cells around a position where a lake's water ends and its rim stands. */
@@ -146,20 +158,22 @@ public final class TerrainLogic {
         this.rockPatchNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT), 3, settings.surface.rockPatchWavelength);
         this.strataNoise = new Fbm(Hashing.derive(seed, ROCK_PATCH_SALT + 1), 2, settings.surface.strataWavelength);
         this.strataSeed = Hashing.derive(seed, ROCK_PATCH_SALT + 2);
-        this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize);
+        // Terrain regions are small (two floats a cell, about 32 KB) and the cheapest to lose, yet every other layer
+        // and every caller sampling the smooth ground reads them, from far around: they get many times the slots
+        this.regions = new RegionCache<>(this::generateRegion, settings.general.regionCacheSize * TERRAIN_REGION_CACHE_FACTOR);
         FlowLayer flow = new FlowLayer(seed, settings, this::sampleDrainageHeight, this::isUpland, this::canSink);
-        this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize);
+        this.flowRegions = new RegionCache<>(flow::compute, settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
         LakeLayer lakes = new LakeLayer(settings, this::flowRegion, this::sampleSmoothLand);
-        this.lakeRegions = new RegionCache<>(lakes::compute, settings.general.regionCacheSize);
+        this.lakeRegions = new RegionCache<>(lakes::compute, settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
         RiverLayer rivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> foreign.cuts(x, z),
                 this::plateauShare);
-        this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize);
+        this.riverRegions = new RegionCache<>(rivers::compute, settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
         RiverLayer naturalRivers = new RiverLayer(seed, settings, this::flowRegion, this::sampleSmoothLand, this::isRockyCoast, (x, z) -> false,
                 this::plateauShare);
-        this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize);
+        this.naturalRiverRegions = new RegionCache<>(naturalRivers::compute, settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
         this.valleyRiverRegions = new RegionCache<>((x, z) -> riverRegion(x, z).lowered(
-                this::riverGround, this::sampleLakeLevel, null), settings.general.regionCacheSize);
-        this.fittedRiverRegions = new RegionCache<>(this::fitRivers, settings.general.regionCacheSize);
+                this::riverGround, this::sampleLakeLevel, null), settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
+        this.fittedRiverRegions = new RegionCache<>(this::fitRivers, settings.general.regionCacheSize * WATER_REGION_CACHE_FACTOR);
         this.erosion = new ErosionLayer(seed, settings, new ErosionLayer.HeightSampler() {
             @Override
             public double height(double x, double z) {
