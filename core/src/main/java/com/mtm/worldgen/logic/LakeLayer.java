@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -48,6 +50,21 @@ final class LakeLayer {
     private final int cellSize;
     private final int cells;
     private final int step;
+    /**
+     * Shapes of lakes already found, by their first cell. A lake reaching into several regions is found by each of
+     * them alike, and its shape, a flood over thousands of samples of the ground, was computed again for every one:
+     * most of the time of reading lakes across many regions (2026-11-20). Kept here, each is computed once while it
+     * stays; the same shape either way.
+     */
+    private final Map<Long, Shape> shapes = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Shape> eldest) {
+            return size() > SHAPE_CACHE;
+        }
+    };
+    /** Stands in the cache for a lake that holds no water. */
+    private static final Shape DRY = new Shape(Double.NaN, 0, 0, 0, 0, 1, new boolean[0]);
+    private static final int SHAPE_CACHE = 4096;
 
     LakeLayer(WorldgenSettings settings, FlowSource flows, HeightSampler heights) {
         this.settings = settings;
@@ -150,7 +167,7 @@ final class LakeLayer {
                     continue;
                 }
                 List<int[]> lake = component(cellX, cellZ, seen);
-                Shape shape = lake == null ? null : shape(lake);
+                Shape shape = lake == null ? null : cachedShape(lake);
                 if (shape == null) {
                     continue;
                 }
@@ -213,6 +230,24 @@ final class LakeLayer {
         }
         lake.sort(Comparator.<int[]>comparingInt(c -> c[1]).thenComparingInt(c -> c[0]));
         return lake;
+    }
+
+    /** {@link #shape}, computed once for a lake while it stays in the cache. */
+    private Shape cachedShape(List<int[]> lake) {
+        long id = key(lake.get(0)[0], lake.get(0)[1]);
+        Shape shape;
+        synchronized (shapes) {
+            shape = shapes.get(id);
+        }
+        if (shape == null) {
+            // Computed outside the lock: two threads may both compute it, and get the same
+            Shape computed = shape(lake);
+            shape = computed == null ? DRY : computed;
+            synchronized (shapes) {
+                shapes.put(id, shape);
+            }
+        }
+        return shape == DRY ? null : shape;
     }
 
     /** The shape of a lake from the ground around its cells, or null where it holds no water. */
