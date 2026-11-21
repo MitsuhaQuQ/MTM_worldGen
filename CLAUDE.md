@@ -25,7 +25,7 @@ gradlew :<版本>:fabric:runGametest           # GameTest；Forge、NeoForge 用
 java -jar <mod jar> <种子> <x> <z> <每像素格数> out.png   # 独立预览导出 PNG（只用默认配置）
 ```
 
-- 1.20.1 Forge 的 `remapJar` 报 `mtm_worldgen.mixins.json names no refmap` 时，多半是增量编译留下的旧状态：先 `gradlew :1.20.1:common:clean :1.20.1:forge:clean :1.20.1:fabric:clean` 再构建
+- 1.20.1 Forge 的 `remapJar` 报 `mtm_worldgen.mixins.json names no refmap` 时，多半是增量编译留下的旧状态：先 `gradlew :1.20.1:common:clean :1.20.1:forge:clean :1.20.1:fabric:clean` 再构建。另一个来源是并行构建：Architectury 的 `transformProduction*` 用 `System.setProperty` 把 refmap 名传给转换器，整个 Gradle 进程共享，其它版本的转换会在中途覆盖它（CI 上偶发）；根 `build.gradle` 用并发数为 1 的 `mtmSerialTransforms` 让这些任务逐个执行，不要去掉
 - 有意改动地形后，GameTest 的期望哈希要在 1.20.1 和 26.3 两份 `MtmGameTests` 里一起更新（失败信息会打印新哈希）
 
 ## 代码结构总览

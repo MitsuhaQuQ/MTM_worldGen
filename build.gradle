@@ -59,6 +59,19 @@ if (!trimmedSqlite.exists() || !trimmedNatives.exists() || trimmedNatives.text !
 // 1.20.1.java_version for the modules in versions/1.20.1
 ext.mcProperty = { Project project, String key -> rootProject.property("${project.parent.name}.${key}") }
 
+// Architectury's transformProduction* tasks hand their settings to the transformer through System properties, which
+// every project in the Gradle daemon shares. Run in parallel, another version's transform overwrote them halfway, and
+// the 1.20.1 Forge jar now and then came out without its refmap (remapJar's check failed). One at a time, then
+abstract class SerialTransforms implements org.gradle.api.services.BuildService<org.gradle.api.services.BuildServiceParameters.None> {}
+def serialTransforms = gradle.sharedServices.registerIfAbsent("mtmSerialTransforms", SerialTransforms) {
+    maxParallelUsages = 1
+}
+subprojects {
+    tasks.matching { it.name.startsWith("transformProduction") }.configureEach {
+        usesService serialTransforms
+    }
+}
+
 // The mod's modules, :<version>:<module>
 configure(subprojects.findAll { it.parent != null && it.parent.parent == rootProject }) {
     def mcVersion = mcProperty(project, "minecraft_version")
