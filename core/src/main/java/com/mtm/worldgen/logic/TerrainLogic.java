@@ -1646,8 +1646,11 @@ public final class TerrainLogic {
                 && skeleton.landform(x, z, baseAboveSea) != Landform.PLATEAU;
     }
 
-    /** Whether the ground around a position is flat enough for a village. */
+    /** Whether a village may start at a position: villages are on and the ground around it is flat enough. */
     public boolean isVillageGround(double x, double z) {
+        if (!settings.general.villages) {
+            return false;
+        }
         int radius = settings.general.villageRadius;
         double low = Double.MAX_VALUE;
         double high = -Double.MAX_VALUE;

@@ -265,7 +265,7 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
     - 高原同样按板块：`plateChance`（0.2）的大陆板块整块是高原板块（性格只取 ±1，不在阈值附近，高原因此不被噪声切碎；海洋板块永远不是），造山带两侧 `beltReach`（12000 格）内的宽收敛带再抬高 `beltShare`（1.0），即青藏、阿尔蒂普拉诺式的造山带旁高原；噪声只剩 `zoneNoise`（0.15）。曾按均匀随机取性格，多数板块正好落在阈值附近，被噪声切成碎块
   - 丘陵：造山带以外的起伏区，起伏 10–25 格（300 基准）
   - 骨架按方块逐列计算（粗网格表达不了山脊），粗网格另存采样值供水系使用
-- 丘陵、山地增加随机地陷、溶洞地貌（`sinkholes` 组，`SinkholeLayer`）：陡壁圆坑进入高度图，坑下的溶洞只改方块（`solidHeight`），坑底通向溶洞，因此这是洞穴少数的地表入口；只出现在干燥、平缓、海拔足够的高地，不计入预估地表
+- 丘陵、山地增加随机地陷、溶洞地貌（`sinkholes` 组，`SinkholeLayer`）：陡壁圆坑进入高度图，坑下的溶洞只改方块（`solidHeight`），坑底通向溶洞，因此这是洞穴少数的地表入口；只出现在干燥、平缓、海拔足够的高地，不计入预估地表。开关 `sinkholes.enabled`（默认开，随配置锁进 level.dat），见"结构"一节的城市生成 mod
 - 原版洞穴（奶酪洞、意面洞、面条洞）保留，但减少对地表地形的影响：`TerrainCaves` 包住原版公式，地表 `caveSurfaceMargin` 格内不开洞，再往下 `caveFade` 格逐渐显现，世界底部同样收掉；因此洞穴没有地表入口。原版每个区块都会再次映射路由且没有种子，自定义密度函数在此时必须保留已绑定的地形，否则会退回种子 0 并慢到卡死。面条洞自带插值器，必须放在地形的 `interpolated` 外面，否则原版会报错
 - 洞穴开关 `general.caves`（默认开，创建世界时锁定）：关闭后噪声洞穴不进入地形密度，雕刻器整个跳过（`applyCarvers` 直接取消，不逐块拒绝）；地陷下的溶洞属于地陷，由 `sinkholes.chance` 控制
 - 雕刻器洞穴和裂谷不破坏地表：地表 `caveSurfaceMargin`（默认 12）格内禁止雕刻（`MtmCarving`），河湖的河床即地表，水下因此同样不会被挖穿
@@ -351,6 +351,8 @@ Forge、Fabric 与 NeoForge 版本须尽可能一致，各 Minecraft 版本之�
 ### 结构
 
 - 村庄仅位于平坦地形（平原、丘陵谷地），不限生物群系：中心 `villageRadius` 格内高差超过 `villageMaxRelief` 时不生成（`ChunkGeneratorMixin`）
+- 村庄开关 `general.villages`（默认开，随配置锁进 level.dat）：关闭后 `isVillageGround` 一律为假，Amidst 也因此不显示村庄
+- 城市生成 mod City Builder（mod id `citybuilder`，`world/CityBuilder`，经 `Platform.isModLoaded` 检测）：装了它时，新建世界取 `MtmConfig.forNewWorld`，在配置文件的设置上关掉村庄和地陷（`withoutSurfaceStructures`），配置文件本身不改；`ChunkGeneratorMixin` 另在运行时拒绝所有新村庄，所以装它之前建的世界也不再生成村庄。已有世界的地陷照旧（地形锁定，改了会和已生成的区块接缝）
 - 要塞等其它原版结构保持默认规则
 
 ## 网页地图

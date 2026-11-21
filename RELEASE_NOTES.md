@@ -1,5 +1,12 @@
 # Release notes
 
+## v0.8.1
+
+### City Builder
+
+- Villages and sinkholes each have a switch, `general.villages` and `sinkholes.enabled`, both on by default
+- With City Builder installed, new worlds are created without villages and sinkholes, which would break up the ground its towns are planned on; the config file keeps what it says. No new village starts in any world of this type while City Builder is installed, also in worlds created before it was; their sinkholes stay, since terrain already generated would otherwise not meet the new
+
 ## v0.8.0
 
 ### Taller mountains on plateaus

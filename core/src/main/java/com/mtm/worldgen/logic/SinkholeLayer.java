@@ -92,7 +92,7 @@ final class SinkholeLayer {
 
     private Site createSite(int cellX, int cellZ) {
         long hash = Hashing.hash(seed, cellX, cellZ);
-        if (Hashing.unit(Hashing.derive(hash, 1)) >= config.chance) {
+        if (!config.enabled || Hashing.unit(Hashing.derive(hash, 1)) >= config.chance) {
             return new Site(cellX, cellZ, 0.0, 0.0, 0.0, 0.0, 0.0);
         }
         double x = (cellX + 0.5 + JITTER * (Hashing.unit(hash) - 0.5)) * config.spacing;

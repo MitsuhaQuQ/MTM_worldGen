@@ -195,6 +195,11 @@ public final class WorldgenSettings {
 
     /** General settings: the world's height, the logic region grid, how far the logic looks, and what the world holds. */
     public static final class General {
+        /**
+         * Whether villages generate. New worlds created with City Builder installed have them off, since it builds the
+         * towns; with City Builder installed, no new village starts in any world of this type.
+         */
+        public boolean villages = true;
         /** Villages only start where the ground within villageRadius blocks varies by at most villageMaxRelief. */
         public int villageRadius = 48;
         public double villageMaxRelief = 10.0;
@@ -620,6 +625,11 @@ public final class WorldgenSettings {
 
     /** Collapse sinkholes in hills and mountains, with a cave chamber below. Sizes are in blocks. */
     public static final class Sinkholes {
+        /**
+         * Whether sinkholes open at all. New worlds created with City Builder installed have them off, since pits would
+         * break the ground its towns are planned on.
+         */
+        public boolean enabled = true;
         /** One candidate per square of this size. */
         public double spacing = 640.0;
         public double chance = 0.35;
@@ -1273,6 +1283,20 @@ public final class WorldgenSettings {
     }
 
     /** Bottom of the world. */
+    /**
+     * These settings without the structures that break the ground a city is built on: villages and sinkholes. New
+     * worlds take this when City Builder is installed. Returns this instance when both are already off.
+     */
+    public WorldgenSettings withoutSurfaceStructures() {
+        if (!general.villages && !sinkholes.enabled) {
+            return this;
+        }
+        WorldgenSettings copy = Json.read(toJson());
+        copy.general.villages = false;
+        copy.sinkholes.enabled = false;
+        return copy.validate();
+    }
+
     /**
      * These settings as the terrain logic works with them: with general.logicRange applied to the ranges it scales,
      * and left at 1 itself, so resolving twice changes nothing. At a range of 1 this is the same instance.

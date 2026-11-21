@@ -14,6 +14,9 @@ public interface Platform {
 
     boolean isDevelopmentEnvironment();
 
+    /** Whether a mod with this id is installed. */
+    boolean isModLoaded(String modId);
+
     /**
      * Whether Minecraft runs recompiled from decompiled sources rather than as Mojang built it, as in NeoForge's
      * development environment. Floats in vanilla code can then come out a bit apart; only tests ask.

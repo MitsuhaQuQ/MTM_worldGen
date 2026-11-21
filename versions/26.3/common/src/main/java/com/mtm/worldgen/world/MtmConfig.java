@@ -41,6 +41,19 @@ public final class MtmConfig {
     }
 
     /**
+     * The settings for a new world: those of the config file, without villages and sinkholes when City Builder is
+     * installed. The file itself keeps what it says.
+     */
+    public static WorldgenSettings forNewWorld() {
+        WorldgenSettings settings = load();
+        if (CityBuilder.present() && (settings.general.villages || settings.sinkholes.enabled)) {
+            MtmWorldgen.LOGGER.info("City Builder is installed: the new world has no villages and no sinkholes");
+            settings = settings.withoutSurfaceStructures();
+        }
+        return settings;
+    }
+
+    /**
      * Reads the config file, creating it with the defaults if missing.
      *
      * @throws IllegalStateException if the file is unreadable or invalid, rather than silently creating a world

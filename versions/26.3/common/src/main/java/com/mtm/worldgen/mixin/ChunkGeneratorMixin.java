@@ -1,6 +1,7 @@
 package com.mtm.worldgen.mixin;
 
 import com.mtm.worldgen.logic.TerrainLogic;
+import com.mtm.worldgen.world.CityBuilder;
 import com.mtm.worldgen.world.MtmGenerators;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
@@ -19,7 +20,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Keeps villages of MTM worlds on flat ground. */
+/** Keeps villages of MTM worlds on flat ground, and out of them when they are off or City Builder is installed. */
 @Mixin(ChunkGenerator.class)
 abstract class ChunkGeneratorMixin {
     @Inject(method = "tryGenerateStructure", at = @At("HEAD"), cancellable = true)
@@ -31,7 +32,8 @@ abstract class ChunkGeneratorMixin {
             return;
         }
         TerrainLogic logic = MtmGenerators.terrainLogic(random);
-        if (logic != null && !logic.isVillageGround(chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ())) {
+        // With City Builder installed, it builds the towns, also in worlds created before it was
+        if (logic != null && (CityBuilder.present() || !logic.isVillageGround(chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ()))) {
             cir.setReturnValue(false);
         }
     }

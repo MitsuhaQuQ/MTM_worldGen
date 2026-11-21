@@ -23,6 +23,11 @@ public final class NeoForgePlatform implements Platform {
     }
 
     @Override
+    public boolean isModLoaded(String modId) {
+        return net.neoforged.fml.ModList.get().isLoaded(modId);
+    }
+
+    @Override
     public boolean recompilesMinecraft() {
         // NeoForge's development environment builds Minecraft from NeoForm's decompiled sources
         return isDevelopmentEnvironment();

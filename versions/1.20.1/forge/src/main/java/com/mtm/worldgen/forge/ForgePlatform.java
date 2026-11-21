@@ -21,4 +21,9 @@ public final class ForgePlatform implements Platform {
     public boolean isDevelopmentEnvironment() {
         return !FMLLoader.isProduction();
     }
+
+    @Override
+    public boolean isModLoaded(String modId) {
+        return net.minecraftforge.fml.ModList.get().isLoaded(modId);
+    }
 }

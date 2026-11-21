@@ -134,7 +134,7 @@ public final class MtmGenerators {
                 || !(generator.getBiomeSource() instanceof MtmBiomeSource source) || !source.isPlaceholder()) {
             return dimensions;
         }
-        WorldgenSettings settings = MtmConfig.load();
+        WorldgenSettings settings = MtmConfig.forNewWorld();
         return new WorldDimensions(WorldDimensions.withOverworld(dimensions.dimensions(),
                 source.lookups().dimensionTypes().getOrThrow(dimensionType(settings.buildHeight())),
                 create(source.lookups(), generator.generatorSettings(), settings)));

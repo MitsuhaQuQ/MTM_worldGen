@@ -210,6 +210,21 @@ class TerrainLogicTest {
         assertTrue(found > 0, "no sinkholes");
     }
 
+    /** With the structures City Builder turns off, no sinkhole opens and no ground holds a village. */
+    @Test
+    void surfaceStructuresCanBeTurnedOff() {
+        WorldgenSettings off = SETTINGS.withoutSurfaceStructures();
+        assertTrue(SETTINGS.general.villages && SETTINGS.sinkholes.enabled, "the defaults changed");
+        TerrainLogic logic = new TerrainLogic(SEED, off);
+        for (int cellX = -16; cellX < 16; cellX++) {
+            for (int cellZ = -16; cellZ < 16; cellZ++) {
+                assertTrue(logic.sinkholePit(cellX, cellZ) == null, "a sinkhole in cell " + cellX + "," + cellZ);
+            }
+        }
+        assertFalse(logic.isVillageGround(0, 0), "a village with villages off");
+        assertTrue(WorldgenSettings.fromJson(off.toJson()).sinkholes.enabled == false, "the switch is not saved");
+    }
+
     /** Inland sinks hold water below their rim and take in no land higher than themselves as a dry hole. */
     @Test
     void inlandSinksHoldWater() {
