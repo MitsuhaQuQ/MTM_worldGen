@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## v0.8.0
 
 ### Taller mountains on plateaus
 
@@ -20,6 +20,10 @@
 
 - Creeks on flat coasts run across the beach into the sea instead of ending on the sand tens of blocks short of it
 - On Minecraft 26.x, merged maps and chunks of older versions were not found: 26.x keeps the overworld's region files under `dimensions/minecraft/overworld/region`, and the mod looked for them in `region`
+
+### Performance
+
+- More terrain and water regions stay cached in memory (up to about 700 MB in all), and each lake's shape is computed once rather than once for every region it reaches, so tools that read the land over a wide area, such as city planners, start about twice as fast
 
 ### Minecraft versions
 
