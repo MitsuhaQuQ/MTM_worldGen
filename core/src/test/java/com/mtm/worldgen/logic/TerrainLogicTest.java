@@ -210,6 +210,14 @@ class TerrainLogicTest {
         assertTrue(found > 0, "no sinkholes");
     }
 
+    /** Waterfalls are off in new settings, and stay on in settings written before they had a switch. */
+    @Test
+    void waterfallsAreOffUnlessOlderSettingsHadThem() {
+        assertFalse(SETTINGS.rivers.waterfalls);
+        assertTrue(WorldgenSettings.fromJson(SETTINGS.toJson().replace("\"waterfalls\"", "\"unknown\"")).rivers.waterfalls);
+        assertFalse(WorldgenSettings.fromJson(SETTINGS.toJson()).rivers.waterfalls);
+    }
+
     /** With the structures City Builder turns off, no sinkhole opens and no ground holds a village. */
     @Test
     void surfaceStructuresCanBeTurnedOff() {

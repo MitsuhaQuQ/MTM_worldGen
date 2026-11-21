@@ -1,5 +1,11 @@
 # Release notes
 
+## v0.8.2
+
+### Rivers
+
+- Waterfalls are off by default (`rivers.waterfalls`): on steep ground they turned wide rivers into a stair of flat water sheets, each tens of blocks long and up to 14 blocks above the next, held up by embankments. Rivers now follow the ground down. Existing worlds keep their waterfalls, since terrain already generated would otherwise not meet the new
+
 ## v0.8.1
 
 ### City Builder

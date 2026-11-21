@@ -52,6 +52,10 @@ public final class WorldgenSettings {
                 if (rivers != null && rivers.has("plainWidthFactor") && !rivers.has("plateauMaxWidth")) {
                     rivers.addProperty("plateauMaxWidth", 0.0);
                 }
+                // Settings written before waterfalls had a switch had them on, as they were by default until 0.8.2
+                if (rivers != null && rivers.has("plainWidthFactor") && !rivers.has("waterfalls")) {
+                    rivers.addProperty("waterfalls", true);
+                }
                 return GSON.fromJson(tree, WorldgenSettings.class);
             } catch (JsonParseException e) {
                 throw new IllegalArgumentException(e.getMessage(), e);
@@ -1151,10 +1155,11 @@ public final class WorldgenSettings {
         /** Narrower rivers still cut a channel this wide, or noise cells would lose them. */
         public double minChannelWidth = 6.0;
         /**
-         * Edges falling at least fallGrade over their length, and at least fallMinDrop blocks, drop in waterfalls of
-         * at most fallHeight blocks between level pools.
+         * Waterfalls, off by default: edges falling at least fallGrade over their length, and at least fallMinDrop
+         * blocks, drop in waterfalls of at most fallHeight blocks between level pools. On steep slopes the pools made
+         * wide rivers into a stair of flat water sheets held up by embankments, so rivers now follow the ground down.
          */
-        public boolean waterfalls = true;
+        public boolean waterfalls = false;
         public double fallGrade = 0.03;
         public double fallMinDrop = 3.0;
         public double fallHeight = 10.0;

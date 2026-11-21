@@ -14,6 +14,8 @@ class RiverWaterRegressionTest {
         settings.general.designHeight = 1024;
         // The world these places come from predates narrow rivers on plateaus
         settings.rivers.plateauMaxWidth = 0.0;
+        // ...and waterfalls turning off by default
+        settings.rivers.waterfalls = true;
         settings.rivers.flowLookAhead = 32768;
         return new TerrainLogic(7701471443861534004L, settings);
     }
